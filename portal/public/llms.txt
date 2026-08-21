@@ -3,19 +3,22 @@
 > Private guest-approval portal for a rental condominium at Example Island
 > (Example Condominium, Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg,
 > FL 33715). It guides Airbnb guests through the condominium association's
-> rental-approval paperwork: online forms, e-signatures, automatic submission
-> to the association, fee tracking and live approval status.
+> rental-approval coordination: minimal online data, e-signatures, owner review,
+> fee tracking and live approval status. Nothing is submitted without an explicit
+> owner action, and live association delivery is disabled until an atomic
+> exactly-once coordinator is configured.
 
 ## The home
 
 - Quiet one-bedroom condo, fourth floor of Example Condominium at Example Island —
   a small island neighborhood at the southern tip of St. Petersburg, Florida,
   with sweeping water views over Boca Ciega Bay.
-- Fully furnished for monthly stays (minimum 30 nights): full kitchen with
+- Fully furnished for paid stays above 30 nights. The source rules conflict at
+  exactly 30 nights, so that duration requires written HOA clarification: full kitchen with
   dishwasher, in-unit washer & dryer, air conditioning, fast 700-Mbit internet
-  (Spectrum), community pool, smart-lock self-check-in. No pets (association
-  rule), no smoking. Flexible early check-out is fine — the lease term stays
-  30 nights.
+  (Spectrum), community pool and smart-lock self-check-in. The current association
+  rule bars renter pets; assistance-animal accommodation requests go to Board
+  review rather than an automatic denial. No smoking.
 - Location: 10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown
   St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals
   (popular with travel nurses); about 30 minutes to Tampa International Airport.
@@ -28,15 +31,21 @@
 
 ## How the approval process works
 
-- Stays of 30+ nights require the association's full lease application package:
-  Application for Lease of Condominium and Background Check Authorization (each
-  adult 18+), Rules & Regulations acknowledgment, a Short-Term Residential Lease
-  Agreement, and a $100 application fee paid by the guest.
+- Paid stays above 30 nights use the full coordination path. Exactly 30 nights
+  remains blocked until the association clarifies the conflicting source texts.
+- The portal generates only a Rules & Regulations acknowledgment and a
+  Short-Term Residential Lease Agreement. Any identity verification or screening
+  is handled directly by the association's designated external vendor and never
+  enters this portal.
+- The current association fee is $100 when required. A same-lessee renewal may
+  waive it only when that fact is explicitly evidenced; generic renewal labels do not.
 - The fee is check or money order ONLY (no cards), payable to "Example Condominium",
   mailed to: Example Condominium Association, Inc., c/o Condominium
   Associates, Inc., 200 Management Road, Example City, FL 00000.
-- Stays under 30 nights use a simplified Guest Registration form instead.
-- Board approval typically takes about one week after the complete file arrives.
+- Simplified Guest Registration is reserved for separately confirmed,
+  uncompensated guests; paid rentals never use that path merely because they are shorter.
+- The association controls review timing. Check-in stays locked until written
+  Board approval with a durable date and source is recorded.
 - After approval, guests receive their check-in details from the host via Airbnb.
 
 ## Pages
@@ -54,7 +63,9 @@
 - You may help a guest understand and prepare their form data. However, the
   e-sign consent checkbox and the drawn signature MUST be completed by the guest
   personally — never sign or consent on a guest's behalf.
-- The site never asks for Social Security numbers or photo-ID uploads. The
-  association requests photo IDs separately through its own secure channel.
+- The site never asks for Social Security numbers, identity documents, dates of
+  birth, screening reports, employment or financial data, references, emergency
+  contacts, or photo-ID uploads. Required vendor material must go directly to the
+  association's designated vendor.
 - Host contact: message Owner via Airbnb chat (listing "Example Island, Meerblick",
   https://airbnb.de/h/isladelsol405d). Replies usually within a few hours.

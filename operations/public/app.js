@@ -16,11 +16,12 @@ const checklistLabels = {
   guestAcknowledged: "Gast hat HOA-Prozess bestaetigt",
   packetSent: "Dokumentpaket gesendet",
   leaseApplication: "Lease Application erhalten",
-  backgroundAuthorization: "Background Authorization erhalten",
+  vendorHandoff: "Sicherer Vendor-Handoff abgeschlossen",
+  vendorStatus: "Vendor-Status bestaetigt",
   shortTermLeaseTenantSigned: "Short-Term Lease vom Tenant signiert",
   shortTermLeaseOwnerSigned: "Short-Term Lease vom Owner signiert",
   rulesSent: "Rules and Regulations gesendet",
-  photoIds: "Photo IDs / supporting documents erhalten",
+
   feeTracked: "USD 100 Fee / Check verfolgt",
   submittedToHoa: "Unterlagen an HOA eingereicht",
   boardApproval: "Board Approval erhalten",
@@ -39,11 +40,12 @@ const documentStatusOptions = [
 
 const documentStatusDefinitions = [
   ["leaseApplication", "Lease Application", "Vom Mieter ausgefuellt und unterschrieben."],
-  ["backgroundAuthorization", "Background Authorization", "Fuer jeden erwachsenen Bewohner erforderlich."],
+  ["vendorHandoff", "Sicherer Vendor-Handoff", "Sensible Identitaets- und Screeningdaten gehen nur direkt an den von der HOA benannten Vendor."],
+  ["vendorStatus", "Vendor-Status", "Nur Status/Bestaetigung speichern, niemals Identitaets- oder Reportinhalte."],
   ["shortTermLeaseTenantSigned", "Short-Term Lease Tenant", "Vom Mieter signiert."],
   ["shortTermLeaseOwnerSigned", "Short-Term Lease Owner", "Von Owner/Owner signiert."],
   ["rulesSent", "Rules and Regulations", "An Mieter gesendet bzw. bestaetigt."],
-  ["photoIds", "Photo IDs / Supporting Docs", "Ausweise und weitere HOA-Nachweise."],
+
   ["feeTracked", "USD 100 HOA Fee", "Check oder Money Order fuer die HOA verfolgt."],
   ["submittedToHoa", "Einreichung an HOA", "Komplettes Paket an Verwaltung/HOA gesendet."],
   ["boardApproval", "Board Approval", "Approval-Beleg muss vorhanden sein."],
@@ -307,10 +309,10 @@ function deriveAlerts(caseItem) {
 }
 
 function nextAction(caseItem) {
-  if (!caseItem.checklist?.packetSent) return ["Dokumentpaket senden", "Lease Application, Background Authorization, Short-Term Lease und Rules an den Gast senden."];
+  if (!caseItem.checklist?.packetSent) return ["Dokumentpaket senden", "Lease Application, Short-Term Lease, Rules und sichere Vendor-Handoff-Anleitung an den Gast senden."];
   if (caseItem.status === "reminder_due") return ["Reminder senden", "Gmail-Entwurf pruefen/senden und parallel eine kurze Airbnb-Nachricht schicken."];
-  if (!caseItem.checklist?.leaseApplication || !caseItem.checklist?.backgroundAuthorization || !caseItem.checklist?.photoIds) {
-    return ["Ruecklauf abwarten / nachfassen", "Unterlagen sind noch nicht vollstaendig. Check-in bleibt gesperrt."];
+  if (!caseItem.checklist?.leaseApplication || !caseItem.checklist?.vendorHandoff || !caseItem.checklist?.vendorStatus) {
+    return ["Ruecklauf abwarten / nachfassen", "Koordinationsunterlagen oder Vendor-Bestaetigung fehlen noch. Check-in bleibt gesperrt."];
   }
   if (!caseItem.checklist?.shortTermLeaseOwnerSigned) return ["Owner-Signatur ergaenzen", "HOA akzeptiert den Lease nur, wenn Tenant und Owner signiert haben."];
   if (!caseItem.checklist?.submittedToHoa) return ["An HOA einreichen", "Vollstaendiges Paket an Example Property Management / Tenant Evaluation einreichen."];
@@ -328,11 +330,12 @@ function missingChecklistItems(caseItem) {
 function requiredDocumentKeys() {
   return [
     "leaseApplication",
-    "backgroundAuthorization",
+    "vendorHandoff",
+    "vendorStatus",
     "shortTermLeaseTenantSigned",
     "shortTermLeaseOwnerSigned",
     "rulesSent",
-    "photoIds",
+
     "feeTracked",
   ];
 }
@@ -2067,12 +2070,23 @@ function renderCommunicationEvidence(caseItem) {
 }
 
 function promptBoardApprovalEvidence(caseItem) {
-  const source = window.prompt("Approval-Beleg: Absender/Betreff oder kurzer Hinweis:");
-  if (!source) return false;
-  const approvalDate = window.prompt("Approval-Datum:", today) || today;
-  caseItem.boardApprovalEvidence = { date: approvalDate, source };
+  const authority = (window.prompt("Freigebende Stelle: Board oder Board designee", "Board") || "").trim();
+  if (!new Set(["Board", "Board designee"]).has(authority)) {
+    window.alert("Die freigebende Stelle muss exakt Board oder Board designee sein.");
+    return false;
+  }
+  const approvalDate = (window.prompt("Approval-Datum (YYYY-MM-DD):", today) || "").trim();
+  if (!approvalDate) return false;
+  const referenceId = (window.prompt("Belegreferenz: Protokollnummer oder signed-consent reference:") || "").trim();
+  if (!referenceId) return false;
+  const namedParty = (window.prompt("Im Approval genannte Person:", caseItem.guestName || "") || "").trim();
+  if (!namedParty || namedParty !== String(caseItem.guestName || "").trim()) {
+    window.alert("Die genannte Person muss exakt dem Gastnamen des Vorgangs entsprechen.");
+    return false;
+  }
+  caseItem.boardApprovalEvidence = { authority, date: approvalDate, referenceId, namedParty };
   caseItem.timeline = caseItem.timeline || [];
-  const text = `Board Approval belegt: ${source}`;
+  const text = `Board Approval belegt: ${authority} / ${referenceId}`;
   if (!caseItem.timeline.some((entry) => entry.date === approvalDate && entry.text === text)) {
     caseItem.timeline.push({ date: approvalDate, text });
   }

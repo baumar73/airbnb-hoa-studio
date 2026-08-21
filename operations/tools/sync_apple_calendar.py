@@ -23,10 +23,10 @@ PANAMA = timezone(timedelta(hours=-5))
 
 CHECKLIST_LABELS = {
     "leaseApplication": "Lease Application",
-    "backgroundAuthorization": "Background Authorization",
+    "vendorHandoff": "Sicherer Vendor-Handoff",
+    "vendorStatus": "Vendor-Bestaetigung",
     "shortTermLeaseTenantSigned": "Short-Term Lease Tenant-Signatur",
     "shortTermLeaseOwnerSigned": "Short-Term Lease Owner-Signatur",
-    "photoIds": "Photo IDs / supporting documents",
     "feeTracked": "USD 100 Fee / Check",
     "submittedToHoa": "Einreichung bei HOA",
     "boardApproval": "Board Approval",

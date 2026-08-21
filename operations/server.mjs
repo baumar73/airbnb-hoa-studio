@@ -139,17 +139,18 @@ function seedState() {
           guestAcknowledged: true,
           packetSent: true,
           leaseApplication: true,
-          backgroundAuthorization: true,
+          vendorHandoff: true,
+          vendorStatus: true,
           shortTermLeaseTenantSigned: true,
           shortTermLeaseOwnerSigned: true,
           rulesSent: true,
-          photoIds: true,
+
           feeTracked: true,
           submittedToHoa: true,
           boardApproval: false,
         },
         timeline: [
-          { date: "2026-05-11", text: "Lease Application, Background Authorization and Rules sent to tenant." },
+          { date: "2026-05-11", text: "Lease Application, secure vendor handoff instructions and Rules sent to tenant." },
           { date: "2026-05-18", text: "HOA Board approval received for DemoSurnameA/DemoSurnameB." },
         ],
         communicationEvidence: [],
@@ -184,11 +185,12 @@ function seedState() {
           guestAcknowledged: true,
           packetSent: true,
           leaseApplication: false,
-          backgroundAuthorization: false,
+          vendorHandoff: false,
+          vendorStatus: false,
           shortTermLeaseTenantSigned: false,
           shortTermLeaseOwnerSigned: false,
           rulesSent: true,
-          photoIds: false,
+
           feeTracked: false,
           submittedToHoa: false,
           boardApproval: false,
@@ -355,13 +357,13 @@ function seedState() {
     },
     templates: {
       listingDisclosure:
-        "Important HOA requirement: This condominium is located in Example Condominium and occupancy is subject to condominium association / HOA approval before check-in. After booking, guests must promptly complete the required HOA lease/application paperwork, background-check authorization for each adult occupant, provide requested photo ID/supporting documents, review the Rules and Regulations, and follow the HOA fee instructions. Check-in/access information cannot be released until the HOA / Board approval has been received. Delayed or incomplete paperwork may make the stay impossible under the condominium rules.",
+        "Important HOA requirement: This condominium is located in Example Condominium and occupancy is subject to condominium association / HOA approval before check-in. After booking, guests must promptly complete the required HOA lease/application paperwork, follow the association's secure Tenant Evaluation vendor process, review the Rules and Regulations, and follow the HOA fee instructions. Sensitive identity or screening material must go only to the association's designated vendor, never to this application. Check-in/access information cannot be released until the HOA / Board approval has been received. Delayed or incomplete paperwork may make the stay impossible under the condominium rules.",
       airbnbInitialMessage:
-        "Hi {{firstName}},\n\nthank you for your booking request/reservation for {{unit}} from {{start}} to {{end}}.\n\nImportant HOA step: Example Condominium requires a lease/application package and HOA/Board approval before occupancy. I will send you the HOA paperwork by email. Please complete and return the documents promptly, including the Lease Application, Background Check Authorization for each adult occupant, signed Short-Term Lease Agreement, and requested photo IDs/supporting documents.\n\nThe HOA application fee must be handled as instructed by the association: {{fee}}.\n\nI cannot release check-in or access information until the HOA / Board approval is received. Please confirm that you understand this HOA requirement and tell me the best email address for the paperwork.\n\nBest,\nOwner",
+        "Hi {{firstName}},\n\nthank you for your booking request/reservation for {{unit}} from {{start}} to {{end}}.\n\nImportant HOA step: Example Condominium requires a lease/application package and HOA/Board approval before occupancy. I will send you the HOA paperwork and the association's secure Tenant Evaluation vendor instructions by email. Please complete the Lease Application and signed Short-Term Lease Agreement promptly. Send any sensitive identity or screening material only through the association's designated secure vendor channel, never by reply email or through this application.\n\nThe HOA application fee must be handled as instructed by the association: {{fee}}.\n\nI cannot release check-in or access information until the HOA / Board approval is received. Please confirm that you understand this HOA requirement and tell me the best email address for the non-sensitive coordination paperwork.\n\nBest,\nOwner",
       airbnbReminder:
         "Hi {{firstName}},\n\nquick reminder: I have not yet received the completed HOA paperwork for your {{start}} stay.\n\nPlease send the completed and signed documents by {{deadlineDocuments}}, so I can submit everything to the condominium association in time.\n\nImportant: I cannot release check-in/access information until Example Condominium / the HOA Board has approved the application.\n\nPlease confirm today or tomorrow when you will send the documents.\n\nBest,\nOwner",
       firmDeadline:
-        "Hi {{firstName}},\n\nI need to set a firm deadline for the HOA paperwork.\n\nExample Condominium requires HOA/Board approval before occupancy, and I cannot provide check-in or access information without that approval.\n\nPlease send the completed and signed documents by {{deadlineDocuments}}:\n\n- Lease Application\n- Background Check Authorization for each adult occupant\n- signed Short-Term Lease Agreement\n- photo ID/supporting documents for each adult occupant\n\nThe USD 100 HOA application fee must also be mailed by check or money order as previously explained.\n\nIf I do not receive the documents by this deadline, I will need to contact Airbnb because the reservation may not be possible under the HOA requirements.\n\nBest,\nOwner",
+        "Hi {{firstName}},\n\nI need to set a firm deadline for the HOA paperwork.\n\nExample Condominium requires HOA/Board approval before occupancy, and I cannot provide check-in or access information without that approval.\n\nPlease complete the following by {{deadlineDocuments}}:\n\n- Lease Application\n- signed Short-Term Lease Agreement\n- secure Tenant Evaluation vendor handoff and vendor confirmation\n\nSensitive identity or screening material must go only to the association's designated secure vendor channel, never by reply email or through this application. The USD 100 HOA application fee must also be mailed by check or money order as previously explained.\n\nIf the required coordination documents and vendor confirmation are not complete by this deadline, I will need to contact Airbnb because the reservation may not be possible under the HOA requirements.\n\nBest,\nOwner",
       submittedToHoa:
         "Hi {{firstName}},\n\nI have submitted your HOA application package to the condominium association / management office. We are now waiting for HOA/Board approval.\n\nI will update you as soon as approval is received. Check-in details will be released only after approval.\n\nBest,\nOwner",
       airbnbSupportReview:
@@ -552,7 +554,112 @@ function assertValidSuggestionPatch(suggestion) {
   }
 }
 
+const PROHIBITED_SENSITIVE_KEYS = new Set([
+  "ssn",
+  "ssnnumber",
+  "socialsecurity",
+  "socialsecuritynumber",
+  "taxid",
+  "taxpayeridentificationnumber",
+  "dob",
+  "dateofbirth",
+  "datebirth",
+  "birthdate",
+  "gender",
+  "governmentid",
+  "governmentidnumber",
+  "identitydocument",
+  "idtype",
+  "idnumber",
+  "idstate",
+  "passport",
+  "passportnumber",
+  "driverlicense",
+  "driverlicensenumber",
+  "driverslicense",
+  "driverslicensenumber",
+  "photoid",
+  "photoids",
+  "idimage",
+  "employer",
+  "employerphone",
+  "employment",
+  "employmenthistory",
+  "employeraddress",
+  "reference",
+  "references",
+  "personalreferences",
+  "landlordreferences",
+  "emergency",
+  "emergencycontact",
+  "emergencycontacts",
+  "credit",
+  "creditscore",
+  "creditreport",
+  "creditdata",
+  "criminal",
+  "criminalhistory",
+  "criminalrecord",
+  "eviction",
+  "evictionhistory",
+  "bank",
+  "bankaccount",
+  "bankaccountnumber",
+  "bankinformation",
+  "bankrouting",
+  "financialdata",
+  "financialinformation",
+  "routingnumber",
+  "screening",
+  "backgroundauthorization",
+  "backgroundreport",
+  "backgroundcheckreport",
+  "screeningreport",
+  "tenantevaluationreport",
+]);
+
+function normalizeSensitiveKey(key) {
+  return String(key).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isValidISODate(value) {
+  const text = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const [year, month, day] = text.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function assertNoProhibitedSensitiveData(value, path = "state", seen = new Set()) {
+  if (typeof value === "string") {
+    const prohibitedText = /\b\d{3}[- ]?\d{2}[- ]?\d{4}\b/.test(value) ||
+      /\b(?:ssn|social\s*security(?:\s*number)?|tax(?:payer)?\s*(?:id|identification\s*number)|date\s*of\s*birth|dob|gender|passport(?:\s*number)?|driver'?s?\s*licen[cs]e(?:\s*number)?|credit\s*(?:score|report)|criminal\s*(?:history|record)|eviction\s*history|bank\s*(?:account|routing|information)|routing\s*number|financial\s*(?:data|information)|employer|employment(?:\s*history)?|personal\s*references?|landlord\s*references?|emergency\s*contacts?|background(?:\s*check)?\s*report|screening\s*report|tenant\s*evaluation\s*report)\s*[:=#-]\s*\S+/i.test(value);
+    if (prohibitedText) {
+      const error = new Error("prohibited_sensitive_data");
+      error.prohibitedPath = path;
+      throw error;
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoProhibitedSensitiveData(entry, `${path}[${index}]`, seen));
+    return;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (PROHIBITED_SENSITIVE_KEYS.has(normalizeSensitiveKey(key))) {
+      const error = new Error("prohibited_sensitive_data");
+      error.prohibitedPath = `${path}.${key}`;
+      throw error;
+    }
+    assertNoProhibitedSensitiveData(entry, `${path}.${key}`, seen);
+  }
+}
+
 function assertValidState(state) {
+  assertNoProhibitedSensitiveData(state);
   if (!state || typeof state !== "object") throw new Error("State fehlt");
   if (!state.property || typeof state.property !== "object") throw new Error("Property fehlt");
   if (!Array.isArray(state.cases)) throw new Error("Cases fehlen");
@@ -575,25 +682,45 @@ function assertValidState(state) {
     if (!caseItem.guestName || typeof caseItem.guestName !== "string") throw new Error(`Fall ${caseItem.id}: Gastname fehlt`);
     if (!caseItem.start || !caseItem.end) throw new Error(`Fall ${caseItem.id}: Zeitraum fehlt`);
     if (!caseItem.checklist || typeof caseItem.checklist !== "object") throw new Error(`Fall ${caseItem.id}: Checkliste fehlt`);
+    const submittedToHoa = caseItem.checklist.submittedToHoa === true;
+    if (submittedToHoa && caseItem.checklist.vendorHandoff !== true) {
+      throw new Error(`Fall ${caseItem.id}: HOA-Einreichung ohne bestaetigten Vendor-Handoff`);
+    }
+    if (submittedToHoa && caseItem.checklist.vendorStatus !== true) {
+      throw new Error(`Fall ${caseItem.id}: HOA-Einreichung ohne bestaetigten Vendor-Status`);
+    }
+    if (submittedToHoa && caseItem.checklist.feeTracked !== true) {
+      throw new Error(`Fall ${caseItem.id}: HOA-Einreichung ohne dokumentierte Gebuehrenentscheidung`);
+    }
     const approvalUnlocked = Boolean(caseItem.checklist.boardApproval) || caseItem.status === "approved" || caseItem.checkInLocked === false;
     if (approvalUnlocked) {
+      if (!submittedToHoa) throw new Error(`Fall ${caseItem.id}: Board Approval ohne vorherige HOA-Einreichung`);
       const evidence = caseItem.boardApprovalEvidence;
+      const allowedAuthorities = new Set(["Board", "Board designee"]);
+      const today = new Date().toISOString().slice(0, 10);
+      const created = String(caseItem.createdAt || "").slice(0, 10);
       if (
         !evidence ||
         typeof evidence !== "object" ||
         Array.isArray(evidence) ||
+        !allowedAuthorities.has(evidence.authority) ||
         typeof evidence.date !== "string" ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(evidence.date) ||
-        typeof evidence.source !== "string" ||
-        !evidence.source.trim()
+        !isValidISODate(evidence.date) ||
+        evidence.date > today ||
+        (isValidISODate(created) && evidence.date < created) ||
+        typeof evidence.referenceId !== "string" ||
+        !evidence.referenceId.trim() ||
+        evidence.referenceId.length > 200 ||
+        typeof evidence.namedParty !== "string" ||
+        evidence.namedParty.trim() !== caseItem.guestName.trim() ||
+        evidence.namedParty.length > 200
       ) {
-        throw new Error(`Fall ${caseItem.id}: Board Approval ohne Beleg (boardApprovalEvidence mit Datum und Quelle erforderlich)`);
+        throw new Error(`Fall ${caseItem.id}: Board Approval ohne substantiellen Beleg (authority, nicht-zukuenftiges Datum, minutes/signed-consent referenceId und namedParty erforderlich)`);
       }
       for (const [key, value] of Object.entries(evidence)) {
-        if (!["date", "source"].includes(key)) throw new Error(`Fall ${caseItem.id}: unsicheres Board-Approval-Feld ${key}`);
+        if (!["authority", "date", "referenceId", "namedParty"].includes(key)) throw new Error(`Fall ${caseItem.id}: unsicheres Board-Approval-Feld ${key}`);
         if (typeof value !== "string") throw new Error(`Fall ${caseItem.id}: Board-Approval-Feld ${key} muss Text sein`);
       }
-      if (evidence.source.length > 500) throw new Error(`Fall ${caseItem.id}: Board-Approval-Quelle ist zu lang`);
     }
     if (caseItem.checklist.boardApproval && caseItem.checkInLocked) throw new Error(`Fall ${caseItem.id}: approved, aber Check-in gesperrt`);
     if (caseItem.status === "approved" && !caseItem.checklist.boardApproval) {
@@ -874,6 +1001,35 @@ async function initializeStateFile() {
 // Strict state reader: fails closed when the real state file exists but is
 // unreadable, malformed, schema-invalid or violates invariants. Seed data is
 // created only when the file truly does not exist.
+function migrateLegacyChecklistState(state) {
+  for (const caseItem of state?.cases || []) {
+    const checklist = caseItem?.checklist;
+    if (!checklist || typeof checklist !== "object" || Array.isArray(checklist)) continue;
+    const hadBackgroundAuthorization = Object.hasOwn(checklist, "backgroundAuthorization");
+    const hadPhotoIds = Object.hasOwn(checklist, "photoIds");
+    if (!hadBackgroundAuthorization && !hadPhotoIds) continue;
+    if (checklist.vendorHandoff === undefined) {
+      // Legacy identity/background flags do not prove that the external vendor
+      // received a current handoff.  Migrate conservatively so an upgrade can
+      // never turn old sensitive-data workflow state into a completed gate.
+      checklist.vendorHandoff = false;
+    }
+    if (checklist.vendorStatus === undefined) checklist.vendorStatus = false;
+    if (checklist.vendorHandoff !== true || checklist.vendorStatus !== true) {
+      // Downstream completion depended on the former sensitive-data flags.
+      // Revoke it rather than preserving an unsupported submission/approval.
+      checklist.submittedToHoa = false;
+      checklist.boardApproval = false;
+      caseItem.checkInLocked = true;
+      if (caseItem.status === "approved") caseItem.status = "waiting_for_board_approval";
+      delete caseItem.boardApprovalEvidence;
+    }
+    delete checklist.backgroundAuthorization;
+    delete checklist.photoIds;
+  }
+  return state;
+}
+
 async function readStateStrict({ validate = true } = {}) {
   await initializeStateFile();
   let raw;
@@ -888,6 +1044,7 @@ async function readStateStrict({ validate = true } = {}) {
   } catch (error) {
     throw new StateReadError(`state_file_malformed: ${error.message}`);
   }
+  parsed = migrateLegacyChecklistState(parsed);
   if (validate) {
     try {
       assertValidState(parsed);
@@ -912,6 +1069,9 @@ function nextStateToken(currentToken) {
 // simultaneous clients both pass and the second silently overwrite the first.
 function writeStateAtomic(incomingState) {
   const run = async () => {
+    // Sensitive payloads are rejected deterministically before concurrency-token
+    // handling so a stale token can never mask a prohibited-data violation.
+    assertNoProhibitedSensitiveData(incomingState);
     await initializeStateFile();
     const releaseLock = await acquireStateLock();
     try {
@@ -1041,11 +1201,12 @@ function missingChecklist(caseItem) {
     guestAcknowledged: "Gastbestaetigung HOA-Prozess",
     packetSent: "Dokumentpaket gesendet",
     leaseApplication: "Lease Application",
-    backgroundAuthorization: "Background Authorization",
+    vendorHandoff: "Sicherer Vendor-Handoff",
+    vendorStatus: "Vendor-Bestaetigung",
     shortTermLeaseTenantSigned: "Short-Term Lease Tenant-Signatur",
     shortTermLeaseOwnerSigned: "Short-Term Lease Owner-Signatur",
     rulesSent: "Rules and Regulations gesendet",
-    photoIds: "Photo IDs / supporting documents",
+
     feeTracked: "USD 100 Fee / Check",
     submittedToHoa: "Einreichung bei HOA",
     boardApproval: "Board Approval",
@@ -1345,11 +1506,12 @@ function buildCancellationDossier(state, calendar, dailyCheck, caseId) {
     `- Guest acknowledged HOA process: ${checklistText(checklist.guestAcknowledged)}`,
     `- Document packet sent: ${checklistText(checklist.packetSent)}`,
     `- Lease Application received: ${checklistText(checklist.leaseApplication)}`,
-    `- Background Authorization received: ${checklistText(checklist.backgroundAuthorization)}`,
+    `- Secure Tenant Evaluation vendor handoff completed: ${checklistText(checklist.vendorHandoff)}`,
+    `- Vendor completion/status confirmed: ${checklistText(checklist.vendorStatus)}`,
     `- Short-Term Lease tenant signed: ${checklistText(checklist.shortTermLeaseTenantSigned)}`,
     `- Short-Term Lease owner signed: ${checklistText(checklist.shortTermLeaseOwnerSigned)}`,
     `- Rules and Regulations sent: ${checklistText(checklist.rulesSent)}`,
-    `- Photo IDs / supporting docs received: ${checklistText(checklist.photoIds)}`,
+
     `- Fee tracked: ${checklistText(checklist.feeTracked)}`,
     `- Submitted to HOA: ${checklistText(checklist.submittedToHoa)}`,
     `- Board Approval received: ${checklistText(checklist.boardApproval)}`,

@@ -11,6 +11,7 @@ register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
 const { socketAttempts, resetSocketAttempts } = await import('cloudflare:sockets');
 const { onRequest } = await import('../functions/[[path]].js');
 const { shouldAutoSubmitAfterGuestSave, isGuestAccessibleCase } = await import('../functions/lib/workflow.js');
+const { containsProhibitedSensitiveData } = await import('../functions/lib/hoa-rules.js');
 
 const ORIGIN = 'https://portal.example.test';
 const TOKEN = 'testtoken123';
@@ -39,6 +40,20 @@ function guestRequest(path, { method = 'POST', form, origin = ORIGIN } = {}) {
   return new Request(ORIGIN + path, { method, headers, body, redirect: 'manual' });
 }
 
+function adminRequest(path, form = {}) {
+  const headers = new Headers({
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Origin: ORIGIN,
+    Authorization: `Basic ${Buffer.from('markus:unused-in-tests').toString('base64')}`,
+  });
+  return new Request(ORIGIN + path, {
+    method: 'POST',
+    headers,
+    body: new URLSearchParams(form).toString(),
+    redirect: 'manual',
+  });
+}
+
 function seedCase(store) {
   const c = {
     id: 'case-1', token: TOKEN, guestName: 'DemoGuest DemoNameL',
@@ -47,7 +62,8 @@ function seedCase(store) {
     notes: '', status: null, hoaOccupancyConfirmedAt: '2026-07-27T12:00:00Z',
     steps: [
       { id: 'forms_sent', label: 'First paperwork draft saved', done: false, date: null },
-      { id: 'ids_provided', label: 'Photo ID provided securely for each adult', done: false, date: null },
+      { id: 'vendor_handoff_confirmed', label: 'External screening-vendor handoff confirmed', done: false, date: null },
+      { id: 'vendor_status_confirmed', label: 'External vendor completion status confirmed', done: false, date: null },
       { id: 'fee_sent', label: '$100 fee confirmed received by association', done: false, date: null },
     ],
   };
@@ -68,16 +84,10 @@ function completeGuestForm() {
   return {
     saveMode: 'complete',
     a0_firstName: 'DemoGuest', a0_middleName: 'None', a0_lastName: 'DemoSurname',
-    a0_birthDate: '1980-01-01', a0_gender: 'F', a0_phone: '+1 555 555 1212',
+    a0_phone: '+1 555 555 1212',
     a0_email: 'guest@example.test', a0_street: '1 Main St', a0_city: 'St Petersburg',
-    a0_state: 'FL', a0_zip: '33715', a0_idType: 'drivers_license',
-    a0_idNumber: 'X1234567', a0_idState: 'FL', a0_employer: 'Retired',
-    a0_employerPhone: 'N/A', a0_esign_consent: 'yes',
+    a0_state: 'FL', a0_zip: '33715', a0_esign_consent: 'yes',
     a0_sig: `data:image/png;base64,${validSignaturePng()}`,
-    ref0_name: 'Reference One', ref0_phone: '+1 555 000 0001', ref0_address: '1 Ref St, Tampa, FL',
-    ref1_name: 'Reference Two', ref1_phone: '+1 555 000 0002', ref1_address: '2 Ref St, Tampa, FL',
-    em0_name: 'Emergency One', em0_phone: '+1 555 100 0001',
-    em1_name: 'Emergency Two', em1_phone: '+1 555 100 0002',
     rules_acknowledged: 'yes',
   };
 }
@@ -172,4 +182,235 @@ test('canceled cases reject guest wizard views and stay closed', async () => {
   });
   assert.equal(res.status, 410);
   assert.match(await res.text(), /reservation is no longer active/i);
+});
+
+test('admin mutations recursively purge prohibited sensitive fields before persistence', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.metadata = {
+    screening: {
+      birthDate: '2000-01-01',
+      idNumber: 'SYNTHETIC-ID',
+      financialData: { creditScore: 700 },
+      references: [{ name: 'Synthetic Reference', phone: '555' }],
+      emergencyContacts: [{ name: 'Synthetic Emergency', phone: '555' }],
+    },
+  };
+  c.wizard = { adults: [{ idType: 'drivers_license', idState: 'FL' }], emergency: [{ name: 'Synthetic Emergency' }] };
+  store.set('cases', JSON.stringify([c]));
+
+  const res = await onRequest({
+    request: adminRequest('/admin/toggle', { id: c.id, step: 'forms_sent' }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 303);
+  const persisted = JSON.parse(store.get('cases'));
+  assert.equal(containsProhibitedSensitiveData(persisted), false);
+  assert.equal(persisted[0].metadata.screening, undefined);
+  assert.equal(persisted[0].wizard.adults[0].idType, undefined);
+  assert.equal(persisted[0].wizard.adults[0].idState, undefined);
+  assert.equal(persisted[0].wizard.emergency, undefined);
+});
+
+test('SSN-pattern payload is rejected before ingestion and records metadata-only audit evidence', async () => {
+  const { env, store } = mockEnv();
+  seedCase(store);
+  const before = store.get('cases');
+
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: { saveMode: 'draft', a0_firstName: '123-45-6789' } }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 400);
+  assert.equal(await res.text(), 'prohibited_sensitive_data');
+  assert.equal(store.get('cases'), before);
+  const auditEntries = [...store.entries()].filter(([key]) => key.startsWith('security-audit:'));
+  assert.equal(auditEntries.length, 1);
+  assert.doesNotMatch(auditEntries[0][1], /123-45-6789/);
+});
+
+test('new prohibited form fields are rejected instead of silently ignored', async () => {
+  const { env, store } = mockEnv();
+  seedCase(store);
+  const before = store.get('cases');
+
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: { saveMode: 'draft', a0_firstName: 'Synthetic', a0_idType: 'passport' } }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 400);
+  assert.equal(await res.text(), 'prohibited_sensitive_data');
+  assert.equal(store.get('cases'), before);
+});
+
+test('admin cannot release check-in before documented Board Approval', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+
+  const res = await onRequest({
+    request: adminRequest('/admin/toggle', { id: c.id, step: 'checkin_released' }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 409);
+  const persisted = JSON.parse(store.get('cases'));
+  const release = persisted[0].steps.find(step => step.id === 'checkin_released');
+  assert.equal(release?.done ?? false, false);
+});
+
+test('removing Board Approval also revokes an existing check-in release', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.steps.push(
+    { id: 'board_approved', label: 'HOA Board approval received', done: true, date: '2026-08-21T12:00:00Z' },
+    { id: 'checkin_released', label: 'Check-in instructions released', done: true, date: '2026-08-21T12:05:00Z' },
+  );
+  c.boardApprovalEvidence = {
+    authority: 'Board',
+    date: '2026-08-21',
+    referenceId: 'minutes-demo-1',
+    namedParty: c.guestName,
+  };
+  store.set('cases', JSON.stringify([c]));
+
+  const res = await onRequest({
+    request: adminRequest('/admin/toggle', { id: c.id, step: 'board_approved' }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 303);
+  const persisted = JSON.parse(store.get('cases'));
+  assert.equal(persisted[0].steps.find(step => step.id === 'board_approved').done, false);
+  assert.equal(persisted[0].steps.find(step => step.id === 'checkin_released').done, false);
+});
+
+test('Board Approval requires substantive evidence and preserves the mail candidate only as a hint', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.approvalCandidate = { mailDate: '2026-08-21T11:00:00Z', subject: 'Written approval for synthetic case' };
+  store.set('cases', JSON.stringify([c]));
+
+  const candidateOnly = await onRequest({
+    request: adminRequest('/admin/toggle', { id: c.id, step: 'board_approved', approvalDate: '', approvalReferenceId: '' }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(candidateOnly.status, 409);
+
+  const approved = await onRequest({
+    request: adminRequest('/admin/toggle', {
+      id: c.id,
+      step: 'board_approved',
+      approvalAuthority: 'Board',
+      approvalDate: '2026-08-21',
+      approvalReferenceId: 'signed-consent-demo-1',
+      approvalNamedParty: c.guestName,
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(approved.status, 303);
+  const persisted = JSON.parse(store.get('cases'))[0];
+  assert.deepEqual(persisted.boardApprovalEvidence, {
+    authority: 'Board',
+    date: '2026-08-21',
+    referenceId: 'signed-consent-demo-1',
+    namedParty: c.guestName,
+  });
+  assert.equal(persisted.approvalCandidate.subject, 'Written approval for synthetic case');
+});
+
+test('future-dated Board Approval evidence is rejected', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  const res = await onRequest({
+    request: adminRequest('/admin/toggle', {
+      id: c.id,
+      step: 'board_approved',
+      approvalAuthority: 'Board',
+      approvalDate: '2099-01-01',
+      approvalReferenceId: 'minutes-demo-future',
+      approvalNamedParty: c.guestName,
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 409);
+  assert.equal(JSON.parse(store.get('cases'))[0].boardApprovalEvidence, undefined);
+});
+
+test('Board Approval without a candidate or explicit evidence is rejected', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  const res = await onRequest({
+    request: adminRequest('/admin/toggle', { id: c.id, step: 'board_approved' }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 409);
+  assert.equal(JSON.parse(store.get('cases'))[0].boardApprovalEvidence, undefined);
+});
+
+test('manual Airbnb creation rejects exact 30 nights and creates only a validated full rental', async () => {
+  const { env, store } = mockEnv();
+  store.set('cases', '[]');
+  const exact = await onRequest({
+    request: adminRequest('/admin/create', {
+      guestName: 'Synthetic Guest', reservationCode: 'HMTEST0030',
+      checkIn: '2026-10-17', checkOut: '2026-11-16', adults: '1',
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(exact.status, 400);
+  assert.deepEqual(JSON.parse(store.get('cases')), []);
+
+  const valid = await onRequest({
+    request: adminRequest('/admin/create', {
+      guestName: 'Synthetic Guest', reservationCode: 'HMTEST0031',
+      checkIn: '2026-10-17', checkOut: '2026-11-17', adults: '1',
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(valid.status, 303);
+  const created = JSON.parse(store.get('cases'))[0];
+  assert.equal(created.nights, 31);
+  assert.equal(created.pathType, 'full');
+  assert.equal(created.occupancyDecision.kind, 'rental');
+  assert.equal(created.occupancyDecision.ruleStatus, 'current');
+  assert.match(created.occupancyDecision.ruleVersionId, /^2026-08-21-corpus-review:/);
+  assert.ok(created.occupancyDecision.sourceIds.includes('CINC-364605'));
+});
+
+test('live submission mode cannot be enabled without an atomic coordinator', async () => {
+  const { env, store } = mockEnv();
+  const res = await onRequest({
+    request: adminRequest('/admin/submit-live', { mode: 'yes', confirm: 'LIVE' }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 409);
+  assert.equal(store.has('submit-live'), false);
+});
+
+test('binary uploads fail closed until content-level DLP is configured', async () => {
+  for (const path of ['/admin/library/upload', '/admin/receipts/upload']) {
+    const { env, store } = mockEnv();
+    const res = await onRequest({
+      request: adminRequest(path),
+      env,
+      waitUntil: () => {},
+    });
+    assert.equal(res.status, 409);
+    assert.deepEqual([...store.keys()], []);
+  }
 });

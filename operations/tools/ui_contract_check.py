@@ -108,6 +108,23 @@ def approval_transition_checks(failures: list[str]) -> None:
         "app.js must return from the Board Approval branch before generic completed-status handling",
         failures,
     )
+    evidence_function = source[source.find("function promptBoardApprovalEvidence"):source.find("function updateDocumentStatus")]
+    for required_field in ("authority", "date: approvalDate", "referenceId", "namedParty"):
+        check(
+            required_field in evidence_function,
+            f"app.js Board Approval prompt must collect server-required evidence field {required_field}",
+            failures,
+        )
+    check(
+        'new Set(["Board", "Board designee"])' in evidence_function,
+        "app.js Board Approval prompt must restrict authority to Board or Board designee",
+        failures,
+    )
+    check(
+        "namedParty !== String(caseItem.guestName" in evidence_function,
+        "app.js Board Approval prompt must bind the named party to the case guest",
+        failures,
+    )
 
 
 def build_report() -> dict:

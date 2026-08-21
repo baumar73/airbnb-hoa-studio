@@ -23,7 +23,7 @@ export function occupancyClause(data) {
 }
 
 export async function generateLeaseAgreement(data) {
-  const doc = await PDFDocument.create();
+  const doc = await PDFDocument.create({ updateMetadata: false });
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
@@ -95,8 +95,14 @@ export async function generateLeaseAgreement(data) {
 
   y -= 8;
   const b64ToBytes = (b64) => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
-  const embedSig = async (src) => { try { return await doc.embedPng(typeof src === 'string' ? b64ToBytes(src) : src); } catch (e) { return null; } };
-  const ownerSig = data.ownerSigPng ? await embedSig(data.ownerSigPng) : null;
+  const embedSig = async (src, role) => {
+    try {
+      return await doc.embedPng(typeof src === 'string' ? b64ToBytes(src) : src);
+    } catch (_) {
+      throw new Error(`invalid ${role} signature PNG`);
+    }
+  };
+  const ownerSig = data.ownerSigPng ? await embedSig(data.ownerSigPng, 'owner') : null;
   const fmtToday = data.todayISO ? (([yy, mm, dd]) => `${mm}/${dd}/${yy}`)(data.todayISO.split('-')) : '';
   const sigBlock = (role, name, sigImg) => {
     ensure(sigImg ? 64 : 54);
@@ -115,7 +121,7 @@ export async function generateLeaseAgreement(data) {
   sigBlock('Landlord', UNIT.owner, ownerSig);
   for (let i = 0; i < tenants.length; i++) {
     const ap = adults[i];
-    const tSig = (data.esignConsent && ap && ap.sigPng) ? await embedSig(ap.sigPng) : null;
+    const tSig = (data.esignConsent && ap && ap.sigPng) ? await embedSig(ap.sigPng, `tenant ${i + 1}`) : null;
     sigBlock('Tenant', tenants[i], tSig);
   }
 

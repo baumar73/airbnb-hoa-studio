@@ -50,7 +50,7 @@ export function computeAlerts(cases, now) {
       }
     }
     if (days <= 30 && days >= 0 && !stepDone(c, 'submitted_hoa') && ageDays(n.deadlineRisk, now) >= 3) {
-      alerts.push({ c, key: 'deadlineRisk', text: `⚠️ ${who}: Noch ${days} Tage bis Check-in, aber das vollständige Paket ist noch nicht bei der HOA. Die Verwaltung nennt bis zu 15 Tage Bearbeitungszeit; Scheck und Ausweise müssen vorher vollständig sein.` });
+      alerts.push({ c, key: 'deadlineRisk', text: `⚠️ ${who}: Noch ${days} Tage bis Check-in, aber das vollständige Paket ist noch nicht bei der HOA. Die Verwaltung nennt bis zu 15 Tage Bearbeitungszeit; Association-Gebühr und der externe Vendor-Status müssen vorher vollständig sein.` });
     }
     if (days <= 16 && days >= 0 && !approved && ageDays(n.escalation, now) >= 1) {
       alerts.push({ c, key: 'escalation', text: `🚨 ${who}: Nur noch ${days} Tage bis Check-in und KEIN Board-Approval. Die offizielle Bearbeitungszeit von bis zu 15 Tagen ist erreicht. Verwaltung sofort anrufen und Alternativen prüfen.` });
@@ -81,6 +81,7 @@ async function sendTelegram(env, text) {
 
 import { purgeExpiredCases, applicationFeeState } from '../../functions/lib/workflow.js';
 import { pollMail } from '../../functions/lib/mailpoll.js';
+import { assertNoProhibitedSensitiveData, stripProhibitedSensitiveData } from '../../functions/lib/hoa-rules.js';
 
 export default {
   async scheduled(event, env, ctx) {
@@ -98,11 +99,15 @@ export default {
       return;
     }
     const raw = await env.CASES.get('cases');
-    const loadedCases = raw ? JSON.parse(raw) : [];
+    const loadedCases = raw ? stripProhibitedSensitiveData(JSON.parse(raw)) : [];
+    const sanitizedLegacyState = Boolean(raw && JSON.stringify(loadedCases) !== raw);
     const { kept: cases, purged } = purgeExpiredCases(loadedCases, now, 90);
-    if (purged.length) {
+    if (purged.length || sanitizedLegacyState) {
+      assertNoProhibitedSensitiveData(cases);
       await env.CASES.put('cases', JSON.stringify(cases));
-      await sendTelegram(env, `🧹 Datenschutz: ${purged.length} abgeschlossene Gastvorgänge wurden 90 Tage nach Check-out aus dem Portal gelöscht.`);
+      if (purged.length) {
+        await sendTelegram(env, `🧹 Datenschutz: ${purged.length} abgeschlossene Gastvorgänge wurden 90 Tage nach Check-out aus dem Portal gelöscht.`);
+      }
     }
 
     const alerts = computeAlerts(cases, now);
@@ -110,7 +115,10 @@ export default {
       if (await sendTelegram(env, a.text)) a.c.notify[a.key] = now.toISOString();
     }
     if (now.getUTCDay() === 0) await sendTelegram(env, buildDigest(cases, now));
-    if (alerts.length) await env.CASES.put('cases', JSON.stringify(cases));
+    if (alerts.length) {
+      assertNoProhibitedSensitiveData(cases);
+      await env.CASES.put('cases', JSON.stringify(cases));
+    }
     console.log(`isla-cron: ${alerts.length} alert(s), ${cases.length} case(s)`);
   },
 

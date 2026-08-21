@@ -136,6 +136,16 @@ class ServerTests(unittest.TestCase):
             source = ROOT / "data" / name
             if source.exists():
                 shutil.copy(source, self.data_dir / name)
+        # The sanitized review workspace intentionally has no operations/data
+        # directory. Create token-free fixtures so health-policy tests verify
+        # request handling rather than failing because optional source data was
+        # deliberately excluded from the review bundle.
+        calendar_fixture = self.data_dir / "airbnb-florida-calendar-snapshot.json"
+        if not calendar_fixture.exists():
+            calendar_fixture.write_text('{"events": []}\n', encoding="utf-8")
+        manifest_fixture = self.data_dir / "markus-operations-manifest.json"
+        if not manifest_fixture.exists():
+            manifest_fixture.write_text('{"version": 1, "domains": [], "runtimePolicy": {}}\n', encoding="utf-8")
         self.port = free_port()
         self.server = ServerFixture(self.data_dir, self.port)
         self.assertTrue(self.server.wait_ready(), "server did not become ready")
@@ -239,6 +249,8 @@ class ServerTests(unittest.TestCase):
     def test_approval_without_evidence_rejected(self) -> None:
         status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
         self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
         state = bootstrap["state"]
         target = next(c for c in state["cases"] if not c["checklist"].get("boardApproval"))
         target["status"] = "approved"
@@ -249,9 +261,54 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("Board Approval", payload.get("error", ""))
         # And with evidence it must pass.
-        target["boardApprovalEvidence"] = {"date": "2026-08-01", "source": "Board email"}
+        target["boardApprovalEvidence"] = {
+            "authority": "Board",
+            "date": time.strftime("%Y-%m-%d", time.gmtime()),
+            "referenceId": "signed-consent-demo-1",
+            "namedParty": target["guestName"],
+        }
         status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
         self.assertEqual(status, 200, payload)
+
+    def test_approval_with_impossible_calendar_date_is_rejected(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        state = bootstrap["state"]
+        target = next(c for c in state["cases"] if not c["checklist"].get("boardApproval"))
+        target["status"] = "approved"
+        target["checkInLocked"] = False
+        target.setdefault("checklist", {})["boardApproval"] = True
+        target["boardApprovalEvidence"] = {
+            "authority": "Board",
+            "date": "2026-99-99",
+            "referenceId": "signed-consent-demo-invalid-date",
+            "namedParty": target["guestName"],
+        }
+
+        status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+        self.assertEqual(status, 400, payload)
+        persisted = json.loads((self.data_dir / "airbnb-hoa-state.json").read_text(encoding="utf-8"))
+        self.assertNotEqual(persisted["cases"][0].get("boardApprovalEvidence", {}).get("date"), "2026-99-99")
+
+    def test_future_dated_approval_is_rejected(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        assert isinstance(bootstrap, dict)
+        state = bootstrap["state"]
+        target = next(c for c in state["cases"] if not c["checklist"].get("boardApproval"))
+        target["status"] = "approved"
+        target["checkInLocked"] = False
+        target.setdefault("checklist", {})["boardApproval"] = True
+        target["boardApprovalEvidence"] = {
+            "authority": "Board",
+            "date": "2099-01-01",
+            "referenceId": "signed-consent-demo-future",
+            "namedParty": target["guestName"],
+        }
+        status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+        self.assertEqual(status, 400, payload)
 
     # -- 5. stale write ----------------------------------------------------
     def test_stale_write_is_409(self) -> None:
@@ -313,6 +370,8 @@ class ServerTests(unittest.TestCase):
     def test_kernel_lock_is_released_after_holder_crash(self) -> None:
         status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
         self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
         state = bootstrap["state"]
         lock_path = self.data_dir / ".airbnb-hoa-state.flock"
         holder = subprocess.Popen(
@@ -353,7 +412,162 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(lock_path.is_file())
         self.assertEqual(lock_path.stat().st_mode & 0o777, 0o600)
 
-    # -- 6. oversized body --------------------------------------------------
+    # -- 6. sensitive-data firewall -----------------------------------------
+    def test_sensitive_screening_payload_is_rejected_and_never_persisted(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        state = bootstrap["state"]
+        marker = "SYNTHETIC-SENSITIVE-MARKER"
+        state["cases"][0]["timeline"][0]["metadata"] = {
+            "screening": {
+                "birthDate": "2000-01-01",
+                "idNumber": marker,
+                "backgroundReport": {"credit": marker, "criminal": "none"},
+            }
+        }
+        status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+        self.assertEqual(status, 400, payload)
+        self.assertEqual(payload.get("error"), "prohibited_sensitive_data")
+        persisted = (self.data_dir / "airbnb-hoa-state.json").read_text(encoding="utf-8")
+        self.assertNotIn(marker, persisted)
+
+    def test_ssn_pattern_in_free_text_is_rejected_and_never_persisted(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        for marker in (
+            "123-45-6789", "SSN: 123 45 6789", "passport number: SYNTHETIC-123", "credit score = 700",
+            "taxpayer identification number: SYNTHETIC-999", "financial information: SYNTHETIC-ACCOUNT",
+            "screening report: SYNTHETIC-REPORT", "emergency contact: SYNTHETIC-PERSON",
+        ):
+            state = json.loads(json.dumps(bootstrap["state"]))
+            state["cases"][0]["notes"] = f"synthetic prohibited value {marker}"
+            status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+            self.assertEqual(status, 400, (marker, payload))
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            self.assertEqual(payload.get("error"), "prohibited_sensitive_data")
+            persisted = (self.data_dir / "airbnb-hoa-state.json").read_text(encoding="utf-8")
+            self.assertNotIn(marker, persisted)
+
+    def test_every_prohibited_sensitive_alias_is_rejected(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        aliases = (
+            "financialData",
+            "financialInformation",
+            "screeningReport",
+            "tenantEvaluationReport",
+            "emergencyContacts",
+            "references",
+            "bankInformation",
+            "dateBirth",
+            "identityDocument",
+            "idImage",
+            "bankRouting",
+            "backgroundCheckReport",
+        )
+        for alias in aliases:
+            state = json.loads(json.dumps(bootstrap["state"]))
+            marker = f"SYNTHETIC-{alias}"
+            state["cases"][0]["timeline"][0]["metadata"] = {alias: marker}
+            status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+            self.assertEqual(status, 400, (alias, payload))
+            self.assertIsInstance(payload, dict)
+            assert isinstance(payload, dict)
+            self.assertEqual(payload.get("error"), "prohibited_sensitive_data")
+            persisted = (self.data_dir / "airbnb-hoa-state.json").read_text(encoding="utf-8")
+            self.assertNotIn(marker, persisted)
+
+    def test_sensitive_payload_wins_over_stale_state_error(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        state = bootstrap["state"]
+        state["updatedAt"] = "2000-01-01T00:00:00.000Z"
+        state["cases"][0]["notes"] = "synthetic prohibited value 123-45-6789"
+
+        status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+        self.assertEqual(status, 400, payload)
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(payload.get("error"), "prohibited_sensitive_data")
+
+    def test_legacy_checklist_is_migrated_without_state_outage(self) -> None:
+        self.server.stop()
+        state_file = self.data_dir / "airbnb-hoa-state.json"
+        legacy = json.loads(state_file.read_text(encoding="utf-8"))
+        checklist = legacy["cases"][0]["checklist"]
+        checklist["backgroundAuthorization"] = True
+        checklist["photoIds"] = False
+        checklist.pop("vendorHandoff", None)
+        checklist.pop("vendorStatus", None)
+        state_file.write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+
+        self.server = ServerFixture(self.data_dir, self.port)
+        self.assertTrue(self.server.wait_ready(), "migrated server did not become ready")
+        status, _, health = http(f"{self.server.base_url}/api/health")
+        self.assertEqual(status, 200, health)
+        status, _, bootstrap = http(f"{self.server.base_url}/api/bootstrap")
+        self.assertEqual(status, 200, bootstrap)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        migrated = bootstrap["state"]["cases"][0]["checklist"]
+        # Former identity/background flags are not evidence that the external
+        # vendor received a current handoff. Migration must not promote them.
+        self.assertFalse(migrated["vendorHandoff"])
+        self.assertFalse(migrated["vendorStatus"])
+        self.assertFalse(migrated["submittedToHoa"])
+        self.assertFalse(migrated["boardApproval"])
+        self.assertNotIn("backgroundAuthorization", migrated)
+        self.assertNotIn("photoIds", migrated)
+
+    def test_clean_state_uses_vendor_status_not_identity_or_report_checklists(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        serialized = json.dumps(bootstrap["state"])
+        for prohibited in ("backgroundAuthorization", "photoIds", "backgroundReport", "idNumber", "birthDate"):
+            self.assertNotIn(prohibited, serialized)
+        for case in bootstrap["state"]["cases"]:
+            self.assertIn("vendorHandoff", case.get("checklist", {}))
+            self.assertIn("vendorStatus", case.get("checklist", {}))
+
+    def test_hoa_submission_requires_vendor_and_fee_gates(self) -> None:
+        status, _, bootstrap = http(f"{self.base_url}/api/bootstrap")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(bootstrap, dict)
+        assert isinstance(bootstrap, dict)
+        for gate in ("vendorHandoff", "vendorStatus", "feeTracked"):
+            state = json.loads(json.dumps(bootstrap["state"]))
+            case = next(item for item in state["cases"] if item["checklist"].get("submittedToHoa"))
+            case["checklist"][gate] = False
+            status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+            self.assertEqual(status, 400, (gate, payload))
+
+        state = json.loads(json.dumps(bootstrap["state"]))
+        case = state["cases"][0]
+        case["checklist"]["submittedToHoa"] = False
+        case["checklist"]["boardApproval"] = True
+        case["checkInLocked"] = False
+        case["status"] = "approved"
+        case["boardApprovalEvidence"] = {
+            "authority": "Board",
+            "date": time.strftime("%Y-%m-%d", time.gmtime()),
+            "referenceId": "signed-consent-gate-test",
+            "namedParty": case["guestName"],
+        }
+        status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
+        self.assertEqual(status, 400, payload)
+
+    # -- 7. oversized body --------------------------------------------------
     def test_oversized_body_is_413(self) -> None:
         big = b'{"pad":"' + b"x" * (1024 * 1024 + 1024) + b'"}'
         status, _, _ = http(f"{self.base_url}/api/state", data=big)
@@ -394,7 +608,12 @@ class ServerTests(unittest.TestCase):
         target["status"] = "approved"
         target["checkInLocked"] = False
         target.setdefault("checklist", {})["boardApproval"] = True
-        target["boardApprovalEvidence"] = {"date": "2026-08-01", "source": "Board email"}
+        target["boardApprovalEvidence"] = {
+            "authority": "Board",
+            "date": time.strftime("%Y-%m-%d", time.gmtime()),
+            "referenceId": "signed-consent-demo-1",
+            "namedParty": target["guestName"],
+        }
         status, _, payload = http(f"{self.base_url}/api/state", data=json.dumps(state).encode())
         self.assertEqual(status, 200, payload)
         backups = list((self.data_dir / "backups").glob("airbnb-hoa-state-*.json"))

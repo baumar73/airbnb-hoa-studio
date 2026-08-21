@@ -1,6 +1,6 @@
 const ADULT_FIELDS = [
-  'firstName', 'middleName', 'lastName', 'birthDate', 'gender', 'street', 'city', 'state', 'zip',
-  'phone', 'altPhone', 'email', 'idType', 'idNumber', 'idState', 'employer', 'employerPhone',
+  'firstName', 'middleName', 'lastName', 'street', 'city', 'state', 'zip',
+  'phone', 'altPhone', 'email',
 ];
 
 function field(form, name, max = 254) {
@@ -30,7 +30,6 @@ export function parseAdultFormSlots(form, count) {
   for (let i = 0; i < count; i++) {
     const adult = {};
     for (const name of ADULT_FIELDS) adult[name] = field(form, `a${i}_${name}`);
-    if (!['drivers_license', 'us_photo_id'].includes(adult.idType)) adult.idType = '';
     const signatureUrl = String(form.get(`a${i}_sig`) || '');
     const match = signatureUrl.match(/^data:image\/png;base64,(.+)$/s);
     explicitSigs[i] = (match && match[1].length <= 400000) ? match[1] : null;

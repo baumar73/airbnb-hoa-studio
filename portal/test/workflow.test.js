@@ -18,8 +18,9 @@ import {
   validateSignaturePng,
   isGuestAccessibleCase,
   applicationFeeState,
+  petPolicyState,
 } from '../functions/lib/workflow.js';
-import { applicationTypeMarkX } from '../functions/lib/fill.js';
+
 
 function validSignaturePng() {
   const bytes = Buffer.alloc(120);
@@ -36,19 +37,11 @@ function completeCase() {
     pathType: 'full', submission: null,
     wizard: {
       adults: [{
-        firstName: 'DemoGuest', middleName: 'None', lastName: 'DemoNameL', birthDate: '1980-01-01', gender: 'F',
+        firstName: 'DemoGuest', middleName: 'None', lastName: 'DemoNameL',
         phone: '+1-555-000-005', email: 'demoGuest@example.com',
         street: '1 Main St', city: 'St Petersburg', state: 'FL', zip: '33715',
-        idType: 'drivers_license', idNumber: 'X1234567', idState: 'FL', employer: 'Retired', employerPhone: 'N/A', sigPng: validSignaturePng(), esignConsent: true
+        sigPng: validSignaturePng(), esignConsent: true
       }],
-      references: [
-        { name: 'Reference One', phone: '+1-555-000-001', address: '1 Ref St, Tampa, FL' },
-        { name: 'Reference Two', phone: '+1-555-000-002', address: '2 Ref St, Tampa, FL' },
-      ],
-      emergency: [
-        { name: 'Emergency One', phone: '+1-555-000-003' },
-        { name: 'Emergency Two', phone: '+1-555-000-004' },
-      ],
       esignConsent: true,
       rulesAcknowledged: true,
     },
@@ -68,8 +61,11 @@ test('rejects invalid dates and missing adult count', () => {
   assert.equal(validateCaseInput({ guestName: 'X', checkIn: '2027-02-31', checkOut: '2027-03-05', adults: 1 }).ok, false);
 });
 
-test('Airbnb rentals must use the full HOA path and meet the 30-night minimum', () => {
-  assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-16', adults: 1 }).ok, true);
+test('Airbnb rentals use the full path while the exact 30-night conflict fails closed', () => {
+  const exactThirty = validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-16', adults: 1 });
+  assert.equal(exactThirty.ok, false);
+  assert.match(exactThirty.error, /exactly 30 nights/i);
+  assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-17', adults: 1 }).ok, true);
   assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-15', adults: 1 }).ok, false);
 });
 
@@ -79,53 +75,68 @@ test('Airbnb rentals with more than two adults are routed to a manual HOA packag
   assert.match(result.error, /more than two adults/i);
 });
 
-test('a paid Airbnb rental has exactly four HOA document components', () => {
+test('a paid Airbnb rental generates only the two safe coordination documents', () => {
   assert.deepEqual(requiredPackageDocuments('full').map(d => d.key), [
-    'lease-application', 'background-authorization', 'rules-and-regulations', 'lease-agreement',
+    'rules-and-regulations', 'lease-agreement',
   ]);
   assert.throws(() => requiredPackageDocuments('guest-registration'), /paid Airbnb/i);
 });
 
-test('owner release requires a separate review attestation for all four documents', () => {
+test('owner release requires a separate review attestation for all safe components', () => {
   const all = Object.fromEntries(requiredPackageDocuments('full').map(d => [d.key, 'yes']));
   assert.equal(validateOwnerReviewAttestations(all).ok, true);
   delete all['rules-and-regulations'];
   assert.equal(validateOwnerReviewAttestations(all).ok, false);
 });
 
-test('live HOA submission waits for secure IDs and confirmed fee receipt', () => {
+test('live HOA submission waits for vendor handoff, vendor completion and confirmed fee receipt', () => {
   const c = completeCase();
   c.steps = [
-    { id: 'ids_provided', done: false },
+    { id: 'vendor_handoff_confirmed', done: false },
+    { id: 'vendor_status_confirmed', done: false },
     { id: 'fee_sent', done: false },
   ];
-  assert.deepEqual(validateLiveSubmissionPrerequisites(c).missing, ['ids_provided', 'fee_sent']);
+  assert.deepEqual(validateLiveSubmissionPrerequisites(c).missing, ['vendor_handoff_confirmed', 'vendor_status_confirmed', 'fee_sent']);
   c.steps.forEach(step => { step.done = true; });
   assert.equal(validateLiveSubmissionPrerequisites(c).ok, true);
 });
 
-test('renewal suppresses payment requests while the discretionary fee waiver is pending', () => {
+test('verified same-lessee renewal has no fee prerequisite', () => {
   const c = completeCase();
   c.applicationType = 'renewal';
-  c.feeStatus = 'waiver_pending';
-  c.steps = [{ id: 'ids_provided', done: true }, { id: 'fee_sent', done: false }];
-  assert.equal(applicationFeeState(c), 'waiver_pending');
-  assert.deepEqual(validateLiveSubmissionPrerequisites(c).missing, ['fee_waiver_confirmation']);
-});
-
-test('confirmed renewal fee waiver removes the fee receipt prerequisite', () => {
-  const c = completeCase();
-  c.applicationType = 'renewal';
-  c.feeStatus = 'waived';
-  c.steps = [{ id: 'ids_provided', done: true }, { id: 'fee_sent', done: false }];
-  assert.equal(applicationFeeState(c), 'waived');
+  c.sameLesseeRenewal = true;
+  c.renewalEvidence = {
+    identityMatchConfirmed: true,
+    priorApprovalReference: 'approval-demo-prior-1',
+    priorApprovedAt: '2026-04-01',
+  };
+  c.steps = [{ id: 'vendor_handoff_confirmed', done: true }, { id: 'vendor_status_confirmed', done: true }, { id: 'fee_sent', done: false }];
+  assert.equal(applicationFeeState(c), 'not_required');
   assert.equal(validateLiveSubmissionPrerequisites(c).ok, true);
 });
 
-test('renewal applications mark the renewal box instead of the lease box', () => {
-  assert.equal(applicationTypeMarkX('lease'), 342);
-  assert.equal(applicationTypeMarkX('renewal'), 480);
+test('unverified same-lessee assertion cannot waive or bypass the fee gate', () => {
+  const c = completeCase();
+  c.applicationType = 'renewal';
+  c.sameLesseeRenewal = true;
+  c.steps = [{ id: 'vendor_handoff_confirmed', done: true }, { id: 'vendor_status_confirmed', done: true }, { id: 'fee_sent', done: false }];
+  assert.equal(applicationFeeState(c), 'clarification_required');
+  assert.deepEqual(validateLiveSubmissionPrerequisites(c).missing, ['fee_authority_or_renewal_evidence']);
 });
+
+test('generic or legacy renewal flags cannot waive the fee without same-lessee evidence', () => {
+  const c = completeCase();
+  c.applicationType = 'renewal';
+  c.feeStatus = 'waived';
+  c.steps = [{ id: 'vendor_handoff_confirmed', done: true }, { id: 'vendor_status_confirmed', done: true }, { id: 'fee_sent', done: false }];
+  assert.equal(applicationFeeState(c), 'required');
+  assert.equal(validateLiveSubmissionPrerequisites(c).ok, false);
+});
+
+test('assistance-animal requests route to Board review rather than automatic denial', () => {
+  assert.equal(petPolicyState({ occupancyKind: 'rental', accommodationRequested: true }).status, 'accommodation_review');
+});
+
 
 test('accepts only plausibly sized PNG signature payloads', () => {
   assert.equal(validateSignaturePng(validSignaturePng()), true);
@@ -139,35 +150,32 @@ test('validates guest email addresses and blocks SMTP/header injection', () => {
   assert.equal(validateEmailAddress('not-an-address'), false);
 });
 
-test('requires materially complete applicant data before owner review', () => {
+test('requires materially complete minimal coordination data before owner review', () => {
   const c = completeCase();
   assert.equal(validatePaperwork(c).ok, true);
-  delete c.wizard.adults[0].birthDate;
+  delete c.wizard.adults[0].email;
   const invalid = validatePaperwork(c);
   assert.equal(invalid.ok, false);
-  assert.ok(invalid.missing.includes('adult 1 birthDate'));
+  assert.ok(invalid.missing.includes('adult 1 email'));
   assert.equal(isReadyForOwnerReview(c, true), false);
 });
 
-test('requires both references and emergency contacts to avoid HOA follow-up', () => {
+test('does not collect references or emergency contacts in the owner portal', () => {
   const c = completeCase();
-  c.wizard.references[1].phone = '';
-  c.wizard.emergency.pop();
+  c.wizard.references = [];
+  c.wizard.emergency = [];
   const result = validatePaperwork(c);
-  assert.equal(result.ok, false);
-  assert.ok(result.missing.includes('reference 2 phone'));
-  assert.ok(result.missing.includes('emergency contact 2 name'));
+  assert.equal(result.ok, true);
 });
 
-test('requires confirmed minor occupants to have a name and valid birth date', () => {
+test('requires only the names of confirmed minor occupants', () => {
   const c = completeCase();
   c.expectedMinors = 1;
-  c.wizard.children = [{ name: '', birthDate: '' }];
+  c.wizard.children = [{ name: '' }];
   let result = validatePaperwork(c);
   assert.equal(result.ok, false);
   assert.ok(result.missing.includes('minor 1 name'));
-  assert.ok(result.missing.includes('minor 1 birthDate'));
-  c.wizard.children[0] = { name: 'DemoNameR Guest', birthDate: '2009-01-01' };
+  c.wizard.children[0] = { name: 'DemoNameR Guest' };
   result = validatePaperwork(c);
   assert.equal(result.ok, true);
 });

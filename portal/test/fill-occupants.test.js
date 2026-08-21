@@ -1,28 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { leaseApplicationAdditionalOccupants } from '../functions/lib/fill.js';
+import { coordinationOccupantNames } from '../functions/lib/fill.js';
 
-test('lease application lists minors as additional occupants without treating them as adult applicants', () => {
+test('coordination package lists minors by name without collecting birth dates', () => {
   const data = {
     adults: [{ firstName: 'DemoGivenNameB', lastName: 'DemoSurnameE' }],
-    children: [{ name: 'DemoNameR DemoSurnameE', birthDate: '2009-01-01' }],
+    children: [{ name: 'DemoNameR DemoSurnameE' }],
   };
-  assert.deepEqual(leaseApplicationAdditionalOccupants(data), [
-    { name: 'DemoNameR DemoSurnameE', birthDate: '2009-01-01' },
-  ]);
+  assert.deepEqual(coordinationOccupantNames(data), ['DemoNameR DemoSurnameE']);
 });
 
-test('additional occupants combine adults beyond the two applicant blocks with minors', () => {
+test('coordination occupants combine adults beyond two with minors by name only', () => {
   const data = {
     adults: [
       { firstName: 'One', lastName: 'Adult' },
       { firstName: 'Two', lastName: 'Adult' },
-      { firstName: 'Three', middleName: 'M', lastName: 'Adult', birthDate: '1990-01-01' },
+      { firstName: 'Three', middleName: 'M', lastName: 'Adult' },
     ],
-    children: [{ name: 'Minor Guest', birthDate: '2010-02-03' }],
+    children: [{ name: 'Minor Guest' }],
   };
-  assert.deepEqual(leaseApplicationAdditionalOccupants(data), [
-    { name: 'Three M Adult', birthDate: '1990-01-01' },
-    { name: 'Minor Guest', birthDate: '2010-02-03' },
-  ]);
+  assert.deepEqual(coordinationOccupantNames(data), ['Three M Adult', 'Minor Guest']);
 });

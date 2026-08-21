@@ -5,6 +5,7 @@ import { Imap, decodeMessage } from './imap.js';
 import { parseBooking, parseCancellation, looksLikeApproval } from './parse.js';
 import { sendTelegram } from './email.js';
 import { validateAirbnbCaseInput, shouldAutoApproveFromEmail } from './workflow.js';
+import { assertNoProhibitedSensitiveData, stripProhibitedSensitiveData } from './hoa-rules.js';
 
 const PORTAL = 'https://portal.example.test';
 
@@ -14,8 +15,8 @@ function newCaseFrom(b) {
   const nights = validation.nights;
   const pathType = validation.pathType;
   const STEPS = pathType === 'full'
-    ? [['forms_sent','Guest portal opened and paperwork started'],['application','1. Lease Application — completed & signed'],['background','2. Background Check Authorization — completed & signed by each adult'],['rules_ack','3. Rules & Regulations — reviewed & signed acknowledgment'],['lease_signed','4. Lease Agreement — signed by guest(s) and owner'],['ids_provided','Photo ID provided securely for each adult'],['fee_sent','$100 fee confirmed received by association'],['owner_reviewed','Owner confirmed the green quality report and released the package'],['submitted_hoa','Complete file submitted to Example Property Management'],['board_approved','HOA Board approval received'],['checkin_released','Check-in instructions released']]
-    : [['forms_sent','Guest Registration Form sent to guest'],['registration','Guest Registration Form — completed & signed'],['ids_provided','Photo ID copy provided for each adult'],['submitted_hoa','Registration submitted to Example Property Management'],['board_approved','HOA confirmation received'],['checkin_released','Check-in instructions released']];
+    ? [['forms_sent','Guest portal opened and coordination paperwork started'],['vendor_handoff_confirmed','External screening-vendor handoff confirmed'],['vendor_status_confirmed','External vendor completion status confirmed'],['rules_ack','Rules & Regulations — reviewed & signed acknowledgment'],['lease_signed','Lease Agreement — signed by guest(s) and owner'],['fee_sent','$100 fee confirmed received by association when applicable'],['owner_reviewed','Owner confirmed the exact generated package'],['submitted_hoa','Safe coordination package submitted to management'],['board_approved','Written Board approval received'],['checkin_released','Check-in instructions released']]
+    : [['forms_sent','Guest Registration Form sent to guest'],['registration','Guest Registration Form — completed & signed'],['submitted_hoa','Registration submitted to Example Property Management'],['board_approved','HOA confirmation received'],['checkin_released','Check-in instructions released']];
   const tokenBytes = new Uint8Array(16);
   crypto.getRandomValues(tokenBytes);
   return {
@@ -44,7 +45,7 @@ export async function pollMail(env) {
     const cancellationUids = await imap.searchRaw('from:airbnb.com subject:(canceled OR cancelled OR storniert) newer_than:30d');
     const hoaUids = await imap.searchRaw('from:condominiumassociates.com newer_than:14d');
     const raw = await env.CASES.get('cases');
-    const cases = raw ? JSON.parse(raw) : [];
+    const cases = raw ? stripProhibitedSensitiveData(JSON.parse(raw)) : [];
     let dirty = false;
 
     const ambiguous = seen.ambiguous || {};
@@ -115,12 +116,11 @@ export async function pollMail(env) {
       const msg = decodeMessage(await imap.fetchMessage(uid));
       const day = (msg.date || new Date().toISOString()).slice(0, 10);
       if (!news.some(n => n.subject === msg.subject && (n.at || '').slice(0, 10) === day)) {
-        news.unshift({
+        news.unshift(stripProhibitedSensitiveData({
           at: msg.date || new Date().toISOString(),
           from: msg.from.replace(/<[^>]*>/g, '').replace(/"/g, '').trim() || 'Example Property Management',
           subject: msg.subject,
-          excerpt: msg.text.replace(/\s+/g, ' ').trim().slice(0, 400),
-        });
+        }));
         newsDirty = true;
         summary.news = (summary.news || 0) + 1;
       }
@@ -147,11 +147,18 @@ export async function pollMail(env) {
 
     if (newsDirty) {
       news.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
-      await env.CASES.put('hoa-news', JSON.stringify(news.slice(0, 100)));
+      const safeNews = stripProhibitedSensitiveData(news.slice(0, 100));
+      assertNoProhibitedSensitiveData(safeNews);
+      await env.CASES.put('hoa-news', JSON.stringify(safeNews));
     }
-    if (dirty) await env.CASES.put('cases', JSON.stringify(cases));
+    if (dirty) {
+      assertNoProhibitedSensitiveData(cases);
+      await env.CASES.put('cases', JSON.stringify(cases));
+    }
     seen.uids = [...seenSet].slice(-2000);
-    await env.CASES.put('mail-seen', JSON.stringify(seen));
+    const safeSeen = stripProhibitedSensitiveData(seen);
+    assertNoProhibitedSensitiveData(safeSeen);
+    await env.CASES.put('mail-seen', JSON.stringify(safeSeen));
   } finally {
     await imap.close();
   }

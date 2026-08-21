@@ -21,10 +21,10 @@ DEFAULT_CALENDAR = ROOT / "data" / "airbnb-florida-calendar-snapshot.json"
 
 REQUIRED_DOCUMENT_KEYS = [
     "leaseApplication",
-    "backgroundAuthorization",
+    "vendorHandoff",
+    "vendorStatus",
     "shortTermLeaseTenantSigned",
     "shortTermLeaseOwnerSigned",
-    "photoIds",
 ]
 
 

@@ -1,6 +1,24 @@
 // Pure workflow policy shared by Pages and the scheduled worker.
 // Guest actions may prepare a package, but only an authenticated owner action
 // may submit it or confirm an approval.
+import { HOA_RULE_REGISTRY, classifyOccupancy, evaluateApplicationFee, evaluatePetRule } from './hoa-rules.js';
+
+export async function bundleDigest(orderedPdfBytes) {
+  const parts = (orderedPdfBytes || []).map(value => value instanceof Uint8Array ? value : new Uint8Array(value));
+  const total = 4 + parts.reduce((sum, bytes) => sum + 4 + bytes.byteLength, 0);
+  const framed = new Uint8Array(total);
+  const view = new DataView(framed.buffer);
+  view.setUint32(0, parts.length, false);
+  let offset = 4;
+  for (const bytes of parts) {
+    view.setUint32(offset, bytes.byteLength, false);
+    offset += 4;
+    framed.set(bytes, offset);
+    offset += bytes.byteLength;
+  }
+  const digest = await crypto.subtle.digest('SHA-256', framed);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 export function validateSignaturePng(value) {
   try {
@@ -57,16 +75,19 @@ export function validateCaseInput(input) {
 export function validateAirbnbCaseInput(input) {
   const result = validateCaseInput(input);
   if (!result.ok) return result;
-  if (result.nights < 30) return { ok: false, error: 'paid Airbnb rentals require at least 30 nights and the full HOA path' };
+  const classification = classifyOccupancy({ ownerPresent: false, compensation: true, stayNights: result.nights });
+  if (classification.kind !== 'rental') return { ok: false, error: 'occupancy classification requires manual clarification' };
+  if (result.nights < 30) return { ok: false, error: 'paid Airbnb rentals require more than 30 nights and the full HOA path' };
+  if (result.nights === 30) return { ok: false, error: 'exactly 30 nights requires manual HOA clarification because the source rules conflict' };
   if (Number(input && input.adults) > 2) return { ok: false, error: 'rentals with more than two adults require a separate manual HOA application package' };
-  return { ...result, pathType: 'full' };
+  return { ...result, pathType: 'full', occupancyKind: classification.kind,
+    ruleVersionId: classification.ruleVersionId, ruleStatus: classification.ruleStatus,
+    ruleSourceIds: classification.sourceIds };
 }
 
 export function requiredPackageDocuments(pathType) {
   if (pathType !== 'full') throw new Error('Paid Airbnb rentals require the full HOA package');
   return [
-    { key: 'lease-application', label: 'Lease Application' },
-    { key: 'background-authorization', label: 'Background Check Authorization' },
     { key: 'rules-and-regulations', label: 'Rules & Regulations and signed acknowledgment' },
     { key: 'lease-agreement', label: 'Short-Term Lease Agreement' },
   ];
@@ -79,25 +100,49 @@ export function validateOwnerReviewAttestations(values) {
   return { ok: missing.length === 0, missing };
 }
 
+function hasVerifiedFeeAuthority() {
+  const rule = HOA_RULE_REGISTRY.rules.find(item => item.id === 'application-fee');
+  return rule?.status === 'current' &&
+    rule.sourceIds.includes('CINC-364605') &&
+    rule.sourceIds.includes('LEGAL-fl-718.112-bylaws-transfer-fees');
+}
+
+function hasVerifiedSameLesseeRenewal(c) {
+  if (!c || c.sameLesseeRenewal !== true) return false;
+  const evidence = c.renewalEvidence;
+  if (!evidence || evidence.identityMatchConfirmed !== true) return false;
+  if (!String(evidence.priorApprovalReference || '').trim() || !isValidISODate(evidence.priorApprovedAt)) return false;
+  if (!isValidISODate(c.checkIn) || evidence.priorApprovedAt > c.checkIn) return false;
+  const prior = new Date(`${evidence.priorApprovedAt}T00:00:00Z`);
+  const checkIn = new Date(`${c.checkIn}T00:00:00Z`);
+  const ageDays = Math.floor((checkIn - prior) / 86400000);
+  return ageDays >= 0 && ageDays <= 366;
+}
+
 export function applicationFeeState(c) {
   if (!c || c.pathType !== 'full') return 'not_required';
-  if (c.applicationType === 'renewal') {
-    if (c.feeStatus === 'waived') return 'waived';
-    if (c.feeStatus === 'waiver_pending') return 'waiver_pending';
-  }
-  return 'required';
+  return evaluateApplicationFee({
+    kind: 'rental',
+    sameLesseeRenewalClaimed: c.sameLesseeRenewal === true,
+    sameLesseeRenewalVerified: hasVerifiedSameLesseeRenewal(c),
+    governingAuthorityVerified: hasVerifiedFeeAuthority(),
+  }).status;
 }
 
 export function validateLiveSubmissionPrerequisites(c) {
-  const required = ['ids_provided'];
+  const required = ['vendor_handoff_confirmed', 'vendor_status_confirmed'];
   if (c && c.pathType === 'full') {
     const feeState = applicationFeeState(c);
     if (feeState === 'required') required.push('fee_sent');
-    if (feeState === 'waiver_pending') required.push('fee_waiver_confirmation');
+    if (feeState === 'clarification_required') required.push('fee_authority_or_renewal_evidence');
   }
   const steps = (c && c.steps) || [];
   const missing = required.filter(id => !steps.some(step => step.id === id && step.done));
   return { ok: missing.length === 0, missing };
+}
+
+export function petPolicyState({ occupancyKind = 'rental', accommodationRequested = false } = {}) {
+  return evaluatePetRule({ occupancyKind, accommodationRequested });
 }
 
 export function validatePaperwork(c) {
@@ -110,37 +155,20 @@ export function validatePaperwork(c) {
   }
   const common = ['firstName', 'lastName'];
   const contact = ['phone', 'email', 'street', 'city', 'state', 'zip'];
-  const fullOnly = ['middleName', 'birthDate', 'gender', 'idType', 'idNumber', 'idState', 'employer', 'employerPhone'];
   adults.slice(0, expected).forEach((a, i) => {
-    const required = [...common, ...(c.pathType === 'full' || i === 0 ? contact : []), ...(c.pathType === 'full' ? fullOnly : [])];
+    const required = [...common, ...(c.pathType === 'full' || i === 0 ? contact : [])];
     for (const field of required) {
       if (!String(a && a[field] || '').trim()) missing.push(`adult ${i + 1} ${field}`);
     }
     if (a && a.email && !validateEmailAddress(a.email)) missing.push(`adult ${i + 1} email invalid`);
-    if (a && a.birthDate && !isValidISODate(a.birthDate)) missing.push(`adult ${i + 1} birthDate invalid`);
     if (!a || !validateSignaturePng(a.sigPng)) missing.push(`adult ${i + 1} signature`);
     if (!a || !a.esignConsent) missing.push(`adult ${i + 1} e-sign consent`);
   });
   if (c && c.pathType === 'full') {
-    const references = (w && w.references) || [];
-    for (let i = 0; i < 2; i++) {
-      for (const field of ['name', 'phone', 'address']) {
-        if (!String(references[i] && references[i][field] || '').trim()) missing.push(`reference ${i + 1} ${field}`);
-      }
-    }
-    const emergency = (w && w.emergency) || [];
-    for (let i = 0; i < 2; i++) {
-      for (const field of ['name', 'phone']) {
-        if (!String(emergency[i] && emergency[i][field] || '').trim()) missing.push(`emergency contact ${i + 1} ${field}`);
-      }
-    }
     const expectedMinors = Number(c.expectedMinors || 0);
     const children = (w && w.children) || [];
     for (let i = 0; i < expectedMinors; i++) {
       if (!String(children[i] && children[i].name || '').trim()) missing.push(`minor ${i + 1} name`);
-      const birthDate = String(children[i] && children[i].birthDate || '').trim();
-      if (!birthDate) missing.push(`minor ${i + 1} birthDate`);
-      else if (!isValidISODate(birthDate)) missing.push(`minor ${i + 1} birthDate invalid`);
     }
   }
   if (!w || !w.esignConsent) missing.push('esign consent');

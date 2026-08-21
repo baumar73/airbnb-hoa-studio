@@ -32,10 +32,10 @@ import sync_apple_calendar  # noqa: E402
 
 REQUIRED_DOCUMENT_KEYS = {
     "leaseApplication": "Lease Application",
-    "backgroundAuthorization": "Background Authorization",
+    "vendorHandoff": "Sicherer Vendor-Handoff",
+    "vendorStatus": "Vendor-Bestaetigung",
     "shortTermLeaseTenantSigned": "Short-Term Lease Tenant-Signatur",
     "shortTermLeaseOwnerSigned": "Short-Term Lease Owner-Signatur",
-    "photoIds": "Photo IDs / supporting documents",
 }
 
 
