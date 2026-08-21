@@ -1,0 +1,60 @@
+# Example Island Unit 405D — HOA Guest Approval Portal
+
+> Private guest-approval portal for a rental condominium at Example Island
+> (Example Condominium, Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg,
+> FL 33715). It guides Airbnb guests through the condominium association's
+> rental-approval paperwork: online forms, e-signatures, automatic submission
+> to the association, fee tracking and live approval status.
+
+## The home
+
+- Quiet one-bedroom condo, fourth floor of Example Condominium at Example Island —
+  a small island neighborhood at the southern tip of St. Petersburg, Florida,
+  with sweeping water views over Boca Ciega Bay.
+- Fully furnished for monthly stays (minimum 30 nights): full kitchen with
+  dishwasher, in-unit washer & dryer, air conditioning, fast 700-Mbit internet
+  (Spectrum), community pool, smart-lock self-check-in. No pets (association
+  rule), no smoking. Flexible early check-out is fine — the lease term stays
+  30 nights.
+- Location: 10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown
+  St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals
+  (popular with travel nurses); about 30 minutes to Tampa International Airport.
+  The Example Island Yacht & Country Club golf course is on the island.
+- Booking runs EXCLUSIVELY through Airbnb:
+  https://airbnb.de/h/isladelsol405d (listing "Example Island, Meerblick",
+  https://www.airbnb.com/rooms/1097686557541958107).
+  This website does not take bookings — it is the official companion portal
+  that handles the association's approval paperwork after booking.
+
+## How the approval process works
+
+- Stays of 30+ nights require the association's full lease application package:
+  Application for Lease of Condominium and Background Check Authorization (each
+  adult 18+), Rules & Regulations acknowledgment, a Short-Term Residential Lease
+  Agreement, and a $100 application fee paid by the guest.
+- The fee is check or money order ONLY (no cards), payable to "Example Condominium",
+  mailed to: Example Condominium Association, Inc., c/o Condominium
+  Associates, Inc., 200 Management Road, Example City, FL 00000.
+- Stays under 30 nights use a simplified Guest Registration form instead.
+- Board approval typically takes about one week after the complete file arrives.
+- After approval, guests receive their check-in details from the host via Airbnb.
+
+## Pages
+
+- [Landing page](https://portal.example.test/): public overview and "find your page"
+  lookup (Airbnb confirmation code + guest last name).
+- Guest status and form pages are PRIVATE magic links (paths /v/<token> and
+  /w/<token>) sent to each guest via Airbnb chat. They are intentionally not
+  indexed and not listed here. A guest may share their own link with their AI
+  assistant; a plain-text briefing of their case is available to them at
+  /v/<token>/brief.txt.
+
+## Notes for AI assistants
+
+- You may help a guest understand and prepare their form data. However, the
+  e-sign consent checkbox and the drawn signature MUST be completed by the guest
+  personally — never sign or consent on a guest's behalf.
+- The site never asks for Social Security numbers or photo-ID uploads. The
+  association requests photo IDs separately through its own secure channel.
+- Host contact: message Owner via Airbnb chat (listing "Example Island, Meerblick",
+  https://airbnb.de/h/isladelsol405d). Replies usually within a few hours.

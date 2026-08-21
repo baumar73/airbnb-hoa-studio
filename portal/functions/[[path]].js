@@ -1,0 +1,1667 @@
+// Demo Unit — HOA Approval Portal (Cloudflare Pages Functions)
+// Storage: Workers KV (binding CASES, key "cases" = JSON array).
+// Admin: HTTP Basic Auth (env ADMIN_USER / ADMIN_PASSWORD).
+import { fillLeaseApplication, fillGuestRegistration, splitLeaseApplicationPackage, buildRulesAcknowledgment } from './lib/fill.js';
+import { generateLeaseAgreement } from './lib/lease.js';
+import { submitApprovedPackage, isReadyForOwnerReview, docStates } from './lib/submit.js';
+import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState } from './lib/workflow.js';
+import { sendViaGmail, sendTelegram } from './lib/email.js';
+import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
+
+// ---------- domain ----------
+const STEP_TEMPLATES = {
+  full: [
+    ['forms_sent',      'First paperwork draft saved'],
+    ['application',     '1. Lease Application — completed & signed'],
+    ['background',      '2. Background Check Authorization — completed & signed by each adult'],
+    ['rules_ack',       '3. Rules & Regulations — reviewed & signed acknowledgment'],
+    ['lease_signed',    '4. Lease Agreement — signed by guest(s) and owner'],
+    ['ids_provided',    'Photo ID provided securely for each adult'],
+    ['fee_sent',        '$100 fee confirmed received by association'],
+    ['owner_reviewed',  'Owner confirmed the green quality report and released the package'],
+    ['submitted_hoa',   'Complete file submitted to Example Property Management'],
+    ['board_approved',  'HOA Board approval received'],
+    ['checkin_released','Check-in instructions released'],
+  ],
+  'guest-registration': [
+    ['forms_sent',      'Guest Registration Form sent to guest'],
+    ['registration',    'Guest Registration Form — completed & signed'],
+    ['ids_provided',    'Photo ID copy provided for each adult'],
+    ['submitted_hoa',   'Registration submitted to Example Property Management'],
+    ['board_approved',  'HOA confirmation received'],
+    ['checkin_released','Check-in instructions released'],
+  ],
+};
+
+function b64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function newCase(input) {
+  const pathType = (input.nights >= 30) ? 'full' : 'guest-registration';
+  const tokenBytes = new Uint8Array(16);
+  crypto.getRandomValues(tokenBytes);
+  return {
+    id: crypto.randomUUID(),
+    token: b64url(tokenBytes),
+    guestName: input.guestName,
+    reservationCode: input.reservationCode || '',
+    checkIn: input.checkIn, checkOut: input.checkOut,
+    nights: input.nights, adults: input.adults,
+    pathType,
+    steps: STEP_TEMPLATES[pathType].map(([id, label]) => ({ id, label, done: false, date: null })),
+    createdAt: new Date().toISOString(),
+    notes: '',
+  };
+}
+
+// ---------- storage ----------
+async function loadCases(env) {
+  const raw = await env.CASES.get('cases');
+  const cases = raw ? JSON.parse(raw) : [];
+  return cases.map(c => {
+    const template = STEP_TEMPLATES[c.pathType] || STEP_TEMPLATES.full;
+    const previous = new Map((c.steps || []).map(step => [step.id, step]));
+    const known = new Set(template.map(([id]) => id));
+    const normalized = template.map(([id, label]) => {
+      const old = previous.get(id) || {};
+      return { ...old, id, label, done: !!old.done, date: old.date || null };
+    });
+    normalized.push(...(c.steps || []).filter(step => !known.has(step.id)));
+    return { ...c, steps: normalized };
+  });
+}
+async function saveCases(env, cases) {
+  await env.CASES.put('cases', JSON.stringify(cases));
+}
+
+// ---------- helpers ----------
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function daysUntil(dateStr) {
+  return Math.ceil((new Date(dateStr + 'T12:00:00Z') - new Date()) / 86400000);
+}
+// security headers applied to every response we control
+const SEC_HEADERS = {
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; " +
+    "form-action 'self'; frame-ancestors 'none'",
+};
+
+function html(body, code, indexable) {
+  const headers = { 'Content-Type': 'text/html; charset=utf-8', ...SEC_HEADERS,
+    'Cache-Control': indexable ? 'public, max-age=300' : 'private, no-store, max-age=0' };
+  if (!indexable) headers['X-Robots-Tag'] = 'noindex';
+  return new Response(body, { status: code || 200, headers });
+}
+function redirect(loc) {
+  return new Response(null, { status: 303, headers: { Location: loc, ...SEC_HEADERS, 'Cache-Control': 'private, no-store, max-age=0' } });
+}
+async function sha256hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function reviewPayload(c, wizard, includeSignatures) {
+  const cleanAdults = ((wizard && wizard.adults) || []).map(a => {
+    const copy = { ...a };
+    if (!includeSignatures) delete copy.sigPng;
+    return copy;
+  });
+  return {
+    case: { id: c.id, reservationCode: c.reservationCode, checkIn: c.checkIn, checkOut: c.checkOut, adults: c.adults, pathType: c.pathType },
+    wizard: {
+      adults: cleanAdults,
+      esignConsent: !!(wizard && wizard.esignConsent),
+      rulesAcknowledged: !!(wizard && wizard.rulesAcknowledged),
+      auto: (wizard && wizard.auto) || {},
+      references: (wizard && wizard.references) || [],
+      emergency: (wizard && wizard.emergency) || [],
+      children: (wizard && wizard.children) || [],
+    },
+  };
+}
+async function reviewDigest(c, wizard, includeSignatures = true) {
+  return sha256hex(JSON.stringify(reviewPayload(c, wizard, includeSignatures)));
+}
+function normalizedLastName(s) {
+  const parts = String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9' -]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return parts.at(-1) || '';
+}
+async function findRateAllowed(request, env) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const key = 'find-rate:' + (await sha256hex(ip + ':' + (env.FIND_RATE_SALT || 'isla'))).slice(0, 24);
+  const count = Number(await env.CASES.get(key) || 0);
+  if (count >= 20) return false;
+  await env.CASES.put(key, String(count + 1), { expirationTtl: 900 });
+  return true;
+}
+async function checkAdmin(request, env) {
+  const hdr = request.headers.get('Authorization') || '';
+  if (hdr.startsWith('Basic ')) {
+    let decoded = '';
+    try { decoded = atob(hdr.slice(6)); } catch (_) { decoded = ''; }
+    const sep = decoded.indexOf(':');
+    const u = sep >= 0 ? decoded.slice(0, sep) : '';
+    const p = sep >= 0 ? decoded.slice(sep + 1) : '';
+    if (u === (env.ADMIN_USER || 'markus')) {
+      const kvHash = await env.CASES.get('admin-password-hash');
+      if (kvHash) { if (await sha256hex(p) === kvHash) return null; }
+      else if (env.ADMIN_PASSWORD && p === env.ADMIN_PASSWORD) return null;
+    }
+  }
+  return new Response('Authentication required', { status: 401, headers: {
+    'WWW-Authenticate': 'Basic realm="Demo Unit Admin"', ...SEC_HEADERS,
+    'Cache-Control': 'private, no-store, max-age=0', 'X-Robots-Tag': 'noindex'
+  } });
+}
+
+// ---------- styles (coastal identity: warm sand ground, Boca Ciega bay teal, sunset coral accent, serif display) ----------
+const CSS = `
+:root{
+ --paper:#EFEDE4;--card:#FCFBF6;--ink:#182826;--soft:#465350;
+ --faint:#6C736F;--line:#E0DDCE;--line-strong:#CBC7B2;
+ --accent:#1E6F6B;--accent-deep:#155450;--accent-wash:#DCEBE7;
+ --sun:#D9663D;--sun-deep:#B84E29;--sun-wash:#F7E6DC;
+ --ok:#3F7A5B;--ok-wash:#E2EEE5;--warn:#9A6A12;--warn-wash:#F5EAD2;--crit:#A33D2E;--crit-wash:#F6E2DC;
+ --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+ --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+ --mono:ui-monospace,'SF Mono',Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:16.5px;
+ -webkit-font-smoothing:antialiased}
+header{padding:52px 22px 34px;border-bottom:1px solid var(--line)}
+.wrap{max-width:720px;margin:0 auto}
+.brand{font-family:var(--serif);font-size:15px;letter-spacing:.02em;color:var(--soft);margin:0 0 22px}
+.brand b{color:var(--accent-deep);font-weight:600}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(30px,5.4vw,42px);line-height:1.12;margin:0 0 12px;
+ letter-spacing:-.01em;text-wrap:balance}
+header p{color:var(--soft);margin:0;max-width:58ch;font-size:17.5px}
+.chip{display:inline-block;font-family:var(--mono);font-size:12px;color:var(--accent-deep);background:var(--accent-wash);
+ padding:5px 12px;border-radius:99px;margin-top:16px}
+main{max-width:720px;margin:0 auto;padding:30px 22px 70px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:18px 0;
+ box-shadow:0 1px 2px rgba(60,50,30,.04)}
+h2{font-family:var(--serif);font-weight:600;font-size:22px;margin:0 0 10px;letter-spacing:-.005em}
+.pill{display:inline-block;font-family:var(--mono);font-size:11.5px;padding:4px 12px;border-radius:99px;vertical-align:middle}
+.pill.ok{background:var(--ok-wash);color:var(--ok)}.pill.warn{background:var(--warn-wash);color:var(--warn)}
+.pill.teal{background:var(--accent-wash);color:var(--accent-deep)}
+ul.steps{list-style:none;padding:0;margin:0}
+ul.steps li{display:flex;gap:14px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--line)}
+ul.steps li:last-child{border-bottom:none}
+.dot{flex:0 0 24px;height:24px;border-radius:50%;border:2px solid var(--line-strong);margin-top:2px;text-align:center;
+ line-height:21px;font-size:13px;color:#fff;background:transparent;transition:background .3s}
+li.done .dot{background:var(--ok);border-color:var(--ok)}
+li.done span.lbl{color:var(--faint);text-decoration:line-through;text-decoration-color:var(--line-strong)}
+li.next .dot{border-color:var(--sun)}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:14px 0 6px}
+.bar>div{height:100%;background:linear-gradient(90deg,var(--accent),var(--sun));border-radius:99px;
+ transition:width .6s ease}
+.muted{color:var(--faint);font-size:14.5px}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+input,select,textarea{font:inherit;padding:10px 12px;border:1px solid var(--line-strong);border-radius:9px;width:100%;
+ background:#fff;color:var(--ink)}
+input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+input[type="checkbox"],input[type="radio"]{width:auto;min-width:18px;min-height:18px;vertical-align:middle}
+.review-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px 14px;margin:8px 0 12px}.review-grid label{margin:0;font-size:13px}
+label{font-size:13.5px;color:var(--soft);display:block;margin:12px 0 5px;font-weight:500}
+button,a.btn{font:inherit;font-weight:600;background:var(--accent);color:#FDFCF8;border:0;border-radius:10px;
+ padding:11px 20px;cursor:pointer;transition:background .15s;display:inline-block;text-decoration:none}
+button:hover,a.btn:hover{background:var(--accent-deep)}
+button.small,a.btn.small{padding:10px 14px;min-height:44px;font-size:13px;font-weight:500}
+button.ghost,a.btn.ghost{background:transparent;color:var(--accent-deep);border:1.5px solid var(--accent)}
+button.ghost:hover,a.btn.ghost:hover{background:var(--accent-wash)}
+button:focus-visible,a.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+a{color:var(--accent-deep)}
+.addr{font-family:var(--mono);font-size:13px;background:var(--sun-wash);color:var(--ink);padding:14px 16px;
+ border-radius:10px;white-space:pre-line;border:1px solid #EAD3C4}
+.sigpad{border:1.5px dashed var(--line-strong);border-radius:12px;width:100%;touch-action:none;background:#fff;display:block}
+.sigrow{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.anav{display:flex;gap:6px;flex-wrap:wrap;margin-top:20px}
+.anav a{font-family:var(--mono);font-size:12.5px;text-decoration:none;color:var(--soft);padding:6px 13px;
+ border:1px solid var(--line);border-radius:99px;background:var(--card)}
+.anav a:hover{border-color:var(--accent);color:var(--accent-deep)}
+.anav a.on{background:var(--accent);border-color:var(--accent);color:#FDFCF8}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:18px 0}
+a.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;text-align:center;
+ text-decoration:none;color:var(--ink);box-shadow:0 1px 2px rgba(60,50,30,.04)}
+a.kpi:hover{border-color:var(--accent)}
+a.kpi b{font-family:var(--serif);font-size:26px;display:block;line-height:1.2}
+a.kpi span{font-size:12.5px;color:var(--faint)}
+details.sect{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:2px 26px;margin:14px 0;
+ box-shadow:0 1px 2px rgba(60,50,30,.04)}
+details.sect>summary{cursor:pointer;font-family:var(--serif);font-weight:600;font-size:20px;padding:16px 0;
+ list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}
+details.sect>summary::-webkit-details-marker{display:none}
+details.sect>summary::after{content:'+';color:var(--accent);font-size:22px;font-family:var(--sans)}
+details.sect[open]>summary::after{content:'–'}
+details.sect>*:last-child{margin-bottom:18px}
+.attn{border-left:4px solid var(--warn);padding:10px 14px;background:var(--warn-wash);border-radius:8px;margin:8px 0;font-size:15px}
+.attn.crit{border-left-color:var(--crit);background:var(--crit-wash)}
+.attn.okk{border-left-color:var(--ok);background:var(--ok-wash)}
+footer{text-align:center;color:var(--faint);font-size:13px;padding:26px 22px;border-top:1px solid var(--line);margin-top:20px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+@media(max-width:640px){
+ header{padding:34px 18px 24px}
+ main{padding:22px 16px 60px}
+ .card{padding:20px 18px}
+ .review-grid{grid-template-columns:1fr}
+ details.sect{padding:2px 18px}
+ h1{font-size:clamp(26px,7vw,34px)}
+ main [style*="grid-template-columns"]{grid-template-columns:1fr!important;gap:8px!important}
+ table,thead,tbody,th,td,tr{display:block}
+ thead{position:absolute;left:-9999px}
+ td{border-bottom:none;padding:3px 0}
+ tr{border-bottom:1px solid var(--line);padding:10px 0}
+}
+`;
+
+function page(title, headerHtml, bodyHtml, opts) {
+  const o = opts || {};
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f4c5c">${o.index ? '' : '<meta name="robots" content="noindex">'}
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
+<title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body>
+<header><div class="wrap"><p class="brand">Example Island <b>· Unit 405D</b> — Guest Approval</p>${headerHtml}</div></header><main>${bodyHtml}</main>
+<footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a></footer>
+</body></html>`;
+}
+
+// ---------- admin chrome ----------
+const ANAV = [
+  ['/admin', 'Übersicht'],
+  ['/admin/cases', 'Vorgänge'],
+  ['/admin/news', 'Neuigkeiten'],
+  ['/admin/board', 'Board'],
+  ['/admin/contacts', 'Kontakte'],
+  ['/admin/library', 'Bibliothek'],
+  ['/admin/receipts', 'Quittungen'],
+  ['/admin/settings', 'Einstellungen'],
+];
+function adminPage(title, active, headerHtml, bodyHtml) {
+  const nav = `<nav class="anav">${ANAV.map(([href, label]) =>
+    `<a href="${href}"${href === active ? ' class="on"' : ''}>${label}</a>`).join('')}</nav>`;
+  return page(title, headerHtml + nav, bodyHtml);
+}
+
+// ---------- views ----------
+const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Example Island, St. Petersburg, Florida. Fully furnished for monthly stays (30+ nights): in-unit washer & dryer, dishwasher, full kitchen, fast 700-Mbit internet, community pool, smart-lock self-check-in. Minutes from St. Pete Beach, Fort De Soto Park and downtown St. Petersburg. Booking exclusively via Airbnb.';
+const HOME_FAQ = [
+  ['Can I book the condo on this website?',
+   'No — booking runs exclusively through Airbnb (airbnb.com/rooms/DEMOID0002). This site is the official companion portal that handles the condominium association\'s approval paperwork after you book.'],
+  ['What is the minimum stay?',
+   'The condominium association requires a lease term of at least 30 nights, so bookings are monthly. That makes the home ideal for snowbirds, travel professionals and remote workers.'],
+  ['Why does my rental need approval?',
+   'Example Condominium is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. This portal makes the paperwork as painless as possible: forms are filled and signed online, checked automatically with AI and released by Owner only after the quality report is green.'],
+  ['How long does the approval take?',
+   'The association asks applicants to allow up to 15 days after the complete file and fee arrive. Complete the portal early; your personal status page shows live progress.'],
+  ['What is the $100 fee?',
+   'The association charges a non-refundable $100 application fee ($50 community fee plus $50 document-processing fee), paid by the guest via check or money order payable to "Example Condominium". Your status page has the exact mailing instructions.'],
+  ['Are pets allowed?',
+   'No — the association does not permit pets for renters. The home is also non-smoking.'],
+  ['Can my AI assistant help me with the paperwork?',
+   'Yes. Your personal page has a "Copy briefing for your AI assistant" button that hands ChatGPT, Claude or any other assistant everything it needs — only the signature must remain yours.'],
+];
+const FAQ_JSONLD = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: HOME_FAQ.map(([q, a]) => ({ '@type': 'Question', name: q,
+    acceptedAnswer: { '@type': 'Answer', text: a } })),
+});
+const HOME_JSONLD = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'Apartment',
+  name: 'Example Island Bay-View Condo — Unit 405D, Example Condominium',
+  description: HOME_DESC,
+  address: { '@type': 'PostalAddress', streetAddress: '6219 Palma Del Mar Blvd S, Unit 405D',
+    addressLocality: 'St. Petersburg', addressRegion: 'FL', postalCode: '33715', addressCountry: 'US' },
+  numberOfBedrooms: 1,
+  petsAllowed: false,
+  occupancy: { '@type': 'QuantitativeValue', maxValue: 4 },
+  amenityFeature: ['Water view (Boca Ciega Bay)', 'In-unit washer & dryer', 'Dishwasher', 'Full kitchen',
+    '700 Mbit internet (Spectrum)', 'Community pool', 'Smart-lock self-check-in', 'Air conditioning']
+    .map(n => ({ '@type': 'LocationFeatureSpecification', name: n, value: true })),
+  tourBookingPage: 'https://www.airbnb.com/rooms/DEMOID0002',
+  sameAs: ['https://www.airbnb.com/rooms/DEMOID0002'],
+  url: 'https://portal.example.test/',
+});
+
+function landingView() {
+  return page('Example Island Bay-View Condo, St. Petersburg FL — Unit 405D Guest Portal',
+    `<h1>Example Island — your bay-view home at Unit 405D</h1>
+     <p>A fully furnished one-bedroom condo above Boca Ciega Bay in St. Petersburg, Florida, for monthly stays. Booked through Airbnb — and this is your private portal for the condominium association's rental approval, step by step.</p>
+     <span class="chip">Example Island · St. Petersburg, Florida</span>`,
+    `<div class="card"><h2>How it works</h2>
+      <ol>
+        <li><b>Book on Airbnb.</b> After your booking is confirmed, you receive a personal link to this portal via Airbnb chat.</li>
+        <li><b>Complete the paperwork.</b> Your personal page lists exactly which forms the association needs (usually 20–30 minutes; you can save a draft).</li>
+        <li><b>HOA board approval.</b> We submit your complete file to the association. Allow up to 15 days after the file, ID copies and fee arrive.</li>
+        <li><b>Check-in released.</b> Once approved, you receive the door codes and arrival guide.</li>
+      </ol>
+      <p class="muted">Paid rentals must be at least 30 nights and require the association's lease application, a background-check authorization ($100 fee, paid by the guest), the house rules acknowledgment and a lease agreement. Simplified guest registration is reserved for confirmed, non-paying guests.</p>
+     </div>
+     <div class="card"><h2>Already booked? Find your page</h2>
+      <p>Enter your Airbnb confirmation code (looks like <span class="pill teal">HMDEMO0003</span>, in your booking confirmation) and your last name:</p>
+      <form method="post" action="/find" autocomplete="off">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label>Confirmation code</label><input name="code" placeholder="HM…" required></div>
+          <div><label>Last name</label><input name="name" required></div>
+        </div>
+        <p><button>Open my paperwork page</button></p>
+      </form>
+      <p class="muted">Your page is created within about an hour of booking. Can't find it? Just message Owner on Airbnb.</p>
+     </div>
+     <div class="card"><h2>The home</h2>
+      <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
+      <ul class="steps" style="font-size:15px">
+        <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished, minimum 30 nights — ideal for snowbirds, travel professionals and remote workers. Flexible early check-out is fine.</span></div></li>
+        <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast 700-Mbit internet, smart-lock self-check-in, community pool.</span></div></li>
+        <li><div><b>The location</b><br><span class="muted">10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals; about 30 minutes to Tampa International Airport.</span></div></li>
+        <li><div><b>Good to know</b><br><span class="muted">No pets (association rule) and no smoking. Every rental needs the association's approval — that's exactly what this portal takes care of.</span></div></li>
+      </ul>
+      <p><a class="btn" href="https://www.airbnb.com/rooms/DEMOID0002" rel="noopener">Book on Airbnb — Example Island, Unit 405D</a><br>
+      <span class="muted" style="font-size:13.5px">Booking runs exclusively through Airbnb. This site is the official companion portal for the home's approval paperwork.</span></p>
+     </div>
+     <div class="card"><h2>Frequently asked questions</h2>
+      <ul class="steps" style="font-size:15px">${HOME_FAQ.map(([q, a]) => `
+        <li><div><b>${esc(q)}</b><br><span class="muted">${esc(a)}</span></div></li>`).join('')}
+      </ul>
+     </div>`,
+    { index: true, extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://portal.example.test/">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Example Island · Unit 405D">
+<meta property="og:title" content="Example Island Bay-View Condo, St. Petersburg FL — monthly stays">
+<meta property="og:description" content="${esc(HOME_DESC)}"><meta property="og:url" content="https://portal.example.test/">
+<meta name="twitter:card" content="summary">
+<script type="application/ld+json">${HOME_JSONLD}</script>
+<script type="application/ld+json">${FAQ_JSONLD}</script>` });
+}
+
+function statusView(c) {
+  const total = c.steps.length, done = c.steps.filter(s => s.done).length;
+  const pct = Math.round(done / total * 100);
+  const days = daysUntil(c.checkIn);
+  const approved = c.steps.find(s => s.id === 'board_approved')?.done;
+  const nextIdx = c.steps.findIndex(s => !s.done);
+  const banner = (approved
+    ? `<span class="pill ok">Approved — you're all set</span>`
+    : (days <= 10 ? `<span class="pill warn">${days} days to check-in — let's finish the paperwork</span>`
+                  : `<span class="pill teal">${days} days until check-in</span>`))
+    + (c.submission ? ` <span class="pill ok">paperwork submitted to the association ${esc(c.submission.sentAt.slice(0,10))}</span>` : '');
+  const feeState = applicationFeeState(c);
+  const feeBlock = feeState === 'waiver_pending' ? `
+    <div class="card"><h2>Renewal fee review</h2>
+      <p><span class="pill teal">Returning tenants confirmed</span></p>
+      <p>Your prior Board approval is on file. We are asking the association to confirm whether it will waive the $100 application fee under its returning-tenant rule. <b>Please do not mail another payment unless we tell you the waiver was declined.</b></p>
+    </div>` : feeState === 'waived' ? `
+    <div class="card"><h2>Renewal fee</h2>
+      <p><span class="pill ok">$100 fee waived by the association</span></p>
+      <p>No additional application-fee payment is required for this renewal.</p>
+    </div>` : feeState === 'required' ? `
+    <div class="card"><h2>The $100 association fee</h2>
+      <p>This <b>non-refundable $100 application fee</b> consists of a $50 community fee and a $50 document-processing fee. Pay by <b>check or money order only</b> (no cards), made out to <b>"Example Condominium"</b>. Mail it with a short note (unit 405D, your name, rental dates${c.reservationCode ? ', reservation ' + esc(c.reservationCode) : ''}) to:</p>
+      <div class="addr">Example Condominium Association, Inc.
+c/o Example Property Management, Inc.
+570 Carillon Parkway, Suite 210
+St. Petersburg, FL 33716</div>
+      ${c.feeMailed
+        ? `<p style="margin-top:14px"><span class="pill ok">check mailed ${esc(c.feeMailed.slice(0, 10))}</span> <span class="muted">Thank you — we are tracking receipt with the association.</span></p>
+           <form method="post" action="/v/${c.token}/fee-unmailed" onsubmit="return confirm('Remove the mailed status because the envelope was not actually sent?')"><button class="small ghost">I have not mailed it</button></form>`
+        : `<form method="post" action="/v/${c.token}/fee-mailed" style="margin-top:14px" onsubmit="return confirm('Confirm that the envelope with the $100 check or money order is actually in the mail?')">
+             <button>I've mailed the check ✓</button>
+             <span class="muted" style="margin-left:10px">Tap this once your envelope is in the mail — it helps us confirm receipt.</span>
+           </form>`}
+    </div>` : '';
+  const wizardCard = approved ? '' : `
+    <div class="card"><h2>Complete your forms online</h2>
+      <p>Enter your details once and sign online. You can save an unfinished draft and return later. We prepare the association's official PDFs and an AI quality check reviews the complete package for missing data and inconsistencies. Owner confirms the green quality report and explicitly releases the package. Usually takes 20–30 minutes.</p>
+      <p><a class="btn" href="/w/${c.token}">${c.wizard ? 'Review / edit your details' : 'Start the paperwork'}</a>
+      ${c.wizard ? `<span class="pill ok" style="margin-left:10px">details saved ${esc((c.wizard.savedAt || '').slice(0, 10))}</span>` : ''}</p>
+    </div>`;
+  return page(`Your stay ${esc(c.checkIn)} — approval status`,
+    `<h1>Hi ${esc(c.guestName.split(' ')[0])}, here's where your approval stands</h1>
+     <p>Stay: <b>${esc(c.checkIn)} → ${esc(c.checkOut)}</b> (${c.nights} nights, ${c.adults} ${c.adults === 1 ? 'adult' : 'adults'} age 18+${Number(c.expectedMinors || 0) ? `, ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''})${c.reservationCode ? ' · Reservation ' + esc(c.reservationCode) : ''}</p>
+     ${banner}`,
+    wizardCard + `<div class="card">
+       <h2>Progress</h2>
+       <div class="bar"><div style="width:${pct}%"></div></div>
+       <p class="muted">${done} of ${total} steps complete</p>
+       <ul class="steps">${c.steps.map((s, i) => `
+         <li class="${s.done ? 'done' : ''} ${i === nextIdx ? 'next' : ''}">
+           <div class="dot">${s.done ? '✓' : ''}</div>
+           <div><span class="lbl">${esc(s.label)}</span>
+           ${s.done && s.date ? `<div class="muted">done ${esc(s.date.slice(0,10))}</div>` : ''}
+           ${i === nextIdx ? `<div style="color:var(--sun-deep);font-size:14.5px;font-weight:500">← next step</div>` : ''}</div>
+         </li>`).join('')}
+       </ul>
+     </div>
+     ${feeBlock}
+     ${c.submission && !approved ? `
+     <div class="card"><h2>What happens now</h2>
+       <p>Your paperwork is with the association — nothing to do on your end${feeState === 'required' && !c.feeMailed ? ' except mailing the $100 fee' : ''}. The association asks applicants to allow up to 15 days after the complete file and fee arrive. The moment it's approved, you'll get an email from us and your check-in details will follow. This page always shows the live status.</p>
+     </div>` : ''}
+     ${approved ? `
+     <div class="card"><h2>You're all set 🎉</h2>
+       <p>The board has approved your stay. Your check-in details (door codes, arrival guide) will reach you well before arrival — usually via Airbnb chat. Safe travels, and see you at Example Island!</p>
+     </div>` : ''}
+     <div class="card"><h2>Good to know</h2>
+       <ul class="steps" style="font-size:15px">
+         <li><div><b>Why all this paperwork?</b><br><span class="muted">The condominium association (HOA) requires board approval for every rental — it applies to all owners in the building, not just this one. We've made it as painless as we can.</span></div></li>
+         <li><div><b>Is my data safe?</b><br><span class="muted">Your details are used solely for the association's approval file and its automated quality check, transmitted encrypted, and never sold. Processing is limited to the association and the service providers identified in the privacy notice. We never ask for your Social Security number or ID uploads on this site.</span></div></li>
+         <li><div><b>How long does approval take?</b><br><span class="muted">Allow up to 15 days after the complete file, required ID copies and fee reach the association. Please complete everything early. This page and our emails keep you posted.</span></div></li>
+         <li><div><b>Questions or stuck?</b><br><span class="muted">Message Owner anytime via Airbnb chat — replies usually within a few hours.</span></div></li>
+       </ul>
+     </div>`);
+}
+
+// ---------- AI-assistant briefing (guests may share this with their own assistant) ----------
+function guestBrief(c) {
+  const isFull = c.pathType === 'full';
+  const done = c.steps.filter(s => s.done).length;
+  const fields = isFull
+    ? `- For EACH adult (${c.adults} total): first name, full middle name (or “None”), last name, birth date, gender,
+  current street address (street, city, state, ZIP), phone, email,
+  ID type (driver's license or US photo ID), ID number + issuing state, employer name, employer phone.
+- Once per application: automobile make & year & license plate,
+  two personal references (non-relatives: name, phone, address),
+  one or two emergency contacts (name, phone).`
+    : `- For EACH adult (${c.adults} total): first name, full middle name (or “None”), last name, birth date, gender, phone, email.
+- Names and birth dates of any children staying.`;
+  return `# HOA approval briefing — Example Island, Unit 405D (Example Condominium)
+
+This is a summary of a guest's rental-approval paperwork, intended for the guest's
+own AI assistant. You may help the guest prepare and understand their form data.
+IMPORTANT: the e-sign consent checkbox and the drawn signature MUST be completed by
+the guest personally — never sign or consent on their behalf.
+
+## Stay
+- Guest: ${c.guestName} (${c.adults} adult(s))
+- Stay: ${c.checkIn} to ${c.checkOut} (${c.nights} nights)
+- Airbnb reservation: ${c.reservationCode || 'n/a'}
+- Process: ${isFull ? 'full lease application package (required for stays of 30+ nights)' : 'simplified guest registration (stays under 30 nights)'}
+- Days until check-in: ${daysUntil(c.checkIn)}
+
+## Current status: ${done} of ${c.steps.length} steps complete
+${c.steps.map(s => `- [${s.done ? 'x' : ' '}] ${s.label}${s.done && s.date ? ` (done ${s.date.slice(0, 10)})` : ''}`).join('\n')}
+${c.submission ? `- The paperwork package was submitted to the association on ${c.submission.sentAt.slice(0, 10)}.` : ''}
+${c.wizard ? `- The online form was last saved on ${(c.wizard.savedAt || '').slice(0, 10)} and can be edited anytime.` : '- The online form has NOT been filled in yet — that is the next step.'}
+
+## The online form — what the guest should have ready
+Private form link (do not publish): https://portal.example.test/w/${c.token}
+${fields}
+- E-sign consent + drawn signature: guest personally, on the form page.
+- An unfinished draft can be saved and continued later.
+- After saving with all signatures, the system prepares the association's official
+  PDFs for automated quality review. Nothing is sent until Owner explicitly authorizes it.
+- The site never asks for Social Security numbers or photo-ID uploads. Owner confirms
+  the secure ID-copy handoff through the existing Airbnb chat before any HOA submission.
+${isFull ? `
+## The non-refundable $100 association fee (paid by the guest)
+- $50 community fee plus $50 document-processing fee.
+- Check or money order ONLY (no cards).
+- Payable to: "Example Condominium"
+- Enclose a note: Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / ' + c.reservationCode : ''}
+- Mail to: Example Condominium Association, Inc.,
+  c/o Example Property Management, Inc., 200 Management Road, Example City, FL 00000
+- ${c.feeMailed ? `The guest reported the check as mailed on ${c.feeMailed.slice(0, 10)}; receipt is being tracked.` : 'Once the envelope is in the mail, the guest should tap "I\'ve mailed the check" on the status page.'}
+` : ''}
+## Timeline & contact
+- Allow up to 15 days after the complete file${isFull ? ', required ID copies and fee' : ''} arrive. Complete everything early.
+- Live status page (private): https://portal.example.test/v/${c.token}
+- Questions: message Owner (the host) via Airbnb chat — replies usually within hours.
+`;
+}
+function aiHelperCard(token) {
+  return `<div class="card"><h2>Using an AI assistant?</h2>
+    <p class="muted">If ChatGPT, Claude or another assistant helps you with paperwork, hand it everything in one go — your live status, the exact fields to prepare and the fee instructions. Only the signature must remain yours.</p>
+    <p class="sigrow">
+      <button type="button" class="small ghost" id="aibrief">Copy briefing for your AI assistant</button>
+      <a class="muted" style="font-size:13.5px" href="/v/${token}/brief.txt" target="_blank">open as plain text →</a>
+      <span id="aimsg" class="muted"></span>
+    </p>
+   </div>
+   <script>
+   document.getElementById('aibrief').onclick = async () => {
+     try {
+       const r = await fetch('/v/${token}/brief.txt');
+       await navigator.clipboard.writeText(await r.text());
+       document.getElementById('aimsg').textContent = 'Copied ✓ — paste it into your assistant.';
+     } catch (e) { window.open('/v/${token}/brief.txt', '_blank'); }
+   };
+   </script>`;
+}
+
+function occupancyView(c, error) {
+  const sourceCount = Number(c.airbnbAdults || c.adults || 1);
+  return page('Confirm who is staying — Demo Unit',
+    `<h1>One quick age check before the HOA forms</h1>
+     <p>Airbnb lists ${sourceCount} ${sourceCount === 1 ? '“adult” guest' : '“adult” guests'}, but its age categories are different from the association's.</p>`,
+    `<div class="card"><h2>Who completes an adult application?</h2>
+      <div class="attn">Airbnb counts guests aged 13–17 as adults. <b>Palma del Mar uses age 18+</b> for adult applications, background authorization, photo ID and signatures. A 17-year-old is therefore listed as a minor occupant and does not complete or sign an adult application.</div>
+      ${error ? `<div class="attn crit">${esc(error)}</div>` : ''}
+      <form method="post" action="/w/${c.token}/occupancy">
+        <label>How many occupants will be 18 or older at check-in? *</label>
+        <select name="hoaAdults" required>
+          <option value="">Choose…</option>
+          <option value="1">1 adult (age 18+)</option>
+          <option value="2">2 adults (age 18+)</option>
+        </select>
+        <label>How many occupants will be under 18 at check-in? *</label>
+        <select name="minors" required>
+          <option value="">Choose…</option>
+          <option value="0">0 minors</option>
+          <option value="1">1 minor</option>
+          <option value="2">2 minors</option>
+        </select>
+        <p class="muted">The automated form supports up to two adults age 18+, up to two minors and four occupants total. If your group is different, save nothing and message Owner through Airbnb.</p>
+        <p><button type="submit">Confirm occupancy and continue</button></p>
+      </form>
+    </div>`);
+}
+
+function wizardView(c, saved) {
+  const w = c.wizard || {};
+  const adults = w.adults || [];
+  const A = (i, f) => {
+    const adult = adults[i] || {};
+    return esc(adult[f] || (f === 'middleName' ? adult.middleInitial : '') || '');
+  };
+  const isFull = c.pathType === 'full';
+  const adultBlock = (i) => `
+    <div class="card"><h2>Adult ${i + 1}${i === 0 ? ' (main guest)' : ''}</h2>
+      <div style="display:grid;grid-template-columns:2fr 1.5fr 2fr;gap:10px">
+        <div><label>First name *</label><input name="a${i}_firstName" value="${A(i,'firstName')}" autocomplete="section-adult${i} given-name" maxlength="60" required></div>
+        <div><label>Full middle name(s), or “None” *</label><input name="a${i}_middleName" value="${A(i,'middleName')}" maxlength="80" required></div>
+        <div><label>Last name *</label><input name="a${i}_lastName" value="${A(i,'lastName')}" autocomplete="section-adult${i} family-name" maxlength="60" required></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Birth date${isFull ? ' *' : ''}</label><input name="a${i}_birthDate" type="date" value="${A(i,'birthDate')}" autocomplete="bday" ${isFull ? 'required' : ''}></div>
+        <div><label>Gender${isFull ? ' (as requested by the HOA) *' : ''}</label><input name="a${i}_gender" value="${A(i,'gender')}" placeholder="As shown on ID" ${isFull ? 'required' : ''}></div>
+      </div>
+      ${isFull ? `
+      <label>Current street address *</label><input name="a${i}_street" value="${A(i,'street')}" autocomplete="section-adult${i} street-address" maxlength="120" required>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+        <div><label>City *</label><input name="a${i}_city" value="${A(i,'city')}" autocomplete="section-adult${i} address-level2" maxlength="60" required></div>
+        <div><label>State *</label><input name="a${i}_state" value="${A(i,'state')}" autocomplete="section-adult${i} address-level1" maxlength="30" required></div>
+        <div><label>ZIP *</label><input name="a${i}_zip" value="${A(i,'zip')}" autocomplete="section-adult${i} postal-code" maxlength="16" required></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div><label>Phone *</label><input name="a${i}_phone" type="tel" inputmode="tel" value="${A(i,'phone')}" autocomplete="section-adult${i} tel" maxlength="32" required></div>
+        <div><label>Alternate phone</label><input name="a${i}_altPhone" type="tel" inputmode="tel" value="${A(i,'altPhone')}" maxlength="32"></div>
+        <div><label>Email *</label><input name="a${i}_email" type="email" value="${A(i,'email')}" autocomplete="section-adult${i} email" maxlength="254" required></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px">
+        <div><label>ID type *</label><select name="a${i}_idType" required><option value="">Choose…</option><option value="drivers_license" ${A(i,'idType') === 'drivers_license' ? 'selected' : ''}>Driver's license</option><option value="us_photo_id" ${A(i,'idType') === 'us_photo_id' ? 'selected' : ''}>US photo ID</option></select></div>
+        <div><label>ID number *</label><input name="a${i}_idNumber" value="${A(i,'idNumber')}" maxlength="40" required></div>
+        <div><label>Issuing state *</label><input name="a${i}_idState" value="${A(i,'idState')}" maxlength="30" required></div>
+      </div>
+      <p class="muted">If you do not have a US driver's license or US photo ID, save a draft and message Owner through Airbnb before continuing.</p>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div><label>Employer / occupation status *</label><input name="a${i}_employer" value="${A(i,'employer')}" placeholder="Employer, self-employed, or retired" maxlength="80" required></div>
+        <div><label>Employer phone *</label><input name="a${i}_employerPhone" type="tel" value="${A(i,'employerPhone')}" placeholder="N/A if retired" maxlength="32" required></div>
+      </div>` : (i === 0 ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><label>Phone *</label><input name="a${i}_phone" type="tel" inputmode="tel" value="${A(i,'phone')}" autocomplete="tel" required></div>
+        <div><label>Email *</label><input name="a${i}_email" type="email" value="${A(i,'email')}" autocomplete="email" required></div>
+      </div>
+      <label>Home street address *</label><input name="a${i}_street" value="${A(i,'street')}" autocomplete="street-address" required>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+        <div><label>City *</label><input name="a${i}_city" value="${A(i,'city')}" autocomplete="address-level2" required></div>
+        <div><label>State *</label><input name="a${i}_state" value="${A(i,'state')}" autocomplete="address-level1" required></div>
+        <div><label>ZIP *</label><input name="a${i}_zip" value="${A(i,'zip')}" autocomplete="postal-code" required></div>
+      </div>` : '')}
+    </div>`;
+  const extras = isFull ? `
+    ${Number(c.expectedMinors || 0) > 0 ? `<div class="card"><h2>Minor occupants (under 18)</h2>
+      <p class="muted">Minors are listed as occupants on the lease application. They do not complete a background authorization, provide photo ID here or sign the adult forms.</p>
+      ${Array.from({ length: Number(c.expectedMinors || 0) }, (_, i) => `
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div><label>Minor ${i + 1} name *</label><input name="ch${i}_name" value="${esc(((w.children||[])[i]||{}).name||'')}" maxlength="120" required></div>
+        <div><label>Minor ${i + 1} birth date *</label><input name="ch${i}_birthDate" type="date" value="${esc(((w.children||[])[i]||{}).birthDate||'')}" required></div>
+      </div>`).join('')}
+    </div>` : ''}
+    <div class="card"><h2>Vehicle (optional)</h2>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+        <div><label>Make / model</label><input name="auto_make" value="${esc((w.auto||{}).make||'')}"></div>
+        <div><label>Year</label><input name="auto_year" value="${esc((w.auto||{}).year||'')}"></div>
+        <div><label>License plate</label><input name="auto_plate" value="${esc((w.auto||{}).plate||'')}"></div>
+      </div>
+    </div>
+    <div class="card"><h2>References (non-relatives)</h2>
+      ${[0,1].map(i => `
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div><label>Name ${i+1} *</label><input name="ref${i}_name" value="${esc(((w.references||[])[i]||{}).name||'')}" required></div>
+        <div><label>Phone *</label><input name="ref${i}_phone" type="tel" value="${esc(((w.references||[])[i]||{}).phone||'')}" required></div>
+      </div>
+      <label>Address *</label><input name="ref${i}_address" value="${esc(((w.references||[])[i]||{}).address||'')}" required>`).join('')}
+    </div>
+    <div class="card"><h2>Emergency contacts</h2>
+      ${[0,1].map(i => `
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div><label>Name ${i+1} *</label><input name="em${i}_name" value="${esc(((w.emergency||[])[i]||{}).name||'')}" required></div>
+        <div><label>Phone *</label><input name="em${i}_phone" type="tel" value="${esc(((w.emergency||[])[i]||{}).phone||'')}" required></div>
+      </div>`).join('')}
+    </div>` : `
+    <div class="card"><h2>Children staying (if any)</h2>
+      ${[0,1,2].map(i => `
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+        <div><label>Child ${i+1} name</label><input name="ch${i}_name" value="${esc(((w.children||[])[i]||{}).name||'')}"></div>
+        <div><label>Birth date</label><input name="ch${i}_birthDate" type="date" value="${esc(((w.children||[])[i]||{}).birthDate||'')}"></div>
+      </div>`).join('')}
+    </div>`;
+  const rulesSection = isFull ? `
+    <div class="card"><h2>Rules &amp; Regulations</h2>
+      <p>Please open and review the association's <a href="/forms/rules-and-regulations.pdf" target="_blank" rel="noopener">Rules &amp; Regulations (PDF)</a> before signing.</p>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
+        <input type="checkbox" name="rules_acknowledged" value="yes" style="width:auto;margin-top:4px" ${w.rulesAcknowledged ? 'checked' : ''} required>
+        <span>I have reviewed the Rules &amp; Regulations and agree to comply with them during the stay.</span>
+      </label>
+    </div>` : '';
+  const signedCount = adults.filter(x => x && x.sigPng).length;
+  const downloads = w.savedAt ? `
+    <div class="card"><h2>Your draft documents</h2>
+      <p>${signedCount ? 'Signed online by ' + signedCount + ' guest(s) and prepared for automated quality review. ' : ''}Review carefully${isFull ? ' — the SS# field stays blank on purpose and ID copies are handled separately through a secure route confirmed by Owner in Airbnb chat' : ''}.</p>
+      <p>
+      ${isFull
+        ? `<a class="btn" href="/w/${c.token}/pdf/lease-application">1. Lease Application</a>
+           <a class="btn ghost" href="/w/${c.token}/pdf/background-authorization">2. Background Authorization</a>
+           <a class="btn ghost" href="/w/${c.token}/pdf/rules-and-regulations">3. Rules &amp; acknowledgment</a>
+           <a class="btn ghost" href="/w/${c.token}/pdf/lease-agreement">4. Lease Agreement</a>`
+        : `<a class="btn" href="/w/${c.token}/pdf/guest-registration">Guest Registration (PDF)</a>`}
+      </p>
+    </div>` : '';
+  const sigSection = `
+    <div class="card"><h2>Sign online</h2>
+      <p class="muted">Draw each adult's signature below — finger on a phone works best. Each adult must personally provide their own signature. The signatures are placed on the association's forms; an automated quality review checks the complete package, and Owner explicitly authorizes any external submission.</p>
+      ${Array.from({ length: c.adults }, (_, i) => `
+      <label>Signature — Adult ${i + 1}${adults[i] && adults[i].sigPng ? ' <span class="pill ok">stored</span>' : ''}</label>
+      <canvas class="sigpad" data-i="${i}" width="640" height="170" role="img" aria-label="Signature pad for adult ${i + 1}" tabindex="0"></canvas>
+      <div class="sigrow"><button type="button" class="small ghost" data-clear="${i}">Clear new drawing</button>
+        ${adults[i] && adults[i].sigPng ? `<label style="display:inline-flex;gap:7px;align-items:center;margin:0;font-weight:400"><input type="checkbox" name="a${i}_remove_sig" value="yes"> Remove stored signature</label>` : ''}
+      </div>
+      <input type="hidden" name="a${i}_sig" value="">
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
+        <input type="checkbox" name="a${i}_esign_consent" value="yes" ${adults[i] && adults[i].esignConsent ? 'checked' : ''} required>
+        <span>Adult ${i + 1} confirms this is their own legal electronic signature and agrees it may be applied to the four listed HOA documents.</span>
+      </label>`).join('')}
+    </div>`;
+  const sigScript = `
+    <script>
+    const pads = [...document.querySelectorAll('canvas.sigpad')].map(cv => {
+      const ctx = cv.getContext('2d');
+      ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a2a6b';
+      let drawing = false, drawn = false;
+      const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height }; };
+      cv.addEventListener('pointerdown', e => { drawing = true; drawn = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); });
+      cv.addEventListener('pointermove', e => { if (!drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); });
+      ['pointerup','pointerleave'].forEach(ev => cv.addEventListener(ev, () => drawing = false));
+      return { cv, isDrawn: () => drawn, reset: () => { ctx.clearRect(0,0,cv.width,cv.height); drawn = false; } };
+    });
+    document.querySelectorAll('[data-clear]').forEach(btn => btn.onclick = () => pads[+btn.dataset.clear].reset());
+    document.querySelector('form').addEventListener('submit', () => {
+      pads.forEach((p, i) => {
+        if (p.isDrawn()) document.querySelector('[name=a' + i + '_sig]').value = p.cv.toDataURL('image/png');
+      });
+    });
+    </script>`;
+  return page('Your paperwork — Demo Unit',
+    `<h1>Your paperwork, filled &amp; signed online</h1>
+     <p>Stay ${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.adults} adult${c.adults === 1 ? '' : 's'} age 18+${Number(c.expectedMinors || 0) ? ` · ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''} · ${isFull ? 'full HOA application package' : 'guest registration'}</p>
+     ${saved === 'ready' ? '<span class="pill ok">Complete — ready for Owner to review</span>' : saved === 'draft' ? '<span class="pill warn">Draft saved — some required details or signatures are still missing below</span>' : ''}`,
+    `${downloads}
+     <form method="post" action="/w/${c.token}">
+       ${Array.from({ length: c.adults }, (_, i) => adultBlock(i)).join('')}
+       ${extras}
+       ${rulesSection}
+       ${sigSection}
+       <div class="card">
+         <p class="muted">We never ask for your Social Security number online. Where the association's form requires it, the field stays blank. Photo IDs are not uploaded here either. After your forms are complete, Owner will confirm the secure handoff through your existing Airbnb chat. The HOA package cannot be sent until the required ID copies have been received securely.</p>
+         <p style="display:flex;gap:10px;flex-wrap:wrap">
+           <button type="submit" name="saveMode" value="draft" formnovalidate class="ghost">Save draft and continue later</button>
+           <button type="submit" name="saveMode" value="complete">Check completeness &amp; prepare quality review</button>
+         </p>
+       </div>
+     </form>
+     ${sigScript}`);
+}
+
+function settingsView(hasSig, liveMode, msg) {
+  return adminPage('Einstellungen — Demo Unit Admin', '/admin/settings',
+    `<h1>Einstellungen</h1><p>Automatik, Unterschrift und Zugänge — alles, was das System am Laufen hält.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<div class="card"><h2>Versandmodus nach deiner Freigabe</h2>
+      <p style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        ${liveMode
+          ? '<span class="pill ok">LIVE — nach deiner Prüfung gehen Pakete an die Verwaltung</span>'
+          : '<span class="pill warn">TESTMODUS — nach deiner Prüfung gehen Pakete nur an dich (contact008@example.test)</span>'}
+        <form method="post" action="/admin/submit-live" style="display:inline" onsubmit="return confirm('${liveMode ? 'Wirklich auf TESTMODUS zurückschalten?' : 'LIVE-Versand wirklich aktivieren? Empfänger: Example Property Management und Keila; CC Owner.'}')">
+          <input type="hidden" name="mode" value="${liveMode ? 'off' : 'yes'}">
+          ${liveMode ? '' : '<label style="display:inline-flex;gap:7px;align-items:center;margin:0 8px"><span>Zum Aktivieren LIVE eingeben:</span><input name="confirm" pattern="LIVE" required style="width:90px"></label>'}
+          <button class="small ${liveMode ? 'ghost' : ''}">${liveMode ? 'Auf Testmodus zurückschalten' : 'LIVE-Versand aktivieren'}</button>
+        </form>
+      </p>
+      <p class="muted">Der Gast kann Daten und Signaturen nur vorbereiten. Die automatisierte Qualitätsprüfung kontrolliert das aktuelle Vier-Dokumente-Paket; danach bestätigst du den grünen Bericht und löst den Versand mit einem eigenen Bestätigungsklick aus. Ohne diese Owner-Freigabe wird niemals an die Verwaltung gesendet. LIVE darf erst aktiviert werden, wenn der sichere Übermittlungsweg für die Ausweiskopien verbindlich bestätigt und im jeweiligen Vorgang belegt ist. Du bekommst je Versand eine Telegram-Nachricht — und einen 🚨-Alarm, wenn etwas hakt.</p>
+    </div>
+    <div class="card"><h2>Deine Unterschrift</h2>
+      ${hasSig
+        ? '<p><span class="pill ok">Unterschrift hinterlegt</span> <span class="muted">— wird ausschließlich beim von dir geprüften und ausdrücklich freigegebenen finalen Paket eingesetzt. Neu zeichnen und speichern überschreibt sie.</span></p>'
+        : '<p><span class="pill warn">noch keine Unterschrift hinterlegt</span> <span class="muted">— ohne sie kann kein finales Paket freigegeben werden.</span></p>'}
+      <p class="muted">Mit Finger (Handy) oder Trackpad/Maus im Feld unterschreiben. Groß und mittig — sie wird automatisch passend skaliert.</p>
+      <canvas id="pad" width="700" height="220" style="border:1.5px dashed var(--line);border-radius:8px;width:100%;max-width:700px;touch-action:none;background:#fff"></canvas>
+      <p>
+        <button id="save">Unterschrift speichern</button>
+        <button id="clear" class="ghost" type="button" style="margin-left:8px">Neu zeichnen</button>
+        <span id="msg" class="muted" style="margin-left:10px"></span>
+      </p>
+    </div>
+    <div class="card"><h2>Zugänge & Anbindung</h2>
+      <ul class="steps">
+        <li><div><b>Admin-Login</b><br><span class="muted">Benutzer <b>markus</b>; das Passwort liegt in Bitwarden (hermes). Gilt für alle /admin-Seiten.</span></div></li>
+        <li><div><b>Read-only-API für Hermes/GBrain</b><br><span class="muted">GET /api/ro/summary · /cases · /contacts · /library · /receipts — Token im Header X-RO-Token (Bitwarden: ISLA_PORTAL_READONLY_TOKEN). Nur Lesen, Änderungen sind technisch ausgeschlossen.</span></div></li>
+        <li><div><b>Wächter im Hintergrund</b><br><span class="muted">Cloudflare-Worker „isla-cron": alle 30 Minuten Gmail-Abruf (neue Airbnb-Buchung → Vorgang wird angelegt, Verwaltungs-Mail → Approval wird erkannt), täglich 08:00 Panama-Zeit Erinnerungs-Check mit Telegram-Nachricht.</span></div></li>
+      </ul>
+    </div>
+    <script>
+    const cv = document.getElementById('pad'), ctx = cv.getContext('2d');
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a2a6b';
+    let drawing = false, drawn = false;
+    const pos = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height }; };
+    cv.addEventListener('pointerdown', e => { drawing = true; drawn = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); });
+    cv.addEventListener('pointermove', e => { if (!drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); });
+    ['pointerup','pointerleave'].forEach(ev => cv.addEventListener(ev, () => drawing = false));
+    document.getElementById('clear').onclick = () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; };
+    document.getElementById('save').onclick = async () => {
+      if (!drawn) { document.getElementById('msg').textContent = 'Bitte erst unterschreiben.'; return; }
+      const resp = await fetch('/admin/signature', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: cv.toDataURL('image/png') });
+      document.getElementById('msg').textContent = resp.ok ? 'Gespeichert ✓ — wird ab sofort eingesetzt.' : 'Fehler beim Speichern.';
+    };
+    </script>`);
+}
+
+// ---------- library ----------
+const LIB_CATS = [
+  ['hoa-formulare', 'HOA — Formulare & Regeln'],
+  ['hoa-protokolle', 'HOA — Protokolle & Meetings'],
+  ['hoa-finanzen', 'HOA — Finanzen & Budgets'],
+  ['hoa-mitteilungen', 'HOA — Mitteilungen & Notices'],
+  ['hoa-sonstiges', 'HOA — Sonstiges'],
+  ['faelle', 'Vergangene Vermietungen (Fälle)'],
+  ['versicherung', 'Versicherung'],
+  ['grundbuch', 'Grundbuch & Kauf'],
+  ['steuer', 'Steuer (US)'],
+  ['vermietung', 'Vermietung'],
+  ['dienstleister', 'Dienstleister & Handwerker'],
+];
+function libDisplayName(key) {
+  let n = key.split('/').pop();
+  n = n.replace(/^\d{4}-\d{2}-\d{2}-\d+-669-/, '').replace(/^\d{4}-\d{2}-\d{2}-\d+-/, '')
+       .replace(/--[0-9a-f]{12}(\.pdf)$/i, '$1').replace(/gmail-attachment-/, '');
+  return n;
+}
+async function libList(env) {
+  const out = [];
+  let cursor;
+  do {
+    const r = await env.CASES.list({ prefix: 'lib:', cursor, limit: 1000 });
+    out.push(...r.keys.map(k => k.name));
+    cursor = r.list_complete ? null : r.cursor;
+  } while (cursor);
+  return out;
+}
+function libraryView(keys, msg) {
+  const groups = LIB_CATS.map(([cat, label]) => {
+    const files = keys.filter(k => k.startsWith(`lib:${cat}/`)).sort((a, b) => libDisplayName(a).localeCompare(libDisplayName(b)));
+    if (!files.length) return '';
+    return `<details class="sect libcat" data-cat="${cat}"><summary>${esc(label)} <span class="muted" style="font-size:14px">(${files.length})</span></summary>
+      <ul class="steps">${files.map(k => `
+        <li class="libfile" data-name="${esc(libDisplayName(k).toLowerCase())}">
+          <div style="flex:1"><a href="/admin/library/f/${encodeURIComponent(k.slice(4))}" target="_blank">${esc(libDisplayName(k))}</a></div>
+          <form method="post" action="/admin/library/delete" onsubmit="return confirm('Datei löschen?')">
+            <input type="hidden" name="key" value="${esc(k)}"><button class="small ghost">×</button>
+          </form>
+        </li>`).join('')}
+      </ul></details>`;
+  }).join('');
+  return adminPage('Bibliothek — Demo Unit Admin', '/admin/library',
+    `<h1>Bibliothek</h1><p>Alle Unterlagen zur Wohnung — HOA, vergangene Fälle, Versicherung, Grundbuch, Steuer. Kategorien aufklappen oder einfach suchen.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<div class="card">
+      <input id="libsearch" placeholder="Suchen … (z. B. rules, minutes, approval, quote)" style="font-size:16px">
+     </div>
+     ${groups}
+     <div class="card"><h2>Datei hochladen</h2>
+      <form method="post" action="/admin/library/upload" enctype="multipart/form-data">
+        <label>Kategorie</label>
+        <select name="cat">${LIB_CATS.map(([c, l]) => `<option value="${c}">${esc(l)}</option>`).join('')}</select>
+        <label>Datei</label><input type="file" name="file" required>
+        <p><button>Hochladen</button></p>
+      </form>
+     </div>
+     <script>
+     document.getElementById('libsearch').addEventListener('input', e => {
+       const q = e.target.value.toLowerCase().trim();
+       document.querySelectorAll('.libfile').forEach(li => li.style.display = !q || li.dataset.name.includes(q) ? '' : 'none');
+       document.querySelectorAll('.libcat').forEach(c => {
+         const any = [...c.querySelectorAll('.libfile')].some(li => li.style.display !== 'none');
+         c.style.display = any ? '' : 'none';
+         c.open = q ? any : false;
+       });
+     });
+     </script>`);
+}
+
+// ---------- receipts ----------
+const RCPT_CATS = [
+  ['hoa-gebuehren', 'HOA-Gebühren & Beiträge'],
+  ['airbnb', 'Airbnb (Auszahlungen & Gebühren)'],
+  ['turno', 'Turno / Reinigung (DemoGivenNameD)'],
+  ['strom', 'Strom (Duke Energy)'],
+  ['versicherung', 'Versicherung'],
+  ['steuern', 'Steuern'],
+  ['maut', 'Maut & Transport (SunPass)'],
+  ['anschaffungen', 'Anschaffungen & Reparaturen'],
+];
+
+// ---------- receipts export (per year, by email) ----------
+const EXPORT_RECIPIENTS = {
+  usa:     { to: 'contact009@example.test', name: 'DemoGivenNameE DemoNameO — Hamilton & Associates (US-Steuerberaterin)', lang: 'en' },
+  de:      { to: 'contact004@example.test', name: 'Dr. DemoSurnameH — DemoSurnameH & Balfanz (Steuerberater DE)', lang: 'de' },
+  demoContactA: { to: 'contact003@example.test', name: 'DemoGivenNameA DemoNameB', lang: 'de' },
+};
+function rcptYear(key) {
+  const m = libDisplayName(key).match(/20\d{2}/) || key.match(/20\d{2}/);
+  return m ? m[0] : 'ohne-jahr';
+}
+async function exportReceipts(env, year, who) {
+  const keys = (await rcptList(env)).filter(k => rcptYear(k) === year)
+    .sort((a, b) => a.localeCompare(b));
+  if (!keys.length) throw new Error(`keine Belege für ${year}`);
+  const MAX = 15 * 1024 * 1024; // raw bytes per mail; base64 bleibt unter Gmails 25-MB-Grenze
+  const batches = [[]];
+  let size = 0;
+  for (const k of keys) {
+    const data = await env.CASES.get(k, 'arrayBuffer');
+    if (!data) continue;
+    if (size + data.byteLength > MAX && batches[batches.length - 1].length) { batches.push([]); size = 0; }
+    batches[batches.length - 1].push({ key: k, filename: libDisplayName(k), bytes: new Uint8Array(data) });
+    size += data.byteLength;
+  }
+  const catLabel = (k) => (RCPT_CATS.find(([c]) => c === k.slice(5).split('/')[0]) || [null, k.slice(5).split('/')[0]])[1];
+  for (let i = 0; i < batches.length; i++) {
+    const part = batches.length > 1 ? (who.lang === 'en' ? ` (part ${i + 1} of ${batches.length})` : ` (Teil ${i + 1} von ${batches.length})`) : '';
+    const list = batches[i].map(a => `  • [${catLabel(a.key)}] ${a.filename}`).join('\n');
+    const subject = (who.lang === 'en'
+      ? `Receipts ${year} — Condo Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg FL`
+      : `Belege ${year} — Wohnung 405D, 6219 Palma Del Mar Blvd S, St. Petersburg FL`) + part;
+    const text = who.lang === 'en'
+      ? `Hello DemoGivenNameE,\n\nattached are the receipts and statements for tax year ${year} for my rental condo (Unit 405D, 100 Example Avenue, Example City, FL 00000 — Parcel account DEMO-PARCEL)${part}:\n\n${list}\n\nPlease let me know if anything is missing for the 1040-NR.\n\nBest regards,\nProperty Owner`
+      : `Hallo,\n\nanbei die Belege des Jahres ${year} zur Wohnung 405D, 6219 Palma Del Mar Blvd S, St. Petersburg, Florida${part}:\n\n${list}\n\nAutomatisch versandt aus dem Verwaltungsportal portal.example.test.\n\nViele Grüße\nOwner`;
+    await sendViaGmail(env, {
+      to: [who.to], cc: ['contact008@example.test'],
+      subject, text,
+      attachments: batches[i].map(({ filename, bytes }) => ({ filename, bytes })),
+    });
+  }
+  return { files: batches.flat().length, mails: batches.length };
+}
+
+// ---------- board (Hinweise & Merkzettel) ----------
+function boardView(notes, msg) {
+  const open = notes.filter(n => !n.done), done = notes.filter(n => n.done);
+  const note = (n) => `
+    <li><div style="flex:1">
+      <b>${esc(n.title)}</b> <span class="muted" style="font-family:var(--mono);font-size:11.5px">${esc((n.createdAt || '').slice(0, 10))}</span>
+      ${n.done ? '<span class="pill ok">erledigt</span>' : ''}
+      ${n.text ? `<br><span class="${n.done ? 'muted' : ''}" style="white-space:pre-wrap">${esc(n.text)}</span>` : ''}
+    </div>
+    <div style="display:flex;gap:6px;flex-direction:column">
+      <form method="post" action="/admin/board/toggle"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ${n.done ? 'ghost' : ''}">${n.done ? 'reaktivieren' : 'erledigt ✓'}</button></form>
+      <form method="post" action="/admin/board/del" onsubmit="return confirm('Hinweis löschen?')"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ghost">×</button></form>
+    </div></li>`;
+  return adminPage('Board — Demo Unit Admin', '/admin/board',
+    `<h1>Board</h1><p>Merkzettel rund um Wohnung, Konten und Behörden — Dinge, die nicht vergessen werden dürfen.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<div class="card"><h2>Offen ${open.length ? `<span class="muted" style="font-size:14px">(${open.length})</span>` : ''}</h2>
+      ${open.length ? `<ul class="steps">${open.map(note).join('')}</ul>` : '<p class="muted">Nichts offen. 🌴</p>'}</div>
+     <div class="card"><h2>Neuer Hinweis</h2>
+      <form method="post" action="/admin/board/add">
+        <label>Titel</label><input name="title" required>
+        <label>Text</label><textarea name="text" rows="4" style="width:100%"></textarea>
+        <p><button class="small">Auf das Board</button></p>
+      </form></div>
+     ${done.length ? `<details class="sect"><summary>Erledigt <span class="muted" style="font-size:14px">(${done.length})</span></summary><ul class="steps">${done.map(note).join('')}</ul></details>` : ''}`);
+}
+async function rcptList(env) {
+  const out = [];
+  let cursor;
+  do {
+    const r = await env.CASES.list({ prefix: 'rcpt:', cursor, limit: 1000 });
+    out.push(...r.keys.map(k => k.name));
+    cursor = r.list_complete ? null : r.cursor;
+  } while (cursor);
+  return out;
+}
+function receiptsView(keys, msg) {
+  const groups = RCPT_CATS.map(([cat, label]) => {
+    const files = keys.filter(k => k.startsWith(`rcpt:${cat}/`)).sort((a, b) => libDisplayName(a).localeCompare(libDisplayName(b)));
+    return `<div class="card libcat" data-cat="${cat}"><h2>${esc(label)} <span class="muted" style="font-size:14px">(${files.length})</span></h2>
+      ${files.length ? `<ul class="steps">${files.map(k => `
+        <li class="libfile" data-name="${esc(libDisplayName(k).toLowerCase())}">
+          <div style="flex:1"><a href="/admin/receipts/f/${encodeURIComponent(k.slice(5))}" target="_blank">${esc(libDisplayName(k))}</a></div>
+          <form method="post" action="/admin/receipts/delete" onsubmit="return confirm('Beleg löschen?')">
+            <input type="hidden" name="key" value="${esc(k)}"><button class="small ghost">×</button>
+          </form>
+        </li>`).join('')}
+      </ul>` : '<p class="muted">noch keine Belege — unten hochladen</p>'}</div>`;
+  }).join('');
+  const years = [...new Set(keys.map(rcptYear))].sort().reverse();
+  const yearCount = (y) => keys.filter(k => rcptYear(k) === y).length;
+  return adminPage('Quittungen — Demo Unit Admin', '/admin/receipts',
+    `<h1>Quittungsordner</h1><p>Alle Belege zur Wohnung an einem Ort — für Steuer, Nebenkostenabrechnung und den Überblick.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<div class="card">
+      <input id="libsearch" placeholder="Beleg suchen …" style="font-size:16px">
+      <p class="muted" style="margin-bottom:0">Laufende Quellen: Turno-Belege in der Turno-App unter „Receipts" · Duke-Energy-Rechnungen im Duke-Konto · Airbnb-Auszahlungen unter Verlauf → Auszahlungen (CSV). Einfach als PDF sichern und hier hochladen.</p>
+     </div>
+     <div class="card"><h2>Jahres-Export per E-Mail</h2>
+      <p class="muted">Verschickt alle Belege eines Jahres als PDF-Anhänge (bei großen Mengen automatisch aufgeteilt). Du bekommst jede Mail als CC und eine Telegram-Bestätigung.</p>
+      <form method="post" action="/admin/receipts/export">
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
+          <div><label>Jahr</label>
+            <select name="year">${years.map(y => `<option value="${esc(y)}">${esc(y)} (${yearCount(y)} Belege)</option>`).join('')}</select></div>
+          <div><label>Empfänger</label>
+            <select name="to">
+              <option value="usa">Steuerberaterin USA — DemoGivenNameE DemoNameO (Hamilton &amp; Associates)</option>
+              <option value="de">Steuerberater Deutschland — Dr. DemoSurnameH (DemoSurnameH &amp; Balfanz)</option>
+              <option value="demoContactA">DemoGivenNameA (contact003@example.test)</option>
+            </select></div>
+        </div>
+        <p><button>Jetzt exportieren &amp; senden</button></p>
+      </form>
+     </div>
+     ${groups}
+     <div class="card"><h2>Beleg hochladen</h2>
+      <form method="post" action="/admin/receipts/upload" enctype="multipart/form-data">
+        <label>Kategorie</label>
+        <select name="cat">${RCPT_CATS.map(([c, l]) => `<option value="${c}">${esc(l)}</option>`).join('')}</select>
+        <label>Datei</label><input type="file" name="file" required>
+        <p><button>Hochladen</button></p>
+      </form>
+     </div>
+     <script>
+     document.getElementById('libsearch').addEventListener('input', e => {
+       const q = e.target.value.toLowerCase().trim();
+       document.querySelectorAll('.libfile').forEach(li => li.style.display = !q || li.dataset.name.includes(q) ? '' : 'none');
+     });
+     </script>`);
+}
+
+// ---------- dashboard ----------
+function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
+  const isDone = (c, id) => !!c.steps.find(s => s.id === id && s.done);
+  const active = cases.filter(c => daysUntil(c.checkIn) >= -1 && !(isDone(c, 'board_approved') && isDone(c, 'checkin_released')));
+  const attn = [];
+  if (!ownerSigOnFile) attn.push(['crit', 'Deine Unterschrift fehlt — kein finales Paket kann freigegeben werden.', '/admin/settings', 'Unterschrift hinterlegen']);
+  if (!liveMode) attn.push(['warn', 'Testmodus aktiv — Pakete gehen nur an dich, nicht an die Verwaltung.', '/admin/settings', 'Einstellungen']);
+  if (counts.boardOpen) attn.push(['warn', `📌 ${counts.boardOpen} offene${counts.boardOpen === 1 ? 'r' : ''} Hinweis${counts.boardOpen === 1 ? '' : 'e'} auf dem Board.`, '/admin/board', 'Zum Board']);
+  for (const c of active) {
+    const days = daysUntil(c.checkIn);
+    const who = `<b>${esc(c.guestName)}</b> (Check-in ${esc(c.checkIn)})`;
+    if (c.submissionError) attn.push(['crit', `${who}: Versand-Störung — „${esc(c.submissionError.message.slice(0, 80))}". Es gibt keinen automatischen Wiederholungsversuch.`, '/admin/cases', 'Zum Vorgang']);
+    if (days >= 0 && days <= 10 && !isDone(c, 'board_approved')) attn.push(['crit', `${who}: nur noch ${days} Tage bis Check-in, Board-Approval fehlt.`, '/admin/cases', 'Zum Vorgang']);
+    if (!c.wizard) attn.push(['warn', `${who}: Gast hat die Formulare noch nicht ausgefüllt. Eine Erinnerung darf nur nach deiner Freigabe versandt werden.`, `/v/${c.token}`, 'Gast-Seite']);
+    else if (!c.submission && !c.submissionError) attn.push(['warn', `${who}: Daten liegen vor — Vollständigkeit und Signaturen prüfen, danach den Versand ausdrücklich freigeben.`, '/admin/cases', 'Zum Vorgang']);
+    const caseFeeState = applicationFeeState(c);
+    if (caseFeeState === 'required' && c.wizard && !c.feeMailed && !isDone(c, 'fee_sent')) attn.push(['warn', `${who}: $100-Scheck noch nicht als versandt gemeldet.`, '/admin/cases', 'Zum Vorgang']);
+    if (caseFeeState === 'waiver_pending') attn.push(['warn', `${who}: Renewal bestätigt; Gebührenbefreiung muss noch durch die HOA bestätigt werden.`, '/admin/cases', 'Zum Vorgang']);
+    if (c.submission && !isDone(c, 'board_approved')) attn.push(['ok', `${who}: Paket eingereicht am ${esc(c.submission.sentAt.slice(0, 10))} — wartet auf das Board.`, '/admin/cases', 'Zum Vorgang']);
+  }
+  const attnHtml = attn.length
+    ? attn.map(([lvl, text, href, label]) =>
+        `<div class="attn${lvl === 'crit' ? ' crit' : lvl === 'ok' ? ' okk' : ''}">${text} <a href="${href}">${esc(label)} →</a></div>`).join('')
+    : '<div class="attn okk">Alles ruhig — keine offenen Punkte. 🌴</div>';
+  const caseRows = active.map(c => {
+    const done = c.steps.filter(s => s.done).length, pct = Math.round(done / c.steps.length * 100);
+    return `<li><div style="flex:1"><b>${esc(c.guestName)}</b> <span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights} Nächte</span>
+      <div class="bar"><div style="width:${pct}%"></div></div>
+      <span class="muted">${done}/${c.steps.length} Schritte</span>
+      ${c.submission ? '<span class="pill ok">eingereicht</span>' : c.wizard ? '<span class="pill teal">Daten da</span>' : '<span class="pill warn">wartet auf Gast</span>'}
+      ${isDone(c, 'board_approved') ? '<span class="pill ok">approved</span>' : ''}</div>
+      <a class="btn small ghost" href="/admin/cases">Öffnen</a></li>`;
+  }).join('');
+  return adminPage('Übersicht — Demo Unit Admin', '/admin',
+    `<h1>Übersicht</h1><p>Dein Vermietungs-Cockpit für Unit 405D — was läuft und was Aufmerksamkeit braucht.${msg ? ' — ' + esc(msg) : ''}</p>
+     <p style="margin:14px 0 0">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
+     ${ownerSigOnFile ? '<span class="pill ok">Unterschrift ✓</span>' : '<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Unterschrift fehlt</span>'}</p>`,
+    `<div class="card"><h2>Braucht Aufmerksamkeit</h2>${attnHtml}</div>
+     <div class="card"><h2>Offene Vorgänge</h2>${active.length
+       ? `<ul class="steps">${caseRows}</ul>`
+       : '<p class="muted">Keine offenen Vorgänge. Neue Buchungen werden automatisch aus Gmail angelegt — du bekommst dann eine Telegram-Nachricht mit dem Magic-Link.</p>'}</div>
+     <div class="card"><h2>Neues von der Verwaltung</h2>${(news && news.length)
+       ? `<ul class="steps">${news.slice(0, 5).map(n => newsItemHtml(n, Date.now())).join('')}</ul><p style="margin:10px 0 0"><a href="/admin/news">Alle Neuigkeiten →</a></p>`
+       : '<p class="muted">Noch keine Verwaltungs-Mails erfasst — neue E-Mails von Example Property Management erscheinen hier automatisch.</p>'}</div>
+     <div class="kpis">
+      <a class="kpi" href="/admin/cases"><b>${cases.length}</b><span>Vorgänge gesamt</span></a>
+      <a class="kpi" href="/admin/contacts"><b>${counts.contacts}</b><span>Kontakte</span></a>
+      <a class="kpi" href="/admin/library"><b>${counts.library}</b><span>Dokumente</span></a>
+      <a class="kpi" href="/admin/receipts"><b>${counts.receipts}</b><span>Belege</span></a>
+     </div>`);
+}
+
+// ---------- HOA news ----------
+function fmtNewsDate(iso) {
+  return iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : '';
+}
+function newsItemHtml(n, now) {
+  const fresh = n.at && (now - new Date(n.at)) < 7 * 86400000;
+  return `<li><div style="flex:1">
+    <span class="muted" style="font-family:var(--mono);font-size:12px">${esc(fmtNewsDate(n.at))}</span>
+    ${fresh ? '<span class="pill teal">neu</span>' : ''}<br>
+    <b>${esc(n.subject || '(ohne Betreff)')}</b><br>
+    <span class="muted" style="font-size:13px">${esc(n.from)}</span>
+    ${n.excerpt ? `<br><span class="muted">${esc(n.excerpt.slice(0, 220))}${n.excerpt.length > 220 ? '…' : ''}</span>` : ''}
+  </div></li>`;
+}
+function newsView(news, msg) {
+  const now = Date.now();
+  return adminPage('Neuigkeiten — Demo Unit Admin', '/admin/news',
+    `<h1>Neuigkeiten der Verwaltung</h1><p>Jede E-Mail von Example Property Management landet automatisch hier — der Wächter prüft das Postfach alle 30 Minuten. Mögliche Genehmigungen werden nur als Prüfkandidaten markiert; sie ändern keinen Vorgangsstatus und lösen keine Gastnachricht aus.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `${news.length
+      ? `<div class="card"><ul class="steps">${news.map(n => newsItemHtml(n, now)).join('')}</ul></div>`
+      : '<div class="card"><p class="muted">Noch keine Verwaltungs-Mails erfasst. Sobald eine E-Mail von condominiumassociates.com eingeht, erscheint sie hier automatisch.</p></div>'}`);
+}
+
+// ---------- contacts ----------
+const CONTACT_GROUPS = [
+  ['HOA & Verwaltung', /hoa|verwaltung|board/i],
+  ['Versicherung, Steuer & Bank', /versicherung|makler|steuer|bank/i],
+  ['Betrieb & Dienstleister', /reinigung|handwerk|lieferant|geräte|strom|internet|klempner|wartung|turno|plattform/i],
+  ['Accounts & Infrastruktur', /account|domain|hosting|lock|einkäufe/i],
+];
+function contactsView(contacts, msg) {
+  const groups = CONTACT_GROUPS.map(([label]) => ({ label, items: [] }));
+  const rest = { label: 'Adressen & Sonstiges', items: [] };
+  contacts.forEach((ct, i) => {
+    const gi = CONTACT_GROUPS.findIndex(([, re]) => re.test(`${ct.name} ${ct.role}`));
+    (gi >= 0 ? groups[gi] : rest).items.push([ct, i]);
+  });
+  groups.push(rest);
+  const cards = groups.filter(g => g.items.length).map(g =>
+    `<div class="card cgroup"><h2>${esc(g.label)} <span class="muted" style="font-size:14px">(${g.items.length})</span></h2>
+     <ul class="steps">${g.items.map(([ct, i]) => `
+      <li class="cfile" data-name="${esc(`${ct.name} ${ct.role} ${ct.notes || ''}`.toLowerCase())}">
+        <div style="flex:1"><b>${esc(ct.name)}</b> <span class="pill teal">${esc(ct.role)}</span>
+          ${ct.email || ct.phone ? `<br>${[
+            ct.email ? `<a href="mailto:${esc(ct.email)}">${esc(ct.email)}</a>` : '',
+            ct.phone ? `<a href="tel:${esc(ct.phone.replace(/[^+\d]/g, ''))}">${esc(ct.phone)}</a>` : '',
+          ].filter(Boolean).join(' · ')}` : ''}
+          ${ct.notes ? `<br><span class="muted">${esc(ct.notes)}</span>` : ''}</div>
+        <form method="post" action="/admin/library/contact-del" onsubmit="return confirm('Kontakt löschen?')">
+          <input type="hidden" name="i" value="${i}"><button class="small ghost">×</button></form>
+      </li>`).join('')}
+     </ul></div>`).join('');
+  return adminPage('Kontakte — Demo Unit Admin', '/admin/contacts',
+    `<h1>Kontakte</h1><p>Alle Ansprechpartner und Accounts rund um Unit 405D — Verwaltung, Versicherung, Dienstleister, Infrastruktur.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<div class="card"><input id="csearch" placeholder="Kontakt suchen … (z. B. Versicherung, Duke, Jeanine)" style="font-size:16px"></div>
+     ${cards || '<div class="card"><p class="muted">noch keine Kontakte</p></div>'}
+     <div class="card"><h2>Kontakt hinzufügen</h2>
+      <form method="post" action="/admin/library/contact-add">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label>Name</label><input name="name" required></div>
+          <div><label>Rolle</label><input name="role" placeholder="z. B. Verwaltung, Versicherung, Handwerker" required></div>
+          <div><label>E-Mail</label><input name="email"></div>
+          <div><label>Telefon</label><input name="phone"></div>
+        </div>
+        <label>Notiz</label><input name="notes">
+        <p><button class="small">Kontakt hinzufügen</button></p>
+      </form>
+     </div>
+     <script>
+     document.getElementById('csearch').addEventListener('input', e => {
+       const q = e.target.value.toLowerCase().trim();
+       document.querySelectorAll('.cfile').forEach(li => li.style.display = !q || li.dataset.name.includes(q) ? '' : 'none');
+       document.querySelectorAll('.cgroup').forEach(c => {
+         const any = [...c.querySelectorAll('.cfile')].some(li => li.style.display !== 'none');
+         c.style.display = any ? '' : 'none';
+       });
+     });
+     </script>`);
+}
+
+function casesView(cases, msg, ownerSigOnFile, liveMode) {
+  const HOA_TO = 'contact005@example.test';
+  const HOA_CC = 'contact006@example.test';
+  const gmail = (to, cc, subject, body) =>
+    `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}${cc ? '&cc=' + encodeURIComponent(cc) : ''}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const rows = cases.map(c => {
+    const done = c.steps.filter(s => s.done).length;
+    const stepBtns = c.steps.map(s =>
+      `<form method="post" action="/admin/toggle" style="display:inline">
+         <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="${s.id}">
+         <button class="small ${s.done ? '' : 'ghost'}" title="${esc(s.label)}">${s.done ? '✓' : '·'}</button>
+       </form>`).join(' ');
+    const guestEmail = c.wizard && c.wizard.adults && c.wizard.adults[0] && c.wizard.adults[0].email;
+    const stayRef = `Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
+    const feeMode = applicationFeeState(c);
+    const feeState = feeMode === 'waiver_pending'
+      ? `<span class="pill warn">renewal: fee waiver pending HOA confirmation</span>`
+      : feeMode === 'waived'
+        ? `<span class="pill ok">renewal fee waived</span>`
+        : feeMode === 'required' && c.feeMailed
+          ? `<span class="pill ok">check mailed ${esc(c.feeMailed.slice(0,10))}</span>`
+          : feeMode === 'required' ? `<span class="pill warn">fee not mailed yet</span>` : '';
+    const mailBtns = feeMode === 'waiver_pending' ? `
+      <a class="btn small ghost" href="${gmail(HOA_TO, HOA_CC, `Unit 405D — Renewal / returning tenants — ${c.checkIn} to ${c.checkOut}`,
+        `Dear Keila,\n\nUtku Günen (approved under the name Tacettin DemoSurnameA) and Kardelen DemoSurnameB have booked Unit 405D again for ${c.checkIn} through ${c.checkOut}. Your May 18, 2026 approval letter approved both tenants.\n\nCould you please confirm whether this should be processed as a RENEWAL and whether the $100 application fee will be waived under the returning-tenant provision in the HOA Rules and Expectations? Please also let me know which updated documents or signatures you require for the new stay.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
+        target="_blank" rel="noopener">✉ HOA: Renewal und Gebührenbefreiung bestätigen</a>` : feeMode !== 'required' ? '' : `
+      ${guestEmail ? `<a class="btn small ghost" href="${gmail(guestEmail, '', `Reminder: $100 HOA fee for your stay ${c.checkIn}`,
+        `Hi ${c.guestName.split(' ')[0]},\n\nA friendly reminder about the $100 association fee (check or money order payable to "Example Condominium").\n\nMailing address:\nExample Condominium Association, Inc.\nc/o Example Property Management, Inc.\n570 Carillon Parkway, Suite 210\nSt. Petersburg, FL 33716\n\nPlease include a note: ${stayRef}\nOnce mailed, please tap "I've mailed the check" on your status page.\n\nThank you!\nOwner`)}"
+        target="_blank" rel="noopener">✉ Gast: Gebühr erinnern</a>` : ''}
+      <a class="btn small ghost" href="${gmail(HOA_TO, HOA_CC, `Fee receipt confirmation — ${stayRef}`,
+        `Dear Example Property Management / Example Condominium,\n\nCould you please confirm receipt of the $100 application fee (check/money order) for the following lease application?\n\n${stayRef}${c.feeMailed ? `\n\nThe applicant reports having mailed the check on ${c.feeMailed.slice(0,10)}.` : ''}\n\nThank you very much!\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
+        target="_blank" rel="noopener">✉ HOA: Empfang bestätigen</a>`;
+    const ds = docStates(c, ownerSigOnFile);
+    const docLine = ds.docs.map(d => {
+      const state = c.submission ? '📤' : d.signed ? '✍️' : d.filled ? '📝' : '⬜';
+      const title = c.submission ? 'an Verwaltung gesendet' : d.signed ? 'ausgefüllt + signiert' : d.filled ? 'ausgefüllt, Signatur fehlt' : 'noch nicht ausgefüllt';
+      return `<span title="${esc(d.label)}: ${title}">${state} ${esc(d.label.split(' ')[0])}</span>`;
+    }).join(' · ');
+    const subLine = c.submission
+      ? `<span class="pill ok">📬 gesendet ${esc(c.submission.sentAt.slice(0,10))}${c.submission.live ? '' : ' (TEST)'}</span>`
+      : c.submissionError
+        ? `<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Versand-Störung: ${esc(c.submissionError.message.slice(0,60))}</span>`
+        : (c.wizard ? '<span class="pill warn">wartet auf Owner-Prüfung / vollständige Signaturen</span>' : '');
+    const ready = isReadyForOwnerReview(c, ownerSigOnFile);
+    const ai = c.aiReview && c.aiReview.reviewHash === c.reviewHash ? c.aiReview : null;
+    const aiLine = !ready ? '' : !ai
+      ? '<span class="pill warn">Lokale KI-Prüfung ausstehend</span>'
+      : ai.status === 'green'
+        ? `<span class="pill ok">Lokale KI-Prüfung grün · ${esc(ai.model || 'local')}</span><p class="muted">${esc(ai.summary || 'Keine Abweichungen gefunden.')}</p>`
+        : `<span class="pill" style="background:var(--crit-wash);color:var(--crit)">KI-Prüfung ${esc(ai.status || 'red')}</span><p class="muted">${esc((ai.findings || []).join(' · ') || ai.summary || 'Prüfung wiederholen.')}</p>`;
+    const reviewButton = ready && !c.submission ? `
+      <div style="margin-top:10px">
+        ${aiLine}
+        ${ai && ai.status === 'green' ? `<form method="post" action="/admin/submit" style="display:block;margin-top:10px" onsubmit="return confirm('Die OpenAI-KI-Prüfung ist grün. Jetzt ${liveMode ? 'den externen Versand an die Verwaltung freigeben' : 'ein Testpaket nur an Owner senden'}?')">
+          <input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="reviewHash" value="${esc(c.reviewHash || '')}">
+          <button class="small">${liveMode ? 'Grünen KI-Bericht bestätigen und versenden' : 'Grünen KI-Bericht bestätigen und Testpaket erzeugen'}</button>
+        </form>` : '<p class="muted">Kein manueller PDF-Abgleich nötig. Der Versand wird erst nach einem grünen OpenAI-KI-Bericht freigeschaltet.</p>'}
+      </div>` : '';
+    return `<tr>
+      <td><b>${esc(c.guestName)}</b><br><span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights}n · ${esc(c.pathType)}</span><br>
+          ${c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
+          ${feeState}<br>
+          <span class="muted">${docLine}</span><br>${subLine}${reviewButton}</td>
+      <td>${done}/${c.steps.length}<br>${stepBtns}<br>${mailBtns}</td>
+      <td><a href="/v/${c.token}" target="_blank">/v/${c.token}</a><br>
+          <form method="post" action="/admin/delete" onsubmit="return confirm('Delete case?')" style="display:inline">
+            <input type="hidden" name="id" value="${c.id}"><button class="small ghost">delete</button>
+          </form></td></tr>`;
+  }).join('');
+  return adminPage('Vorgänge — Demo Unit Admin', '/admin/cases',
+    `<h1>Vorgänge</h1><p>${cases.length} Vorgang/Vorgänge${msg ? ' — ' + esc(msg) : ''}</p>
+     <p style="margin:14px 0 0">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
+     ${ownerSigOnFile ? '' : '<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Owner-Signatur fehlt — finaler Versand gesperrt</span>'}
+     <a href="/admin/settings" style="font-size:13.5px">Einstellungen →</a></p>`,
+    `<div class="card"><h2>Alle Vorgänge</h2><table><tr><th>Gast / Aufenthalt</th><th>Schritte</th><th>Link</th></tr>${rows || '<tr><td colspan=3 class=muted>Noch keine — neue Buchungen werden automatisch aus Gmail angelegt.</td></tr>'}</table></div>
+     <details class="sect"><summary>Vorgang manuell anlegen <span class="muted" style="font-size:14px">(Normalfall: automatisch aus Gmail)</span></summary>
+      <form method="post" action="/admin/create">
+        <label>Voller Name des Gastes</label><input name="guestName" required>
+        <label>Airbnb-Buchungscode</label><input name="reservationCode" placeholder="HM…">
+        <label>Check-in (YYYY-MM-DD)</label><input name="checkIn" required pattern="\\d{4}-\\d{2}-\\d{2}">
+        <label>Check-out (YYYY-MM-DD)</label><input name="checkOut" required pattern="\\d{4}-\\d{2}-\\d{2}">
+        <label>Erwachsene (18+)</label><input name="adults" type="number" value="2" min="1" max="4">
+        <p class="muted">Airbnb-Buchungen werden immer als vollständiger Mietvorgang angelegt und müssen mindestens 30 Nächte umfassen. Guest Registration ist ausschließlich für bestätigte, unentgeltliche Gäste vorgesehen.</p>
+        <p><button>Vorgang anlegen & Magic-Link erhalten</button></p>
+      </form></details>`);
+}
+
+// ---------- router ----------
+export async function onRequest(context) {
+  const { request, env } = context;
+  const waitUntil = context.waitUntil ? context.waitUntil.bind(context) : (p) => p;
+  const url = new URL(request.url);
+  const p = url.pathname;
+  if (request.method === 'POST' && p !== '/find' && !isAllowedMutationOrigin(request.headers.get('Origin'), url.origin)) {
+    return new Response('Forbidden: invalid request origin', { status: 403, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+  }
+
+  // canonical host: old domain and www redirect permanently — keeps every old magic link alive
+  if (url.hostname === 'legacy-portal.example.test' || url.hostname === 'www.portal.example.test') {
+    return new Response(null, { status: 301, headers: { Location: `https://portal.example.test${url.pathname}${url.search}`, ...SEC_HEADERS } });
+  }
+
+
+  if (p === '/' && (request.method === 'GET' || request.method === 'HEAD')) return html(landingView(), 200, true);
+  if (p === '/privacy' && request.method === 'GET') return html(page('Privacy — Demo Unit', '<h1>Privacy notice</h1><p>This private portal is operated by Property Owner for the limited purpose of preparing and tracking Example Condominium guest-registration and lease-approval paperwork for Unit 405D.</p>', `<div class="card"><h2>What is collected</h2><p>Booking reference, stay dates, applicant names and contact details, address, birth date and identification details where the association form requires them, electronic consent, signatures, and workflow status. Social Security numbers and ID-image uploads are deliberately not collected through this portal.</p><h2>Why and with whom</h2><p>The information is used only to prepare and quality-check the association forms and, after an explicit owner release, submit the package to Example Property Management / Example Condominium. Cloudflare provides the portal and encrypted application storage. OpenAI processes the purpose-bound application data and generated document text in the United States for automated completeness and consistency review. Google Gmail is used only for an owner-approved submission email. Infrastructure credentials and unrelated personal data are not included in the AI review.</p><h2>Retention and security</h2><p>Active case data is not publicly indexed and private pages are marked no-store. New access links use high-entropy bearer tokens. Active guest case data is deleted from the portal 90 days after checkout unless a concrete legal dispute or mandatory recordkeeping requirement requires a documented exception. Temporary AI-review files are deleted after processing. Minimal non-sensitive audit metadata may be retained.</p><h2>Your choices</h2><p>Do not enter information for another adult or sign on their behalf. To request access, correction, deletion, or an alternative to the portal and automated review, contact Owner through the existing Airbnb conversation before submitting data.</p><p class="muted">Last updated: July 18, 2026.</p>`));
+  if (p === '/healthz') return new Response('ok', { headers: { 'Content-Type': 'text/plain', ...SEC_HEADERS, 'Cache-Control': 'no-store' } });
+  if (p.startsWith('/forms/') || p === '/robots.txt' || p === '/llms.txt' || p === '/sitemap.xml' || p === '/manifest.webmanifest' || p === '/favicon.svg') return env.ASSETS.fetch(request);
+
+  // Read-only API for Hermes/GBrain — GET only, token-gated, no mutations possible.
+  if (p.startsWith('/api/ro/')) {
+    if (request.method !== 'GET') return new Response('read-only', { status: 405 });
+    const token = request.headers.get('X-RO-Token') || '';
+    const expected = await env.CASES.get('readonly-token');
+    if (!expected || token !== expected) return new Response('unauthorized', { status: 401 });
+    const jsonResp = (data) => new Response(JSON.stringify(data, null, 1), { headers: {
+      'Content-Type': 'application/json', 'X-Robots-Tag': 'noindex',
+      'Cache-Control': 'private, no-store, max-age=0', ...SEC_HEADERS,
+    } });
+    if (p === '/api/ro/cases') {
+      const cases = await loadCases(env);
+      return jsonResp(cases.map(c => ({
+        id: c.id, guestName: c.guestName, reservationCode: c.reservationCode || null,
+        checkIn: c.checkIn, checkOut: c.checkOut, nights: c.nights, adults: c.adults,
+        pathType: c.pathType, createdAt: c.createdAt,
+        steps: (c.steps || []).map(s => ({ id: s.id, label: s.label, done: !!s.done, date: s.date || null })),
+        paperworkSaved: !!c.wizard, ownerReviewReadyAt: c.ownerReviewReadyAt || null,
+        submittedAt: c.submission && c.submission.sentAt || null,
+        feeMailed: c.feeMailed || null, approvalCandidate: c.approvalCandidate || null,
+      })));
+    }
+    if (p === '/api/ro/contacts') return jsonResp(JSON.parse((await env.CASES.get('library-contacts')) || '[]'));
+    if (p === '/api/ro/news') return jsonResp(JSON.parse((await env.CASES.get('hoa-news')) || '[]'));
+    if (p === '/api/ro/library') return jsonResp((await libList(env)).map(k => k.slice(4)));
+    if (p === '/api/ro/receipts') return jsonResp((await rcptList(env)).map(k => k.slice(5)));
+    if (p === '/api/ro/summary') {
+      const cases = await loadCases(env);
+      return jsonResp({
+        generatedAt: new Date().toISOString(),
+        activeCases: cases.map(c => ({ guest: c.guestName, checkIn: c.checkIn, checkOut: c.checkOut,
+          pathType: c.pathType, stepsDone: c.steps.filter(s => s.done).length, stepsTotal: c.steps.length,
+          submitted: !!c.submission, approved: !!c.steps.find(s => s.id === 'board_approved' && s.done),
+          feeMailed: c.feeMailed || null })),
+        libraryFiles: (await libList(env)).length,
+        receiptFiles: (await rcptList(env)).length,
+      });
+    }
+    return new Response('not found', { status: 404 });
+  }
+
+  if (p === '/find' && request.method === 'GET') return redirect('/');
+
+  if (p === '/find' && request.method === 'POST') {
+    if (!(await findRateAllowed(request, env))) {
+      return html(page('Please wait — Demo Unit', '<h1>Too many attempts</h1><p>Please wait 15 minutes or message Owner through Airbnb.</p>', ''), 429);
+    }
+    const form = await request.formData();
+    const code = String(form.get('code') || '').trim().toUpperCase();
+    const name = normalizedLastName(form.get('name'));
+    if (/^HM[A-Z0-9]{8,12}$/.test(code) && name) {
+      const c = (await loadCases(env)).find(c =>
+        isGuestAccessibleCase(c) &&
+        (c.reservationCode || '').toUpperCase() === code &&
+        normalizedLastName(c.guestName) === name);
+      if (c) return redirect(`/v/${c.token}`);
+    }
+    return html(page('Not found yet — Demo Unit',
+      `<h1>We couldn't find your page yet</h1>
+       <p>Please double-check the confirmation code and last name — or your page may simply not be ready yet.</p>`,
+      `<div class="card"><p>Your personal paperwork page is created automatically within about an hour of your booking confirmation. Please try again a little later, or just message Owner via the Airbnb chat — he'll send you the direct link.</p>
+       <p><a href="/">← back</a></p></div>`), 404);
+  }
+
+  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/brief\.txt)?$/);
+  if (mV) {
+    const cases = await loadCases(env);
+    const c = cases.find(c => c.token === mV[1]);
+    if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
+    if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
+    if (mV[2] === '/fee-mailed' && request.method === 'POST') {
+      if (!c.feeMailed) { c.feeMailed = new Date().toISOString(); await saveCases(env, cases); }
+      return redirect(`/v/${c.token}`);
+    }
+    if (mV[2] === '/fee-unmailed' && request.method === 'POST') {
+      if (c.feeMailed) { delete c.feeMailed; await saveCases(env, cases); }
+      return redirect(`/v/${c.token}`);
+    }
+    if (mV[2] === '/brief.txt' && request.method === 'GET') {
+      return new Response(guestBrief(c), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store, max-age=0', 'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
+    }
+    if (!mV[2] && request.method === 'GET') return html(statusView(c));
+  }
+
+  const mOccupancy = p.match(/^\/w\/([A-Za-z0-9_-]{6,})\/occupancy$/);
+  if (mOccupancy && request.method === 'POST') {
+    const cases = await loadCases(env);
+    const c = cases.find(c => c.token === mOccupancy[1]);
+    if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
+    if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
+    if (c.submission || c.reviewLockedAt || c.wizard) return new Response('occupancy can no longer be changed here; message Owner through Airbnb', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+    const form = await request.formData();
+    const confirmed = confirmHoaOccupancy(c, { hoaAdults: form.get('hoaAdults'), minors: form.get('minors') });
+    if (!confirmed.ok) return html(occupancyView(c, confirmed.error), 400);
+    await saveCases(env, cases);
+    return redirect(`/w/${c.token}`);
+  }
+
+  const mW = p.match(/^\/w\/([A-Za-z0-9_-]{6,})(\/pdf\/(lease-application|background-authorization|rules-and-regulations|guest-registration|lease-agreement))?$/);
+  if (mW) {
+    const cases = await loadCases(env);
+    const c = cases.find(c => c.token === mW[1]);
+    if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
+
+    if (!mW[2] && request.method === 'GET') {
+      if (c.submission || c.reviewLockedAt) return redirect(`/v/${c.token}`);
+      if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return html(occupancyView(c));
+      return html(wizardView(c, url.searchParams.get('saved')));
+    }
+
+    if (!mW[2] && request.method === 'POST') {
+      if (c.submission || c.reviewLockedAt) return new Response('paperwork is locked after owner release', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return redirect(`/w/${c.token}`);
+      const form = await request.formData();
+      const g = (n, max = 254) => String(form.get(n) || '').trim().slice(0, max);
+      const saveMode = g('saveMode', 16);
+      const prevWizard = c.wizard || null;
+      const prevAdults = (prevWizard && prevWizard.adults) || [];
+      const { adults, explicitSigs, removeSigs } = parseAdultFormSlots(form, c.adults);
+      const nextWizard = {
+        adults,
+        esignConsent: adults.length === c.adults && adults.every(a => a.esignConsent),
+        rulesAcknowledged: c.pathType !== 'full' || g('rules_acknowledged') === 'yes',
+        auto: { make: g('auto_make'), year: g('auto_year'), plate: g('auto_plate') },
+        references: [0,1].map(i => ({ name: g(`ref${i}_name`), phone: g(`ref${i}_phone`), address: g(`ref${i}_address`) })),
+        emergency: [0,1].map(i => ({ name: g(`em${i}_name`), phone: g(`em${i}_phone`) })),
+        children: [0,1].map(i => ({ name: g(`ch${i}_name`, 120), birthDate: g(`ch${i}_birthDate`, 10) })),
+        savedAt: new Date().toISOString(),
+      };
+      const previousContentHash = prevWizard ? await reviewDigest(c, prevWizard, false) : null;
+      const nextContentHash = await reviewDigest(c, nextWizard, false);
+      const materialChange = !!prevWizard && previousContentHash !== nextContentHash;
+      nextWizard.adults.forEach((a, i) => {
+        if (removeSigs[i]) a.sigPng = null;
+        else if (explicitSigs[i]) a.sigPng = explicitSigs[i];
+        else a.sigPng = materialChange ? null : ((prevAdults[i] && prevAdults[i].sigPng) || null);
+      });
+      const previousReviewHash = c.reviewHash || null;
+      c.wizard = nextWizard;
+      c.contentHash = nextContentHash;
+      c.reviewHash = await reviewDigest(c, nextWizard, true);
+      if (previousReviewHash !== c.reviewHash) delete c.aiReview;
+      if (materialChange) {
+        delete c.ownerReviewReadyAt;
+        delete c.ownerApprovedAt;
+        delete c.ownerApprovedBy;
+        delete c.ownerApprovedReviewHash;
+        delete c.ownerReviewedDocuments;
+      }
+      const opened = c.steps.find(s => s.id === 'forms_sent');
+      if (opened && !opened.done) { opened.done = true; opened.date = new Date().toISOString(); }
+      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      const becameReady = saveMode !== 'draft' && isReadyForOwnerReview(c, ownerSigOnFile) && !c.ownerReviewReadyAt;
+      if (becameReady) c.ownerReviewReadyAt = new Date().toISOString();
+      await saveCases(env, cases);
+      if (becameReady) waitUntil(sendTelegram(env, `🤖 ${c.guestName} (${c.checkIn}): Unterlagen vollständig. Die OpenAI-KI-Vorprüfung läuft; du erhältst nur bei Abweichungen Rückfragen oder anschließend eine kompakte Versandfreigabe.`));
+      const saveState = saveMode !== 'draft' && (becameReady || isReadyForOwnerReview(c, ownerSigOnFile)) ? 'ready' : 'draft';
+      return redirect(`/w/${c.token}?saved=${saveState}`);
+    }
+
+    if (mW[2] && request.method === 'GET') {
+      if (!c.wizard) return redirect(`/w/${c.token}`);
+      const doc = mW[3];
+      const data = { checkIn: c.checkIn, checkOut: c.checkOut, reservationCode: c.reservationCode,
+        applicationType: c.applicationType || 'lease', ownerSigPng: null, preview: true, todayISO: new Date().toISOString().slice(0, 10), ...c.wizard };
+      let bytes;
+      const template = async (name) => {
+        const response = await env.ASSETS.fetch(new URL(`/forms/${name}.pdf`, request.url));
+        if (!response.ok) throw new Error(`form template unavailable: ${name}`);
+        return new Uint8Array(await response.arrayBuffer());
+      };
+      if (doc === 'lease-agreement') {
+        bytes = await generateLeaseAgreement(data);
+      } else if (doc === 'lease-application' || doc === 'background-authorization') {
+        const filled = await fillLeaseApplication(await template('lease-application'), data);
+        const split = await splitLeaseApplicationPackage(filled);
+        bytes = doc === 'lease-application' ? split.application : split.background;
+      } else if (doc === 'rules-and-regulations') {
+        bytes = await buildRulesAcknowledgment(await template('rules-and-regulations'), data);
+      } else {
+        bytes = await fillGuestRegistration(await template('guest-registration'), data);
+      }
+      return new Response(bytes, { headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="Palma-del-Mar-2-${doc}-${c.checkIn}.pdf"`,
+        'Cache-Control': 'private, no-store, max-age=0', 'Pragma': 'no-cache',
+        ...SEC_HEADERS,
+        'X-Robots-Tag': 'noindex',
+      }});
+    }
+  }
+
+  if (p.startsWith('/admin')) {
+    const denied = await checkAdmin(request, env);
+    if (denied) return denied;
+    if (p === '/admin' && request.method === 'GET') {
+      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      const liveMode = (await env.CASES.get('submit-live')) === 'yes';
+      const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
+      const board = JSON.parse((await env.CASES.get('admin-board')) || '[]');
+      const counts = { contacts: contacts.length, library: (await libList(env)).length, receipts: (await rcptList(env)).length, boardOpen: board.filter(n => !n.done).length };
+      const news = JSON.parse((await env.CASES.get('hoa-news')) || '[]');
+      return html(dashboardView(await loadCases(env), counts, ownerSigOnFile, liveMode, url.searchParams.get('msg'), news));
+    }
+    if (p === '/admin/news' && request.method === 'GET') {
+      const news = JSON.parse((await env.CASES.get('hoa-news')) || '[]');
+      return html(newsView(news, url.searchParams.get('msg')));
+    }
+    if (p === '/admin/cases' && request.method === 'GET') {
+      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      const liveMode = (await env.CASES.get('submit-live')) === 'yes';
+      return html(casesView(await loadCases(env), url.searchParams.get('msg'), ownerSigOnFile, liveMode));
+    }
+    if (p === '/admin/contacts' && request.method === 'GET') {
+      const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
+      return html(contactsView(contacts, url.searchParams.get('msg')));
+    }
+    if (p === '/admin/settings' && request.method === 'GET') {
+      const sig = await env.CASES.get('owner-signature-png');
+      const liveMode = (await env.CASES.get('submit-live')) === 'yes';
+      return html(settingsView(validateSignaturePng(sig), liveMode, url.searchParams.get('msg')));
+    }
+    if (p === '/admin/receipts' && request.method === 'GET') {
+      return html(receiptsView(await rcptList(env), url.searchParams.get('msg')));
+    }
+    if (p.startsWith('/admin/receipts/f/') && request.method === 'GET') {
+      const key = 'rcpt:' + decodeURIComponent(p.slice('/admin/receipts/f/'.length));
+      const data = await env.CASES.get(key, 'arrayBuffer');
+      if (!data) return new Response('not found', { status: 404 });
+      const name = libDisplayName(key);
+      const type = name.toLowerCase().endsWith('.pdf') ? 'application/pdf'
+        : /\.(png|jpg|jpeg)$/i.test(name) ? 'image/' + name.split('.').pop().toLowerCase().replace('jpg', 'jpeg')
+        : 'application/octet-stream';
+      return new Response(data, { headers: { 'Content-Type': type, 'Content-Disposition': `inline; filename="${name}"`, 'X-Robots-Tag': 'noindex' } });
+    }
+    if (p === '/admin/receipts/upload' && request.method === 'POST') {
+      const form = await request.formData();
+      const file = form.get('file');
+      const cat = String(form.get('cat') || 'anschaffungen');
+      if (!file || typeof file === 'string' || !RCPT_CATS.some(([c]) => c === cat)) return new Response('invalid', { status: 400 });
+      const safe = file.name.replace(/[^\w.\-äöüÄÖÜß ]+/g, '_').slice(0, 120);
+      await env.CASES.put(`rcpt:${cat}/${safe}`, await file.arrayBuffer());
+      return redirect('/admin/receipts?msg=' + encodeURIComponent(safe + ' hochgeladen'));
+    }
+    if (p === '/admin/receipts/export' && request.method === 'POST') {
+      const form = await request.formData();
+      const year = String(form.get('year') || '');
+      const who = EXPORT_RECIPIENTS[String(form.get('to') || '')];
+      if (!who || !/^(20\d{2}|ohne-jahr)$/.test(year)) return new Response('invalid', { status: 400 });
+      waitUntil((async () => {
+        try {
+          const r = await exportReceipts(env, year, who);
+          await sendTelegram(env, `📤 Beleg-Export ${year} an ${who.name} (${who.to}): ${r.files} Datei(en) in ${r.mails} Mail(s) versandt. CC liegt in deinem Postfach.`);
+        } catch (e) {
+          await sendTelegram(env, `🚨 Beleg-Export ${year} an ${who.name} FEHLGESCHLAGEN: ${String(e && e.message || e).slice(0, 200)}`);
+        }
+      })());
+      return redirect('/admin/receipts?msg=' + encodeURIComponent(`Export ${year} an ${who.name} läuft im Hintergrund — Telegram-Bestätigung folgt.`));
+    }
+    if (p === '/admin/board' && request.method === 'GET') {
+      const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
+      return html(boardView(notes, url.searchParams.get('msg')));
+    }
+    if (p === '/admin/board/add' && request.method === 'POST') {
+      const form = await request.formData();
+      const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
+      notes.unshift({ id: crypto.randomUUID(), title: String(form.get('title') || '').slice(0, 200),
+        text: String(form.get('text') || '').slice(0, 4000), createdAt: new Date().toISOString(), done: false });
+      await env.CASES.put('admin-board', JSON.stringify(notes));
+      return redirect('/admin/board');
+    }
+    if (p === '/admin/board/toggle' && request.method === 'POST') {
+      const form = await request.formData();
+      const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
+      const n = notes.find(n => n.id === form.get('id'));
+      if (n) { n.done = !n.done; n.doneAt = n.done ? new Date().toISOString() : null; await env.CASES.put('admin-board', JSON.stringify(notes)); }
+      return redirect('/admin/board');
+    }
+    if (p === '/admin/board/del' && request.method === 'POST') {
+      const form = await request.formData();
+      const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
+      await env.CASES.put('admin-board', JSON.stringify(notes.filter(n => n.id !== form.get('id'))));
+      return redirect('/admin/board');
+    }
+    if (p === '/admin/receipts/delete' && request.method === 'POST') {
+      const form = await request.formData();
+      const key = String(form.get('key') || '');
+      if (key.startsWith('rcpt:')) await env.CASES.delete(key);
+      return redirect('/admin/receipts');
+    }
+    if (p === '/admin/library' && request.method === 'GET') {
+      return html(libraryView(await libList(env), url.searchParams.get('msg')));
+    }
+    if (p.startsWith('/admin/library/f/') && request.method === 'GET') {
+      const key = 'lib:' + decodeURIComponent(p.slice('/admin/library/f/'.length));
+      const data = await env.CASES.get(key, 'arrayBuffer');
+      if (!data) return new Response('not found', { status: 404 });
+      const name = libDisplayName(key);
+      const type = name.toLowerCase().endsWith('.pdf') ? 'application/pdf'
+        : /\.(png|jpg|jpeg)$/i.test(name) ? 'image/' + name.split('.').pop().toLowerCase().replace('jpg', 'jpeg')
+        : 'application/octet-stream';
+      return new Response(data, { headers: { 'Content-Type': type, 'Content-Disposition': `inline; filename="${name}"`, 'X-Robots-Tag': 'noindex' } });
+    }
+    if (p === '/admin/library/upload' && request.method === 'POST') {
+      const form = await request.formData();
+      const file = form.get('file');
+      const cat = String(form.get('cat') || 'hoa-sonstiges');
+      if (!file || typeof file === 'string' || !LIB_CATS.some(([c]) => c === cat)) return new Response('invalid', { status: 400 });
+      const safe = file.name.replace(/[^\w.\-äöüÄÖÜß ]+/g, '_').slice(0, 120);
+      await env.CASES.put(`lib:${cat}/${safe}`, await file.arrayBuffer());
+      return redirect('/admin/library?msg=' + encodeURIComponent(safe + ' hochgeladen'));
+    }
+    if (p === '/admin/library/delete' && request.method === 'POST') {
+      const form = await request.formData();
+      const key = String(form.get('key') || '');
+      if (key.startsWith('lib:')) await env.CASES.delete(key);
+      return redirect('/admin/library');
+    }
+    if (p === '/admin/library/contact-add' && request.method === 'POST') {
+      const form = await request.formData();
+      const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
+      contacts.push({ name: String(form.get('name') || ''), role: String(form.get('role') || ''),
+        email: String(form.get('email') || ''), phone: String(form.get('phone') || ''), notes: String(form.get('notes') || '') });
+      await env.CASES.put('library-contacts', JSON.stringify(contacts));
+      return redirect('/admin/contacts');
+    }
+    if (p === '/admin/library/contact-del' && request.method === 'POST') {
+      const form = await request.formData();
+      const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
+      contacts.splice(parseInt(form.get('i'), 10), 1);
+      await env.CASES.put('library-contacts', JSON.stringify(contacts));
+      return redirect('/admin/contacts');
+    }
+    if (p === '/admin/submit' && request.method === 'POST') {
+      const form = await request.formData();
+      const cases = await loadCases(env);
+      const c = cases.find(x => x.id === form.get('id'));
+      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      if (!c) return new Response('case not found', { status: 404, headers: SEC_HEADERS });
+      if (!isReadyForOwnerReview(c, ownerSigOnFile)) {
+        return new Response('paperwork is not complete or was already submitted', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
+      const ai = c.aiReview;
+      if (!ai || ai.reviewHash !== c.reviewHash || ai.status !== 'green') {
+        return new Response('OpenAI review is missing, stale, or not green', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
+      c.ownerReviewedDocuments = ['openai-ai-review'];
+      const expectedReviewHash = await reviewDigest(c, c.wizard, true);
+      const submittedReviewHash = String(form.get('reviewHash') || '');
+      if (!submittedReviewHash || submittedReviewHash !== c.reviewHash || expectedReviewHash !== c.reviewHash) {
+        return new Response('review version changed; reopen and review all four PDFs', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
+      const live = (await env.CASES.get('submit-live')) === 'yes';
+      if (live) {
+        const prerequisites = validateLiveSubmissionPrerequisites(c);
+        if (!prerequisites.ok) return new Response(`live submission blocked: ${prerequisites.missing.join(', ')}`, { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
+      c.ownerApprovedAt = new Date().toISOString();
+      c.ownerApprovedBy = env.ADMIN_USER || 'markus';
+      c.ownerApprovedReviewHash = c.reviewHash;
+      if (live) c.reviewLockedAt = c.ownerApprovedAt;
+      const claimKey = `send-claim:${c.id}:${c.reviewHash}`;
+      if (await env.CASES.get(claimKey)) return new Response('submission already in progress or completed', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      await env.CASES.put(claimKey, c.ownerApprovedAt, { expirationTtl: 600 });
+      await saveCases(env, cases);
+      const sent = await submitApprovedPackage(c, cases, env);
+      if (!sent || !live) await env.CASES.delete(claimKey);
+      else await env.CASES.put(claimKey, c.submission.sentAt, { expirationTtl: 604800 });
+      const message = sent ? (live ? 'Vier-Dokumente-Paket live an die Verwaltung versandt' : 'Testpaket nur an Owner versandt; Live-Versand bleibt offen') : 'Versand fehlgeschlagen — Details im Vorgang';
+      return redirect('/admin/cases?msg=' + encodeURIComponent(message));
+    }
+    if (p === '/admin/submit-live' && request.method === 'POST') {
+      const form = await request.formData();
+      if (form.get('mode') === 'yes') {
+        if (String(form.get('confirm') || '') !== 'LIVE') return new Response('type LIVE to enable external delivery', { status: 400, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+        await env.CASES.put('submit-live', 'yes');
+        await env.CASES.put('submit-live-audit', JSON.stringify({ at: new Date().toISOString(), by: env.ADMIN_USER || 'markus' }));
+      } else await env.CASES.delete('submit-live');
+      return redirect('/admin/settings');
+    }
+    if (p === '/admin/signature' && request.method === 'GET') return redirect('/admin/settings');
+    if (p === '/admin/signature' && request.method === 'POST') {
+      const dataUrl = await request.text();
+      const m = dataUrl.match(/^data:image\/png;base64,(.+)$/s);
+      if (!m || !validateSignaturePng(m[1])) return new Response('invalid signature PNG', { status: 400, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      await env.CASES.put('owner-signature-png', m[1]);
+      return new Response('ok');
+    }
+    if (p === '/admin/create' && request.method === 'POST') {
+      const form = await request.formData();
+      const input = {
+        guestName: String(form.get('guestName') || '').trim(),
+        reservationCode: String(form.get('reservationCode') || '').trim().toUpperCase(),
+        checkIn: String(form.get('checkIn') || ''), checkOut: String(form.get('checkOut') || ''),
+        adults: Number(form.get('adults')),
+      };
+      const validation = validateCaseInput(input);
+      if (!validation.ok) return new Response(validation.error, { status: 400, headers: SEC_HEADERS });
+      if (validation.nights >= 30 && input.adults > 2) return new Response('rentals with more than two adults require a separate manual HOA application package', { status: 400, headers: SEC_HEADERS });
+      const cases = await loadCases(env);
+      if (input.reservationCode && cases.some(x => String(x.reservationCode || '').toUpperCase() === input.reservationCode)) {
+        return new Response('reservation code already exists', { status: 409, headers: SEC_HEADERS });
+      }
+      const c = newCase({ ...input, nights: validation.nights });
+      cases.push(c);
+      await saveCases(env, cases);
+      return redirect('/admin/cases?msg=' + encodeURIComponent('angelegt — Magic-Link: /v/' + c.token));
+    }
+    if (p === '/admin/toggle' && request.method === 'POST') {
+      const form = await request.formData();
+      const cases = await loadCases(env);
+      const c = cases.find(c => c.id === form.get('id'));
+      const s = c && c.steps.find(s => s.id === form.get('step'));
+      if (s) {
+        s.done = !s.done; s.date = s.done ? new Date().toISOString() : null;
+        if (s.id === 'board_approved' && s.done) delete c.approvalCandidate;
+        await saveCases(env, cases);
+      }
+      return redirect('/admin/cases');
+    }
+    if (p === '/admin/delete' && request.method === 'POST') {
+      const form = await request.formData();
+      await saveCases(env, (await loadCases(env)).filter(c => c.id !== form.get('id')));
+      return redirect('/admin/cases');
+    }
+  }
+  return html(page('Not found', '<h1>Page not found</h1>', ''), 404);
+}

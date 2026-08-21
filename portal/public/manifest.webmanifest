@@ -1,0 +1,13 @@
+{
+  "name": "Example Island 405D Guest Portal",
+  "short_name": "Demo Unit",
+  "description": "Private guest paperwork and HOA approval tracking for Unit 405D",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f4ed",
+  "theme_color": "#0f4c5c",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

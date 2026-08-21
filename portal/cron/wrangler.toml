@@ -1,0 +1,10 @@
+name = "isla-cron"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+[triggers]
+crons = ["0 13 * * *", "*/30 * * * *"]
+
+[[kv_namespaces]]
+binding = "CASES"
+id = "00000000000000000000000000000000"

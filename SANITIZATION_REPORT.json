@@ -1,0 +1,19 @@
+{
+  "contains_original_to_synthetic_mapping": false,
+  "copied_file_counts": {
+    "operations": 24,
+    "portal": 29
+  },
+  "manifest_entries": 53,
+  "sanitization_counts": {
+    "booking_names_replaced": 14,
+    "emails_replaced": 26,
+    "files_scanned": 53,
+    "keyed_values_replaced": 65,
+    "literal_replacements": 270,
+    "phones_replaced": 11,
+    "toml_ids_replaced": 3
+  },
+  "source_directories_modified": false,
+  "status": "privacy-sanitized"
+}

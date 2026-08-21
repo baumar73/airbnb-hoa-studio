@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+.DS_Store
+._*
+*.log
+backups/
+.hermes/
+__pycache__/
+*.tar.gz

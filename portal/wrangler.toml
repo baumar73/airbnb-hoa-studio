@@ -1,0 +1,14 @@
+name = "isla-405d"
+compatibility_date = "2026-06-01"
+pages_build_output_dir = "public"
+
+[[kv_namespaces]]
+binding = "CASES"
+id = "00000000000000000000000000000000"
+# Preview/staging must never touch production data (handover report 2026-07-27,
+# risk A). Preview deployments bind CASES to the isolated cases-preview namespace.
+[env.preview]
+
+[[env.preview.kv_namespaces]]
+binding = "CASES"
+id = "00000000000000000000000000000000"

@@ -1,0 +1,9 @@
+User-agent: *
+Disallow: /v/
+Disallow: /w/
+Disallow: /admin
+Disallow: /find
+Disallow: /api/
+Disallow: /forms/
+
+Sitemap: https://portal.example.test/sitemap.xml

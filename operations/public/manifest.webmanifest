@@ -1,0 +1,11 @@
+{
+  "name": "Airbnb HOA Display",
+  "short_name": "HOA Display",
+  "start_url": "/display",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f1720",
+  "theme_color": "#0f1720",
+  "description": "Read-only Anzeige fuer Airbnb HOA Risiken, Fristen und naechste Schritte.",
+  "icons": []
+}
