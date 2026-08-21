@@ -497,9 +497,10 @@ function ensureDocumentStatus(caseItem) {
 
 function setChecklistFromDocumentStatus(caseItem, key, status) {
   caseItem.checklist = caseItem.checklist || {};
-  caseItem.checklist[key] = completedDocumentStatuses.has(status);
   if (key === "boardApproval") {
-    if (status === "approved") {
+    const approved = status === "approved";
+    caseItem.checklist.boardApproval = approved;
+    if (approved) {
       caseItem.status = "approved";
       caseItem.checkInLocked = false;
     } else {
@@ -507,7 +508,9 @@ function setChecklistFromDocumentStatus(caseItem, key, status) {
       caseItem.checkInLocked = true;
       delete caseItem.boardApprovalEvidence;
     }
+    return;
   }
+  caseItem.checklist[key] = completedDocumentStatuses.has(status);
 }
 
 function ensureMaintenanceItems() {
@@ -2927,7 +2930,16 @@ async function saveState(showFeedback = true) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(appState),
   });
+  if (response.status === 409) {
+    alert("Der Stand wurde zwischenzeitlich an anderer Stelle geaendert. Bitte die Seite neu laden, bevor weiter gearbeitet wird.");
+    throw new Error("Veralteter Stand (409)");
+  }
+  if (response.status === 413) {
+    throw new Error("Zustand zu gross zum Speichern (413)");
+  }
   if (!response.ok) throw new Error("Speichern fehlgeschlagen");
+  const payload = await response.json().catch(() => ({}));
+  if (payload.state?.updatedAt) appState.updatedAt = payload.state.updatedAt;
   if (showFeedback) {
     $("saveState").textContent = "Gespeichert";
     setTimeout(() => ($("saveState").textContent = "Speichern"), 1200);

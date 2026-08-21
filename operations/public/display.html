@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Airbnb HOA Display</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/display.css" />
+</head>
+<body class="display-body">
+  <div class="display-shell">
+    <section class="display-hero">
+      <div>
+        <p class="section-kicker">Airbnb HOA</p>
+        <h1 id="displayTitle">Airbnb HOA</h1>
+        <p id="displaySubtitle"></p>
+      </div>
+      <div class="display-clock">
+        <span>Heute</span>
+        <strong id="displayToday"></strong>
+        <span id="displayUpdated" class="muted"></span>
+        <span id="displayAccessPill" class="pill blue">lokal sicher</span>
+      </div>
+    </section>
+
+    <section class="display-metrics" aria-label="Kennzahlen">
+      <div class="display-metric red"><strong id="displayRed">0</strong><span>rot</span></div>
+      <div class="display-metric amber"><strong id="displayAmber">0</strong><span>gelb</span></div>
+      <div class="display-metric"><strong id="displayLocked">0</strong><span>gesperrte Check-ins</span></div>
+      <div class="display-metric"><strong id="displayInbox">0</strong><span>Eingaenge offen</span></div>
+    </section>
+
+    <main class="display-grid">
+      <section class="display-panel" aria-label="Arbeitsschritte">
+        <div class="display-section-heading">
+          <h2>Aktuelle Schritte</h2>
+          <span id="displayWorkCount" class="pill blue">0 offen</span>
+        </div>
+        <div id="displayWorkItems" class="display-work-list"></div>
+      </section>
+
+      <section class="display-panel" aria-label="Faelle">
+        <div class="display-section-heading">
+          <h2>Fallakten</h2>
+          <span id="displayCaseCount" class="pill blue">0 Faelle</span>
+        </div>
+        <div id="displayCases" class="display-case-list"></div>
+      </section>
+
+      <section class="display-panel" aria-label="Zugriffswege">
+        <div class="display-section-heading">
+          <h2>Zugriff</h2>
+        </div>
+        <div id="displayAccess" class="display-access-list"></div>
+        <p class="muted">Sicherheitsregel: Keine Zugangsdaten senden, solange Board Approval fehlt.</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="/display.js"></script>
+</body>
+</html>

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Airbnb HOA Operations</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Owner Operations</p>
+      <h1>Airbnb HOA Operations</h1>
+    </div>
+    <div class="topbar-actions">
+      <span id="dailyStatusPill" class="pill blue">Laedt</span>
+      <button id="saveState" type="button" class="button primary">Speichern</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="metrics" aria-label="Kennzahlen">
+      <div class="metric"><span class="metric-label">Offene Faelle</span><strong id="metricOpen">-</strong></div>
+      <div class="metric"><span class="metric-label">Reminder</span><strong id="metricReminder">-</strong></div>
+      <div class="metric"><span class="metric-label">Gesperrte Check-ins</span><strong id="metricLocked">-</strong></div>
+      <div class="metric"><span class="metric-label">Naechste Entscheidung</span><strong id="metricDecision">-</strong></div>
+      <div class="metric"><span class="metric-label">Maengel</span><strong id="metricDefects">-</strong></div>
+      <div class="metric"><span class="metric-label">Reinigung bis</span><strong id="metricCleaning">-</strong></div>
+      <div class="metric"><span class="metric-label">Zahlungen offen</span><strong id="metricPayments">-</strong></div>
+    </section>
+
+    <section class="today-focus blue" aria-label="Heute im Fokus">
+      <div>
+        <span class="section-kicker">Heute im Fokus</span>
+        <div class="focus-main">
+          <h2 id="focusTitle">-</h2>
+        </div>
+        <p class="focus-meta" id="focusMeta">-</p>
+        <p class="focus-detail" id="focusDetail">-</p>
+        <dl class="focus-deadlines" id="focusDeadlineSummary"></dl>
+      </div>
+      <aside class="focus-guard">
+        <div class="guard-header">
+          <strong id="focusGuardTitle">-</strong>
+          <span id="focusGuardPill" class="pill blue">-</span>
+        </div>
+        <p id="focusGuardDetail">-</p>
+        <div class="focus-actions">
+          <button id="focusCopyText" type="button" class="button secondary mini">Text kopieren</button>
+          <button id="focusOpenCase" type="button" class="button secondary mini">Fall anzeigen</button>
+          <button id="focusCopyDossier" type="button" class="button secondary mini">Dossier kopieren</button>
+        </div>
+      </aside>
+    </section>
+
+    <div class="workspace">
+      <section class="panel work-mode-panel" aria-label="Arbeitsmodus">
+        <div class="panel-heading work-mode-heading">
+          <div>
+            <h2>Priorisierte Schritte</h2>
+            <p class="muted" id="workModeMeta"></p>
+          </div>
+          <span id="workModePill" class="pill blue">-</span>
+        </div>
+        <div id="workModeList" class="work-mode-list"></div>
+      </section>
+
+      <section id="casePanel" class="panel" aria-label="Fallakte">
+        <div class="panel-heading case-heading">
+          <h2>Fallakte</h2>
+          <select id="caseStatus" class="select"></select>
+        </div>
+        <h3 id="caseTitle">-</h3>
+        <p class="muted" id="caseSubtitle">-</p>
+        <div id="alertStrip" class="alert-strip"></div>
+        <div id="caseSummary" class="case-summary"></div>
+        <div class="case-layout">
+          <div>
+            <h4 class="compact-heading">Checkliste</h4>
+            <div id="checklist" class="checklist"></div>
+            <h4 class="compact-heading">Fristen</h4>
+            <dl id="deadlineList" class="deadline-list"></dl>
+            <div class="timeline-section">
+              <h4 class="compact-heading">Timeline</h4>
+              <div id="timeline" class="timeline"></div>
+            </div>
+            <h4 class="compact-heading">Naechste Aktion</h4>
+            <div id="nextAction" class="next-action"></div>
+          </div>
+          <div>
+            <div class="document-status-section">
+              <h4 class="compact-heading">Dokumentenstatus</h4>
+              <p class="muted" id="documentStatusMeta"></p>
+              <div id="documentStatusList" class="document-status-list"></div>
+            </div>
+            <div class="decision-path-section">
+              <h4 class="compact-heading">Entscheidungspfad</h4>
+              <p class="muted" id="decisionPathMeta"></p>
+              <div id="decisionPathList" class="decision-path-list"></div>
+            </div>
+            <div class="communication-section">
+              <h4 class="compact-heading">Kommunikationshinweise</h4>
+              <div id="communicationEvidence" class="communication-evidence"></div>
+            </div>
+          </div>
+        </div>
+        <div class="case-layout">
+          <div class="sync-section">
+            <h4 class="compact-heading">Gmail-Sync</h4>
+            <p><span id="gmailStatusPill" class="pill blue">-</span></p>
+            <div id="gmailSync" class="sync-card"></div>
+          </div>
+          <div class="suggestions-section">
+            <h4 class="compact-heading">KI-Vorschlaege</h4>
+            <p><span id="suggestionStatusPill" class="pill green">0 offen</span></p>
+            <div id="aiSuggestions" class="suggestions-list"></div>
+          </div>
+        </div>
+        <div class="case-layout">
+          <div>
+            <h4 class="compact-heading">Vorlage</h4>
+            <label class="field">
+              <span>Vorlage waehlen (nur Kopiervorschau, kein automatischer Versand)</span>
+              <select id="templateSelect" class="select"></select>
+            </label>
+            <textarea id="templateText" rows="10" readonly></textarea>
+            <div class="focus-actions">
+              <button id="copyTemplate" type="button" class="button secondary">Text kopieren</button>
+            </div>
+          </div>
+          <div class="dossier-section">
+            <h4 class="compact-heading">Hermes-Pruefauftrag</h4>
+            <div class="focus-actions">
+              <button id="copyHermesTask" type="button" class="button secondary">Pruefauftrag kopieren</button>
+              <button id="pullHermesSync" type="button" class="button secondary">Neue Pruefung holen</button>
+            </div>
+            <div class="focus-actions">
+              <button id="copyDossier" type="button" class="button secondary">Dossier kopieren</button>
+              <a id="downloadDossier" class="button secondary" href="/api/cancellation-dossier?caseId=" download>Dossier herunterladen</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel inbox-panel" aria-label="Eingangsmappe">
+        <div class="panel-heading inbox-heading">
+          <h2>Eingangsmappe</h2>
+          <span id="inboxStatusPill" class="pill blue">-</span>
+        </div>
+        <div id="inboxList" class="inbox-list"></div>
+      </section>
+    </div>
+
+    <section class="panel daily-section" aria-label="Tagescheck">
+      <div class="panel-heading">
+        <h2>Tagescheck</h2>
+        <button id="refreshDailyCheck" type="button" class="button secondary mini">Tagescheck aktualisieren</button>
+      </div>
+      <div id="dailyCheck" class="daily-check"></div>
+    </section>
+
+    <section class="panel" aria-label="Kalender">
+      <div class="panel-heading">
+        <h2>Airbnb-Kalender</h2>
+        <div class="focus-actions">
+          <span class="muted" id="calendarGenerated"></span>
+          <button id="refreshCalendar" type="button" class="button secondary mini">Buchungen aktualisieren</button>
+          <button id="syncAppleCalendar" type="button" class="button secondary mini">iPhone-Kalender sync</button>
+        </div>
+      </div>
+      <div id="calendarList" class="calendar-list"></div>
+    </section>
+
+    <section id="cleaningPanel" class="panel cleaning-panel" aria-label="Reinigung">
+      <div class="panel-heading cleaning-heading">
+        <h2>Turno-Reinigung</h2>
+        <span id="cleaningStatusPill" class="pill blue">-</span>
+      </div>
+      <div id="cleaningSummary" class="cleaning-summary"></div>
+      <p class="muted" id="cleaningListMeta"></p>
+      <div id="cleaningProjects" class="cleaning-projects"></div>
+    </section>
+
+    <section id="paymentsPanel" class="panel payments-panel" aria-label="Zahlungen">
+      <div class="panel-heading payments-heading">
+        <h2>Airbnb-Zahlungen</h2>
+        <span id="paymentsStatusPill" class="pill blue">-</span>
+      </div>
+      <div id="paymentsSummary" class="payments-summary"></div>
+      <p class="muted" id="paymentsListMeta"></p>
+      <div id="paymentsList" class="payments-list"></div>
+    </section>
+
+    <section id="maintenancePanel" class="panel maintenance-panel" aria-label="Maengel">
+      <div class="panel-heading maintenance-heading">
+        <h2>Maengel</h2>
+        <span id="maintenanceStatusPill" class="pill blue">-</span>
+      </div>
+      <p class="muted" id="maintenanceListMeta"></p>
+      <form id="maintenanceForm" class="form-grid maintenance-form">
+        <label class="field"><span>Gegenstand</span><input id="maintenanceItem" required /></label>
+        <label class="field"><span>Titel</span><input id="maintenanceTitle" required /></label>
+        <label class="field"><span>Raum</span><input id="maintenanceRoom" /></label>
+        <label class="field"><span>Beschreibung</span><input id="maintenanceDescription" /></label>
+        <label class="field"><span>Meldedatum</span><input id="maintenanceReportedAt" type="date" /></label>
+        <label class="field"><span>Faellig am</span><input id="maintenanceDueDate" type="date" /></label>
+        <label class="field"><span>Dringlichkeit</span>
+          <select id="maintenancePriority" class="select">
+            <option value="high">hoch</option>
+            <option value="medium" selected>mittel</option>
+            <option value="low">niedrig</option>
+          </select>
+        </label>
+        <label class="field"><span>Status</span>
+          <select id="maintenanceStatus" class="select">
+            <option value="open" selected>offen</option>
+            <option value="planned">Termin geplant</option>
+            <option value="ordered">Ersatz bestellt</option>
+            <option value="done">erledigt</option>
+            <option value="cancelled">entfaellt</option>
+          </select>
+        </label>
+        <label class="field"><span>Fallbezug</span><select id="maintenanceCase" class="select"></select></label>
+        <button type="submit" class="button primary">Mangel erfassen</button>
+      </form>
+      <div id="maintenanceList" class="maintenance-list"></div>
+    </section>
+
+    <section id="telephonyPanel" class="panel telephony-panel" aria-label="Telefonie">
+      <div class="panel-heading telephony-heading">
+        <h2>Telefonie</h2>
+        <span id="telephonyStatusPill" class="pill blue">-</span>
+      </div>
+      <p class="muted" id="telephonyMeta"></p>
+      <form id="telephonyForm" class="form-grid telephony-form">
+        <label class="field"><span>Kontakt</span><select id="telephonyContact" class="select"></select></label>
+        <label class="field"><span>Nummer</span><input id="telephonyPhone" /></label>
+        <label class="field"><span>Thema</span><input id="telephonyTopic" /></label>
+        <label class="field"><span>Bereich</span><select id="telephonyProject" class="select"></select></label>
+        <label class="field"><span>Notiz</span><input id="telephonyNotes" /></label>
+        <label class="field"><span>Naechster Schritt</span><input id="telephonyNextAction" /></label>
+        <button type="submit" class="button primary">Anruf vorbereiten</button>
+      </form>
+      <div class="telephony-actions focus-actions">
+        <button id="copyTelephonyNumber" type="button" class="button secondary mini">Nummer kopieren</button>
+        <button id="openGoogleFiWeb" type="button" class="button secondary mini">Google Fi</button>
+        <button id="openTelephonyDialer" type="button" class="button secondary mini">Dialer</button>
+      </div>
+      <div id="telephonySummary" class="telephony-summary"></div>
+      <div id="telephonyContacts" class="telephony-contacts"></div>
+      <p class="muted" id="telephonyLogMeta"></p>
+      <div id="telephonyCallLog" class="telephony-call-log"></div>
+    </section>
+
+    <section class="panel listing-panel" aria-label="Inseratswissen">
+      <div class="panel-heading listing-heading">
+        <h2>Inseratswissen</h2>
+        <span id="listingStatusPill" class="pill blue">-</span>
+      </div>
+      <p class="muted" id="listingMeta"></p>
+      <div id="listingSummary" class="listing-summary"></div>
+      <div id="listingDetails" class="listing-details"></div>
+    </section>
+
+    <section class="panel integration-panel" aria-label="Integrationen">
+      <div class="panel-heading integration-heading">
+        <h2>Integrationen</h2>
+        <div class="integration-actions">
+          <span class="muted" id="integrationMeta"></span>
+          <button id="refreshIntegrationStatus" type="button" class="button secondary mini">Status pruefen</button>
+        </div>
+      </div>
+      <p><span id="integrationStatusPill" class="pill blue">-</span></p>
+      <div id="integrationStatusList" class="integration-status-list"></div>
+    </section>
+
+    <section class="panel device-panel" aria-label="Geraetezugriff">
+      <div class="panel-heading device-heading">
+        <h2>Geraete &amp; Anzeige</h2>
+        <div class="device-actions">
+          <span class="muted" id="deviceMeta"></span>
+          <button id="refreshDisplayInfo" type="button" class="button secondary mini">Wege pruefen</button>
+        </div>
+      </div>
+      <p><span id="deviceStatusPill" class="pill blue">-</span></p>
+      <div class="device-actions focus-actions">
+        <button id="openDisplayMode" type="button" class="button secondary">Anzeige oeffnen</button>
+        <button id="copyDisplayLink" type="button" class="button secondary">Link kopieren</button>
+        <button id="syncGbrain" type="button" class="button secondary">GBrain aktualisieren</button>
+      </div>
+      <div id="deviceAccessList" class="device-access-list"></div>
+    </section>
+
+    <section class="panel operations-tree-panel" aria-label="Operations-Baum">
+      <div class="panel-heading operations-tree-heading">
+        <h2>Operations-Baum</h2>
+        <span id="operationsTreePill" class="pill blue">-</span>
+      </div>
+      <p class="muted" id="operationsTreeMeta"></p>
+      <div id="operationsTreeList" class="operations-tree-list"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p class="muted">Lokale Owner-App. Kein automatischer Nachrichtenversand. Check-in-Freigabe nur mit dokumentiertem Board Approval.</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

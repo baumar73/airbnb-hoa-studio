@@ -1,20 +1,26 @@
 import { createServer } from "node:http";
-import { copyFile, readFile, writeFile, mkdir } from "node:fs/promises";
+import { copyFile, readFile, writeFile, mkdir, open, rename, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { networkInterfaces } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
-const dataDir = join(root, "data");
+// Overridable so tests can run against an isolated data directory.
+const dataDir = process.env.AIRBNB_HOA_DATA_DIR ? join(process.env.AIRBNB_HOA_DATA_DIR, "") : join(root, "data");
 const stateFile = join(dataDir, "airbnb-hoa-state.json");
+const stateLockFile = join(dataDir, ".airbnb-hoa-state.flock");
 const stateBackupDir = join(dataDir, "backups");
 const calendarFile = join(dataDir, "airbnb-florida-calendar-snapshot.json");
 const operationsManifestFile = join(dataDir, "markus-operations-manifest.json");
 const port = Number(process.env.PORT || 4327);
 const host = process.env.HOST || "127.0.0.1";
+// Explicit opt-in so read-only display endpoints can answer LAN requests.
+// Everything else stays loopback-only until real authentication exists.
+const allowLanDisplay = process.env.ALLOW_LAN_DISPLAY === "1";
+const maxBodyBytes = 1024 * 1024; // 1 MiB JSON body limit
 const hermesHost = process.env.HERMES_HOST || "markus@192.0.2.10";
 const hermesSyncPath = process.env.HERMES_SYNC_PATH || "/srv/agents/hermes/state/workspace/airbnb-hoa-operations/sync/latest.json";
 
@@ -114,8 +120,8 @@ function seedState() {
         adults: 2,
         reservationCode: "",
         email: "contact010@example.test",
-        status: "approved",
-        checkInLocked: false,
+        status: "waiting_for_board_approval",
+        checkInLocked: true,
         documentPacketSentAt: "2026-05-11",
         deadlineDocuments: "2026-05-14",
         cancellationReviewAt: "",
@@ -140,7 +146,7 @@ function seedState() {
           photoIds: true,
           feeTracked: true,
           submittedToHoa: true,
-          boardApproval: true,
+          boardApproval: false,
         },
         timeline: [
           { date: "2026-05-11", text: "Lease Application, Background Authorization and Rules sent to tenant." },
@@ -382,7 +388,8 @@ function localIPv4Addresses() {
 }
 
 function displayInfo() {
-  const lanEnabled = host === "0.0.0.0" || host === "::" || localIPv4Addresses().includes(host);
+  const boundToLan = host === "0.0.0.0" || host === "::" || localIPv4Addresses().includes(host);
+  const lanEnabled = allowLanDisplay && boundToLan;
   const localBaseUrl = `http://127.0.0.1:${port}`;
   const lanUrls = localIPv4Addresses().map((address) => `http://${address}:${port}`);
   return {
@@ -404,6 +411,47 @@ function displayInfo() {
 function isLocalRequest(req) {
   const address = req.socket?.remoteAddress || "";
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+// Private-by-default API policy:
+// - /api/health answers remotely with a minimal, non-sensitive payload.
+// - Read-only display endpoints may answer remotely only with an explicit
+//   ALLOW_LAN_DISPLAY=1 opt-in.
+// - Full state reads and every mutating/action endpoint stay loopback-only
+//   until real authentication exists.
+const DISPLAY_READ_PATHS = new Set(["/api/display-state", "/api/display-info", "/api/voice-brief"]);
+
+function denyRemote(res) {
+  json(res, 403, { ok: false, error: "forbidden_nonlocal", detail: "Dieser Endpunkt ist auf loopback (127.0.0.1) beschraenkt." });
+}
+
+function requestAllowed(req, pathname) {
+  if (isLocalRequest(req)) return true;
+  if (pathname === "/api/health") return true;
+  if (allowLanDisplay && DISPLAY_READ_PATHS.has(pathname)) return true;
+  return false;
+}
+
+async function readBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBodyBytes) {
+      const error = new Error("request_body_too_large");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    const error = new Error("invalid_json_body");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function assertValidCommunicationEvidenceList(entries, context) {
@@ -527,6 +575,26 @@ function assertValidState(state) {
     if (!caseItem.guestName || typeof caseItem.guestName !== "string") throw new Error(`Fall ${caseItem.id}: Gastname fehlt`);
     if (!caseItem.start || !caseItem.end) throw new Error(`Fall ${caseItem.id}: Zeitraum fehlt`);
     if (!caseItem.checklist || typeof caseItem.checklist !== "object") throw new Error(`Fall ${caseItem.id}: Checkliste fehlt`);
+    const approvalUnlocked = Boolean(caseItem.checklist.boardApproval) || caseItem.status === "approved" || caseItem.checkInLocked === false;
+    if (approvalUnlocked) {
+      const evidence = caseItem.boardApprovalEvidence;
+      if (
+        !evidence ||
+        typeof evidence !== "object" ||
+        Array.isArray(evidence) ||
+        typeof evidence.date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(evidence.date) ||
+        typeof evidence.source !== "string" ||
+        !evidence.source.trim()
+      ) {
+        throw new Error(`Fall ${caseItem.id}: Board Approval ohne Beleg (boardApprovalEvidence mit Datum und Quelle erforderlich)`);
+      }
+      for (const [key, value] of Object.entries(evidence)) {
+        if (!["date", "source"].includes(key)) throw new Error(`Fall ${caseItem.id}: unsicheres Board-Approval-Feld ${key}`);
+        if (typeof value !== "string") throw new Error(`Fall ${caseItem.id}: Board-Approval-Feld ${key} muss Text sein`);
+      }
+      if (evidence.source.length > 500) throw new Error(`Fall ${caseItem.id}: Board-Approval-Quelle ist zu lang`);
+    }
     if (caseItem.checklist.boardApproval && caseItem.checkInLocked) throw new Error(`Fall ${caseItem.id}: approved, aber Check-in gesperrt`);
     if (caseItem.status === "approved" && !caseItem.checklist.boardApproval) {
       throw new Error(`Fall ${caseItem.id}: Status approved ohne Board Approval`);
@@ -649,11 +717,245 @@ async function backupCurrentState() {
   return backupFile;
 }
 
-async function ensureState() {
-  await mkdir(dataDir, { recursive: true });
-  if (!existsSync(stateFile)) {
-    await writeFile(stateFile, JSON.stringify(seedState(), null, 2) + "\n", "utf8");
+class StateReadError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.name = "StateReadError";
   }
+}
+
+let stateInitPromise = null;
+
+async function acquireStateLock({ timeoutMs = 5000 } = {}) {
+  await mkdir(dataDir, { recursive: true });
+  // Delegate the actual inter-process lock to the kernel. Python's fcntl.flock
+  // is available on both Linux and macOS, is released automatically on crash,
+  // and avoids every stale-directory/ABA reclamation race. The helper holds the
+  // descriptor until Node closes its stdin.
+  const helper = String.raw`
+import fcntl, os, sys, time
+path, timeout = sys.argv[1], float(sys.argv[2])
+fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+os.fchmod(fd, 0o600)
+deadline = time.monotonic() + timeout
+while True:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        if time.monotonic() >= deadline:
+            print("TIMEOUT", flush=True)
+            sys.exit(73)
+        time.sleep(0.025)
+print("LOCKED", flush=True)
+for _ in sys.stdin.buffer:
+    pass
+fcntl.flock(fd, fcntl.LOCK_UN)
+os.close(fd)
+`;
+
+  const child = spawn("python3", ["-u", "-c", helper, stateLockFile, String(timeoutMs / 1000)], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  await new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (!settled && stdout.includes("LOCKED\n")) {
+        settled = true;
+        resolve();
+      }
+      if (!settled && stdout.includes("TIMEOUT\n")) {
+        const error = new Error("state_locked");
+        error.statusCode = 423;
+        fail(error);
+      }
+    });
+    child.once("error", fail);
+    child.once("exit", (code, signal) => {
+      if (settled) return;
+      const error = new Error(code === 73 ? "state_locked" : `state_lock_helper_failed: ${stderr.trim() || signal || code}`);
+      error.statusCode = code === 73 ? 423 : 500;
+      fail(error);
+    });
+  }).catch((error) => {
+    child.stdin.destroy();
+    if (!child.killed) child.kill();
+    throw error;
+  });
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        if (!child.killed) child.kill();
+        setTimeout(finish, 100).unref();
+      }, 1000);
+      child.once("exit", finish);
+      child.stdin.end();
+    });
+  };
+}
+
+async function initializeStateFile() {
+  await mkdir(dataDir, { recursive: true });
+  if (existsSync(stateFile)) return;
+
+  if (!stateInitPromise) {
+    stateInitPromise = (async () => {
+      const releaseLock = await acquireStateLock();
+      try {
+        if (existsSync(stateFile)) return;
+        const initialState = seedState();
+        assertValidState(initialState);
+        const tempFile = `${stateFile}.tmp-init-${process.pid}-${Date.now()}`;
+        let handle;
+        try {
+          handle = await open(tempFile, "wx", 0o600);
+          await handle.writeFile(JSON.stringify(initialState, null, 2) + "\n", "utf8");
+          await handle.sync();
+          await handle.close();
+          handle = undefined;
+          await rename(tempFile, stateFile);
+        } catch (error) {
+          if (handle) {
+            try {
+              await handle.close();
+            } catch {
+              // preserve the original initialization failure
+            }
+          }
+          try {
+            await unlink(tempFile);
+          } catch {
+            // temp file already gone
+          }
+          throw error;
+        }
+      } finally {
+        await releaseLock();
+      }
+    })();
+  }
+
+  const pending = stateInitPromise;
+  try {
+    await pending;
+  } finally {
+    if (stateInitPromise === pending) stateInitPromise = null;
+  }
+}
+
+// Strict state reader: fails closed when the real state file exists but is
+// unreadable, malformed, schema-invalid or violates invariants. Seed data is
+// created only when the file truly does not exist.
+async function readStateStrict({ validate = true } = {}) {
+  await initializeStateFile();
+  let raw;
+  try {
+    raw = await readFile(stateFile, "utf8");
+  } catch (error) {
+    throw new StateReadError(`state_file_unreadable: ${error.message}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new StateReadError(`state_file_malformed: ${error.message}`);
+  }
+  if (validate) {
+    try {
+      assertValidState(parsed);
+    } catch (error) {
+      throw new StateReadError(`state_file_invalid: ${error.message}`);
+    }
+  }
+  return parsed;
+}
+
+let stateWriteChain = Promise.resolve();
+
+function nextStateToken(currentToken) {
+  const now = Date.now();
+  const currentMilliseconds = Date.parse(currentToken || "");
+  const nextMilliseconds = Number.isFinite(currentMilliseconds) ? Math.max(now, currentMilliseconds + 1) : now;
+  return new Date(nextMilliseconds).toISOString();
+}
+
+// Serialize the compare, validation, backup and replacement as one critical
+// section. Comparing updatedAt before entering this queue would let two
+// simultaneous clients both pass and the second silently overwrite the first.
+function writeStateAtomic(incomingState) {
+  const run = async () => {
+    await initializeStateFile();
+    const releaseLock = await acquireStateLock();
+    try {
+      const currentState = await readStateStrict();
+      if (!incomingState.updatedAt || incomingState.updatedAt !== currentState.updatedAt) {
+        const error = new Error("stale_state");
+        error.statusCode = 409;
+        throw error;
+      }
+      const nextState = { ...incomingState, updatedAt: nextStateToken(currentState.updatedAt) };
+      assertValidState(nextState);
+      const backupFile = await backupCurrentState();
+      const tempFile = `${stateFile}.tmp-${process.pid}-${Date.now()}`;
+      let handle;
+      try {
+        handle = await open(tempFile, "wx", 0o600);
+        await handle.writeFile(JSON.stringify(nextState, null, 2) + "\n", "utf8");
+        await handle.sync();
+        await handle.close();
+        handle = undefined;
+        await rename(tempFile, stateFile);
+      } catch (error) {
+        if (handle) {
+          try {
+            await handle.close();
+          } catch {
+            // preserve the original write failure
+          }
+        }
+        try {
+          await unlink(tempFile);
+        } catch {
+          // temp file already gone
+        }
+        throw error;
+      }
+      return { backupFile, nextState };
+    } finally {
+      await releaseLock();
+    }
+  };
+  const result = stateWriteChain.then(run, run);
+  stateWriteChain = result.then(() => {}, () => {});
+  return result;
 }
 
 async function readJson(path, fallback) {
@@ -664,13 +966,6 @@ async function readJson(path, fallback) {
   }
 }
 
-async function readBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
-}
-
 function json(res, status, payload) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload, null, 2));
@@ -679,13 +974,27 @@ function json(res, status, payload) {
 async function buildHealth() {
   const operationsManifest = await readJson(operationsManifestFile, { version: 1, domains: [], runtimePolicy: {} });
   const runtimePolicy = operationsManifest.runtimePolicy || {};
+  let stateError = "";
+  try {
+    await initializeStateFile();
+  } catch {
+    stateError = "state_file_unreadable";
+  }
   const checks = {
     dataDir: existsSync(dataDir),
     stateFile: existsSync(stateFile),
     calendarSnapshot: existsSync(calendarFile),
     operationsManifest: existsSync(operationsManifestFile),
   };
-  const ok = Object.values(checks).every(Boolean);
+  if (checks.stateFile && !stateError) {
+    try {
+      await readStateStrict();
+    } catch (error) {
+      // Report degradation without leaking private state content.
+      stateError = error instanceof StateReadError ? error.message.split(":")[0] : "state_file_unreadable";
+    }
+  }
+  const ok = Object.values(checks).every(Boolean) && !stateError;
   return {
     ok,
     status: ok ? "ok" : "degraded",
@@ -701,7 +1010,8 @@ async function buildHealth() {
       workspace: root,
       publicBaseUrl: process.env.PUBLIC_BASE_URL || "",
     },
-    checks,
+    checks: { ...checks, stateValid: !stateError },
+    ...(stateError ? { stateError } : {}),
     domains: (operationsManifest.domains || []).map((domain) => ({
       id: domain.id,
       status: domain.status,
@@ -1229,17 +1539,24 @@ async function pullHermesSync() {
 }
 
 async function api(req, res, url) {
-  await ensureState();
+  if (!requestAllowed(req, url.pathname)) {
+    denyRemote(res);
+    return;
+  }
 
   if (req.method === "GET" && url.pathname === "/api/health") {
     const health = await buildHealth();
-    json(res, health.ok ? 200 : 503, health);
+    // Remote callers get a minimal non-sensitive answer; loopback gets details.
+    const payload = isLocalRequest(req)
+      ? health
+      : { ok: health.ok, status: health.status, app: health.app, generatedAt: health.generatedAt };
+    json(res, health.ok ? 200 : 503, payload);
     return;
   }
 
   if (req.method === "GET" && url.pathname === "/api/bootstrap") {
-    const [state, calendar, operationsManifest] = await Promise.all([
-      readJson(stateFile, seedState()),
+    const state = await readStateStrict();
+    const [calendar, operationsManifest] = await Promise.all([
       readJson(calendarFile, { events: [] }),
       readJson(operationsManifestFile, { version: 1, domains: [], sharedCapabilities: [] }),
     ]);
@@ -1265,10 +1582,8 @@ async function api(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/display-state") {
-    const [state, calendar] = await Promise.all([
-      readJson(stateFile, seedState()),
-      readJson(calendarFile, { events: [] }),
-    ]);
+    const state = await readStateStrict();
+    const calendar = await readJson(calendarFile, { events: [] });
     let dailyCheck = { items: [], summary: { red: 0, amber: 0, openCases: 0, reservedEvents: 0 } };
     try {
       dailyCheck = await runDailyCheck();
@@ -1280,10 +1595,8 @@ async function api(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/voice-brief") {
-    const [state, calendar] = await Promise.all([
-      readJson(stateFile, seedState()),
-      readJson(calendarFile, { events: [] }),
-    ]);
+    const state = await readStateStrict();
+    const calendar = await readJson(calendarFile, { events: [] });
     let dailyCheck = { items: [], summary: { red: 0, amber: 0, openCases: 0, reservedEvents: 0 } };
     try {
       dailyCheck = await runDailyCheck();
@@ -1297,12 +1610,18 @@ async function api(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/state") {
     try {
       const body = await readBody(req);
-      const nextState = { ...body, updatedAt: new Date().toISOString() };
-      assertValidState(nextState);
-      const backupFile = await backupCurrentState();
-      await writeFile(stateFile, JSON.stringify(nextState, null, 2) + "\n", "utf8");
+      const { backupFile, nextState } = await writeStateAtomic(body);
       json(res, 200, { ok: true, state: nextState, backupFile });
     } catch (error) {
+      if (error.statusCode) {
+        const detail = error.statusCode === 409 ? "Der Stand ist veraltet. Bitte neu laden und erneut speichern." : undefined;
+        json(res, error.statusCode, { ok: false, error: error.message, ...(detail ? { detail } : {}) });
+        return;
+      }
+      if (error instanceof StateReadError) {
+        json(res, 503, { ok: false, error: "state_unreadable" });
+        return;
+      }
       json(res, 400, { ok: false, error: error.message });
     }
     return;
@@ -1374,10 +1693,8 @@ async function api(req, res, url) {
     try {
       const caseId = url.searchParams.get("caseId");
       if (!caseId) throw new Error("caseId fehlt");
-      const [state, calendar] = await Promise.all([
-        readJson(stateFile, seedState()),
-        readJson(calendarFile, { events: [] }),
-      ]);
+      const state = await readStateStrict();
+      const calendar = await readJson(calendarFile, { events: [] });
       let dailyCheck = { items: [], summary: { red: 0, amber: 0, openCases: 0, reservedEvents: 0 } };
       try {
         dailyCheck = await runDailyCheck();
@@ -1424,6 +1741,10 @@ createServer(async (req, res) => {
       await serveStatic(req, res, url);
     }
   } catch (error) {
+    if (error instanceof StateReadError) {
+      json(res, 503, { ok: false, error: "state_unreadable" });
+      return;
+    }
     json(res, 500, { error: error.message });
   }
 }).listen(port, host, () => {

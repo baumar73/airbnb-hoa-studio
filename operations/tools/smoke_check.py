@@ -156,7 +156,12 @@ def post_json_expect_error(url: str, payload: dict[str, Any]) -> tuple[int, dict
         with urllib.request.urlopen(request, timeout=20) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read().decode("utf-8"))
+        code = error.code
+        try:
+            body = json.loads(error.read().decode("utf-8"))
+        finally:
+            error.close()
+        return code, body
 
 
 def api_checks(base_url: str, state: dict[str, Any]) -> list[str]:
