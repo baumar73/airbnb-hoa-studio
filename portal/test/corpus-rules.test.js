@@ -6,6 +6,7 @@ import {
   evaluateApplicationFee,
   evaluateOccupancyLimit,
   evaluatePetRule,
+  evaluateMinimumRentalTerm,
   containsProhibitedSensitiveData,
   stripProhibitedSensitiveData,
 } from '../functions/lib/hoa-rules.js';
@@ -36,6 +37,16 @@ test('occupancy classification requires explicit owner-presence and compensation
 test('exactly 30 nights fails closed because one-month and 30-day texts conflict', () => {
   const result = classifyOccupancy({ ownerPresent: false, compensation: false, stayNights: 30 });
   assert.equal(result.kind, 'clarification_required');
+  assert.equal(result.checkInLocked, true);
+  assert.deepEqual(result.sourceIds.sort(), ['CINC-363471', 'CINC-364605']);
+});
+
+test('short paid stays remain rentals but maintenance blocks never count as rental nights', () => {
+  const result = evaluateMinimumRentalTerm({ rentalNights: 27, maintenanceBlockedNights: 3 });
+  assert.equal(result.status, 'owner_review_required');
+  assert.equal(result.rentalNights, 27);
+  assert.equal(result.maintenanceBlockedNights, 3);
+  assert.equal(result.maintenanceCountsTowardRentalTerm, false);
   assert.equal(result.checkInLocked, true);
   assert.deepEqual(result.sourceIds.sort(), ['CINC-363471', 'CINC-364605']);
 });

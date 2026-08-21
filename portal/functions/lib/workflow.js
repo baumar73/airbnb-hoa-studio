@@ -1,7 +1,7 @@
 // Pure workflow policy shared by Pages and the scheduled worker.
 // Guest actions may prepare a package, but only an authenticated owner action
 // may submit it or confirm an approval.
-import { HOA_RULE_REGISTRY, classifyOccupancy, evaluateApplicationFee, evaluatePetRule } from './hoa-rules.js';
+import { HOA_RULE_REGISTRY, classifyOccupancy, evaluateApplicationFee, evaluateMinimumRentalTerm, evaluatePetRule } from './hoa-rules.js';
 
 export async function bundleDigest(orderedPdfBytes) {
   const parts = (orderedPdfBytes || []).map(value => value instanceof Uint8Array ? value : new Uint8Array(value));
@@ -77,12 +77,18 @@ export function validateAirbnbCaseInput(input) {
   if (!result.ok) return result;
   const classification = classifyOccupancy({ ownerPresent: false, compensation: true, stayNights: result.nights });
   if (classification.kind !== 'rental') return { ok: false, error: 'occupancy classification requires manual clarification' };
-  if (result.nights < 30) return { ok: false, error: 'paid Airbnb rentals require more than 30 nights and the full HOA path' };
-  if (result.nights === 30) return { ok: false, error: 'exactly 30 nights requires manual HOA clarification because the source rules conflict' };
+  const minimumTermDecision = evaluateMinimumRentalTerm({
+    rentalNights: result.nights,
+    maintenanceBlockedNights: input && input.maintenanceBlockedNights,
+  });
+  if (minimumTermDecision.status === 'invalid') return { ok: false, error: 'maintenance blocked nights must be a whole number between 0 and 366' };
+  if (minimumTermDecision.status === 'clarification_required') {
+    return { ok: false, error: 'exactly 30 nights requires manual HOA clarification because the source rules conflict' };
+  }
   if (Number(input && input.adults) > 2) return { ok: false, error: 'rentals with more than two adults require a separate manual HOA application package' };
   return { ...result, pathType: 'full', occupancyKind: classification.kind,
     ruleVersionId: classification.ruleVersionId, ruleStatus: classification.ruleStatus,
-    ruleSourceIds: classification.sourceIds };
+    ruleSourceIds: classification.sourceIds, minimumTermDecision };
 }
 
 export function requiredPackageDocuments(pathType) {

@@ -48,6 +48,27 @@ export function classifyOccupancy(input = {}) {
   return { kind: 'rental', registrationRequired: false, checkInLocked: true, ...ruleAudit('occupancy-classification') };
 }
 
+export function evaluateMinimumRentalTerm(input = {}) {
+  const rentalNights = Number(input.rentalNights);
+  const maintenanceBlockedNights = input.maintenanceBlockedNights == null || input.maintenanceBlockedNights === ''
+    ? 0 : Number(input.maintenanceBlockedNights);
+  const base = {
+    rentalNights,
+    maintenanceBlockedNights,
+    maintenanceCountsTowardRentalTerm: false,
+    checkInLocked: true,
+    policyVersionId: 'transparent-short-rental-review-v1',
+    ...ruleAudit('minimum-term-boundary'),
+  };
+  if (!Number.isInteger(rentalNights) || rentalNights < 1 ||
+      !Number.isInteger(maintenanceBlockedNights) || maintenanceBlockedNights < 0 || maintenanceBlockedNights > 366) {
+    return { ...base, status: 'invalid' };
+  }
+  if (rentalNights < 30) return { ...base, status: 'owner_review_required' };
+  if (rentalNights === 30) return { ...base, status: 'clarification_required' };
+  return { ...base, status: 'satisfied_above_conflict', checkInLocked: false };
+}
+
 export function evaluateApplicationFee(input = {}) {
   const base = { currentAssociationAmount: 100, statutoryMaximum: 150, ...ruleAudit('application-fee') };
   if (input.kind === 'guest') return { status: 'not_required', amount: 0, ...base };

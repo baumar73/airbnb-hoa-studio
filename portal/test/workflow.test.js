@@ -61,12 +61,20 @@ test('rejects invalid dates and missing adult count', () => {
   assert.equal(validateCaseInput({ guestName: 'X', checkIn: '2027-02-31', checkOut: '2027-03-05', adults: 1 }).ok, false);
 });
 
-test('Airbnb rentals use the full path while the exact 30-night conflict fails closed', () => {
+test('Airbnb rentals use the full path, short stays remain visible for owner review, and exact 30 fails closed', () => {
   const exactThirty = validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-16', adults: 1 });
   assert.equal(exactThirty.ok, false);
   assert.match(exactThirty.error, /exactly 30 nights/i);
-  assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-17', adults: 1 }).ok, true);
-  assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-15', adults: 1 }).ok, false);
+  const regular = validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-17', adults: 1 });
+  assert.equal(regular.ok, true);
+  assert.equal(regular.minimumTermDecision.status, 'satisfied_above_conflict');
+  const short = validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-13', adults: 1, maintenanceBlockedNights: 3 });
+  assert.equal(short.ok, true);
+  assert.equal(short.pathType, 'full');
+  assert.equal(short.minimumTermDecision.status, 'owner_review_required');
+  assert.equal(short.minimumTermDecision.rentalNights, 27);
+  assert.equal(short.minimumTermDecision.maintenanceBlockedNights, 3);
+  assert.equal(short.minimumTermDecision.maintenanceCountsTowardRentalTerm, false);
 });
 
 test('Airbnb rentals with more than two adults are routed to a manual HOA package', () => {

@@ -9,7 +9,7 @@ import { register } from 'node:module';
 register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
 
 const { socketAttempts, resetSocketAttempts } = await import('cloudflare:sockets');
-const { onRequest } = await import('../functions/[[path]].js');
+const { onRequest, reviewPayload } = await import('../functions/[[path]].js');
 const { shouldAutoSubmitAfterGuestSave, isGuestAccessibleCase } = await import('../functions/lib/workflow.js');
 const { containsProhibitedSensitiveData } = await import('../functions/lib/hoa-rules.js');
 
@@ -389,6 +389,48 @@ test('manual Airbnb creation rejects exact 30 nights and creates only a validate
   assert.equal(created.occupancyDecision.ruleStatus, 'current');
   assert.match(created.occupancyDecision.ruleVersionId, /^2026-08-21-corpus-review:/);
   assert.ok(created.occupancyDecision.sourceIds.includes('CINC-364605'));
+});
+
+test('manual short paid rental is created transparently without counting maintenance blocks as rental nights', async () => {
+  const { env, store } = mockEnv();
+  store.set('cases', '[]');
+  const response = await onRequest({
+    request: adminRequest('/admin/create', {
+      guestName: 'Synthetic Short Stay', reservationCode: 'HMTEST0027',
+      checkIn: '2026-10-17', checkOut: '2026-11-13', adults: '1', maintenanceBlockedNights: '3',
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(response.status, 303);
+  const created = JSON.parse(store.get('cases'))[0];
+  assert.equal(created.nights, 27);
+  assert.equal(created.pathType, 'full');
+  assert.equal(created.minimumTermDecision.status, 'owner_review_required');
+  assert.equal(created.minimumTermDecision.rentalNights, 27);
+  assert.equal(created.minimumTermDecision.maintenanceBlockedNights, 3);
+  assert.equal(created.minimumTermDecision.maintenanceCountsTowardRentalTerm, false);
+  assert.equal(created.minimumTermDecision.checkInLocked, true);
+});
+
+test('review payload binds the transparent minimum-term decision without counting maintenance', () => {
+  const payload = reviewPayload({
+    id: 'short-1', reservationCode: 'SHORTSAFE', checkIn: '2026-10-17', checkOut: '2026-11-13',
+    nights: 27, adults: 1, pathType: 'full',
+    minimumTermDecision: {
+      status: 'satisfied_above_conflict', rentalNights: 30, maintenanceBlockedNights: 3,
+      maintenanceCountsTowardRentalTerm: true, checkInLocked: false,
+      policyVersionId: 'tampered-policy', ruleVersionId: 'tampered-rule',
+      ruleStatus: 'current', sourceIds: ['tampered-source'],
+    },
+  }, { adults: [], children: [] }, false);
+  assert.deepEqual(payload.case.minimumTermDecision, {
+    status: 'owner_review_required', rentalNights: 27, maintenanceBlockedNights: 3,
+    maintenanceCountsTowardRentalTerm: false, checkInLocked: true,
+    policyVersionId: 'transparent-short-rental-review-v1',
+    ruleVersionId: '2026-08-21-corpus-review:minimum-term-boundary',
+    ruleStatus: 'unresolved', sourceIds: ['CINC-363471', 'CINC-364605'],
+  });
 });
 
 test('live submission mode cannot be enabled without an atomic coordinator', async () => {

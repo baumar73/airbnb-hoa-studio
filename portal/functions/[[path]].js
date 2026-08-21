@@ -7,7 +7,7 @@ import { submitApprovedPackage, isReadyForOwnerReview, docStates } from './lib/s
 import { validateAirbnbCaseInput, isAllowedMutationOrigin, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isValidISODate } from './lib/workflow.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
-import { assertNoProhibitedSensitiveData, containsProhibitedSensitiveData, stripProhibitedSensitiveData } from './lib/hoa-rules.js';
+import { assertNoProhibitedSensitiveData, containsProhibitedSensitiveData, evaluateMinimumRentalTerm, stripProhibitedSensitiveData } from './lib/hoa-rules.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -54,6 +54,7 @@ function newCase(input) {
       sourceIds: [...(input.ruleSourceIds || [])],
       recordedAt: new Date().toISOString(),
     },
+    minimumTermDecision: input.minimumTermDecision,
     steps: STEP_TEMPLATES[pathType].map(([id, label]) => ({ id, label, done: false, date: null })),
     createdAt: new Date().toISOString(),
     notes: '',
@@ -136,7 +137,7 @@ async function sha256hex(s) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
-function reviewPayload(c, wizard, includeSignatures) {
+export function reviewPayload(c, wizard, includeSignatures) {
   const cleanAdults = ((wizard && wizard.adults) || []).map(a => {
     const safe = {
       firstName: String(a?.firstName || ''), middleName: String(a?.middleName || ''), lastName: String(a?.lastName || ''),
@@ -147,8 +148,17 @@ function reviewPayload(c, wizard, includeSignatures) {
     if (includeSignatures) safe.sigPng = String(a?.sigPng || '');
     return safe;
   });
+  const minimumTerm = c.minimumTermDecision
+    ? evaluateMinimumRentalTerm({
+        rentalNights: Number(c.nights),
+        maintenanceBlockedNights: c.minimumTermDecision.maintenanceBlockedNights,
+      })
+    : null;
   return {
-    case: { id: c.id, reservationCode: c.reservationCode, checkIn: c.checkIn, checkOut: c.checkOut, adults: c.adults, pathType: c.pathType },
+    case: {
+      id: c.id, reservationCode: c.reservationCode, checkIn: c.checkIn, checkOut: c.checkOut,
+      adults: c.adults, pathType: c.pathType, minimumTermDecision: minimumTerm,
+    },
     wizard: {
       adults: cleanAdults,
       esignConsent: !!(wizard && wizard.esignConsent),
@@ -984,6 +994,9 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
   for (const c of active) {
     const days = daysUntil(c.checkIn);
     const who = `<b>${esc(c.guestName)}</b> (Check-in ${esc(c.checkIn)})`;
+    if (c.minimumTermDecision?.status === 'owner_review_required') {
+      attn.push(['crit', `${who}: bezahlte Kurzvermietung mit ${Number(c.minimumTermDecision.rentalNights || c.nights)} tatsächlichen Mietnächten. ${Number(c.minimumTermDecision.maintenanceBlockedNights || 0)} separat blockierte Wartungsnächte zählen nicht als Mietzeit; Owner- und HOA-Prüfung bleiben erforderlich.`, '/admin/cases', 'Zum Vorgang']);
+    }
     if (c.submissionError) attn.push(['crit', `${who}: Versand-Störung — „${esc(c.submissionError.message.slice(0, 80))}". Es gibt keinen automatischen Wiederholungsversuch.`, '/admin/cases', 'Zum Vorgang']);
     if (days >= 0 && days <= 10 && !isDone(c, 'board_approved')) attn.push(['crit', `${who}: nur noch ${days} Tage bis Check-in, Board-Approval fehlt.`, '/admin/cases', 'Zum Vorgang']);
     if (!c.wizard) attn.push(['warn', `${who}: Gast hat die Formulare noch nicht ausgefüllt. Eine Erinnerung darf nur nach deiner Freigabe versandt werden.`, `/v/${c.token}`, 'Gast-Seite']);
@@ -1175,6 +1188,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
       </div>` : '';
     return `<tr>
       <td><b>${esc(c.guestName)}</b><br><span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights}n · ${esc(c.pathType)}</span><br>
+          ${c.minimumTermDecision?.status === 'owner_review_required' ? `<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Kurzvermietung: Owner-Prüfung erforderlich</span><p class="muted">${Number(c.minimumTermDecision.rentalNights || c.nights)} tatsächliche Mietnächte; ${Number(c.minimumTermDecision.maintenanceBlockedNights || 0)} separat blockierte Wartungsnächte zählen nicht als Mietzeit.</p>` : ''}
           ${c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
           ${feeState}<br>
           <span class="muted">${docLine}</span><br>${subLine}${reviewButton}</td>
@@ -1197,7 +1211,8 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
         <label>Check-in (YYYY-MM-DD)</label><input name="checkIn" required pattern="\\d{4}-\\d{2}-\\d{2}">
         <label>Check-out (YYYY-MM-DD)</label><input name="checkOut" required pattern="\\d{4}-\\d{2}-\\d{2}">
         <label>Erwachsene (18+)</label><input name="adults" type="number" value="2" min="1" max="4">
-        <p class="muted">Airbnb-Buchungen werden immer als vollständiger Mietvorgang angelegt und müssen mehr als 30 Nächte umfassen. Genau 30 Nächte bleiben wegen widersprüchlicher Quelltexte gesperrt und benötigen eine schriftliche HOA-Klärung.</p>
+        <label>Separat blockierte Wartungsnächte nach dem Aufenthalt</label><input name="maintenanceBlockedNights" type="number" value="0" min="0" max="366">
+        <p class="muted">Auch kürzere bezahlte Aufenthalte können als vollständiger Mietvorgang angelegt werden. Sie werden deutlich als Owner-Prüfung markiert. Wartungsblöcke bleiben separat und zählen nicht als Mietnächte. Genau 30 Mietnächte bleiben wegen widersprüchlicher Quelltexte gesperrt und benötigen eine schriftliche HOA-Klärung.</p>
         <p><button>Vorgang anlegen & Magic-Link erhalten</button></p>
       </form></details>`);
 }
@@ -1608,6 +1623,7 @@ export async function onRequest(context) {
         reservationCode: String(form.get('reservationCode') || '').trim().toUpperCase(),
         checkIn: String(form.get('checkIn') || ''), checkOut: String(form.get('checkOut') || ''),
         adults: Number(form.get('adults')),
+        maintenanceBlockedNights: Number(form.get('maintenanceBlockedNights') || 0),
       };
       const validation = validateAirbnbCaseInput(input);
       if (!validation.ok) return new Response(validation.error, { status: 400, headers: SEC_HEADERS });

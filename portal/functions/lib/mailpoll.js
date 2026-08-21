@@ -25,6 +25,14 @@ function newCaseFrom(b) {
     guestName: b.guestName, reservationCode: b.code,
     checkIn: b.checkIn, checkOut: b.checkOut, nights, adults: b.adults,
     pathType,
+    occupancyDecision: {
+      kind: validation.occupancyKind,
+      ruleVersionId: validation.ruleVersionId,
+      ruleStatus: validation.ruleStatus,
+      sourceIds: [...(validation.ruleSourceIds || [])],
+      recordedAt: new Date().toISOString(),
+    },
+    minimumTermDecision: validation.minimumTermDecision,
     steps: STEPS.map(([id, label]) => ({ id, label, done: false, date: null })),
     createdAt: new Date().toISOString(),
     notes: 'auto-created from Airbnb confirmation email',
@@ -60,7 +68,10 @@ export async function pollMail(env) {
           const c = newCaseFrom(b);
           cases.push(c); dirty = true; summary.bookings++;
           seenSet.add('b' + uid); delete ambiguous[uid];
-          await sendTelegram(env, `🆕 Buchung erkannt & Vorgang angelegt: ${b.guestName}, ${b.checkIn} → ${b.checkOut} (${c.nights} Nächte, ${c.pathType}, ${b.code}, ${b.adults} Erwachsene).\n\n➡️ Bitte Daten im Admin prüfen und den Portalzugang per Airbnb-Chat senden:\n${PORTAL}/admin`);
+          const termNotice = c.minimumTermDecision?.status === 'owner_review_required'
+            ? `\n⚠️ Kurzvermietung: ${c.nights} tatsächliche Mietnächte. Wartungsblöcke zählen nicht als Mietzeit; Owner- und HOA-Prüfung bleiben erforderlich.`
+            : '';
+          await sendTelegram(env, `🆕 Buchung erkannt & Vorgang angelegt: ${b.guestName}, ${b.checkIn} → ${b.checkOut} (${c.nights} Nächte, ${c.pathType}, ${b.code}, ${b.adults} Erwachsene).${termNotice}\n\n➡️ Bitte Daten im Admin prüfen und den Portalzugang per Airbnb-Chat senden:\n${PORTAL}/admin`);
         } catch (e) {
           summary.alerts++;
           if (!ambiguous[uid]) {
