@@ -1340,6 +1340,7 @@ export async function onRequest(context) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mW[1]);
     if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
+    if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
 
     if (!mW[2] && request.method === 'GET') {
       if (c.submission || c.reviewLockedAt) return redirect(`/v/${c.token}`);
