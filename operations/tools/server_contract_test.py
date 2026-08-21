@@ -162,6 +162,27 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertIn("text/html", header_value(headers, "Content-Type"))
 
+        for path in ("/refinement.css", "/display-refinement.css"):
+            status, headers, _ = http(f"{self.base_url}{path}")
+            self.assertEqual(status, 200)
+            self.assertIn("text/css", header_value(headers, "Content-Type"))
+
+        for name in ("refinement.css", "display-refinement.css"):
+            css = (ROOT / "public" / name).read_text(encoding="utf-8")
+            self.assertIn("prefers-reduced-motion", css)
+
+        owner_css = (ROOT / "public" / "refinement.css").read_text(encoding="utf-8")
+        self.assertIn("transition: none !important", owner_css)
+        self.assertIn("transform: none !important", owner_css)
+        self.assertIn("@media (max-width: 760px)", owner_css)
+        self.assertIn("position: static", owner_css)
+
+        index = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('class="skip-link"', index)
+        self.assertIn('class="section-nav"', index)
+        self.assertIn('id="caseStatus" class="select" aria-label="Fallstatus auswählen"', index)
+        self.assertIn('id="mainContent" class="app-main" tabindex="-1"', index)
+
     def test_clean_install_seed_is_valid_consistent_and_locked(self) -> None:
         self.server.stop()
         blank_dir = Path(self.tmp) / "blank-data"

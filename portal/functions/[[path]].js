@@ -289,15 +289,103 @@ details.sect>*:last-child{margin-bottom:18px}
 .attn.crit{border-left-color:var(--crit);background:var(--crit-wash)}
 .attn.okk{border-left-color:var(--ok);background:var(--ok-wash)}
 footer{text-align:center;color:var(--faint);font-size:13px;padding:26px 22px;border-top:1px solid var(--line);margin-top:20px}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+/* refined coastal interface */
+html{scroll-behavior:smooth;scroll-padding-top:30px}
+body{min-height:100vh;background:
+ radial-gradient(circle at 6% 0%,rgba(30,111,107,.12),transparent 32rem),
+ radial-gradient(circle at 96% 4%,rgba(217,102,61,.10),transparent 28rem),
+ linear-gradient(180deg,#f4f0e5 0,var(--paper) 34rem,#e9efea 100%)}
+.skip-link{align-items:center;display:flex;min-height:44px;position:fixed;left:22px;top:-80px;z-index:100;background:var(--ink);color:#fff;padding:9px 15px;border-radius:0 0 10px 10px}
+.skip-link:focus{top:0}
+header.site-header{padding:34px 22px 38px;border-bottom:0;position:relative;overflow:hidden}
+header.site-header::after{content:'';position:absolute;inset:auto -10vw 0 45%;height:1px;background:linear-gradient(90deg,transparent,var(--line-strong),transparent)}
+header .wrap{max-width:1060px}
+.brand{align-items:center;display:flex;flex-wrap:wrap;gap:10px;font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.11em;max-width:100%;text-transform:uppercase}
+.brand::before{align-items:center;background:var(--accent-deep);border-radius:12px;color:#fff;content:'IS';display:inline-flex;font-family:var(--serif);font-size:14px;height:36px;justify-content:center;letter-spacing:.03em;width:36px}
+header h1{font-size:clamp(38px,6vw,68px);max-width:15ch}
+header p{font-size:18px;line-height:1.55;max-width:65ch}
+main{max-width:1060px;padding:36px 22px 84px}
+.card{border-color:rgba(24,40,38,.12);border-radius:20px;box-shadow:0 1px 2px rgba(24,40,38,.04),0 16px 46px rgba(24,40,38,.07);padding:28px 30px;margin:20px 0}
+.card h2{font-size:25px}
+.card p:last-child{margin-bottom:0}
+.chip{border:1px solid rgba(30,111,107,.13);font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.06em;padding:7px 13px;text-transform:uppercase}
+button,a.btn{border-radius:12px;min-height:46px;padding:12px 20px;box-shadow:0 8px 20px rgba(30,111,107,.16)}
+button.ghost,a.btn.ghost{box-shadow:none}
+button:hover,a.btn:hover{transform:translateY(-1px)}
+button:active,a.btn:active{transform:translateY(0)}
+input,select,textarea{border-color:rgba(24,40,38,.22);border-radius:11px;min-height:48px;padding:11px 13px;transition:border-color .15s,box-shadow .15s}
+input:hover,select:hover,textarea:hover{border-color:var(--line-strong)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 4px rgba(30,111,107,.12);outline:none}
+label{font-weight:650;color:var(--ink);margin-top:15px}
+.pill{border:1px solid transparent;font-family:var(--sans);font-size:12px;font-weight:750;padding:5px 10px}
+.pill.ok{border-color:#b9d8c4}.pill.warn{border-color:#e4ce99}.pill.teal{border-color:#b7d9d2}
+ul.steps li{gap:16px;padding:14px 0}
+.dot{align-items:center;display:flex;height:28px;justify-content:center;line-height:1;width:28px;flex-basis:28px}
+.bar{height:10px;background:#dfe4dd}
+.attn{border-left-width:5px;border-radius:12px;padding:13px 16px}
+.addr{border-radius:13px}
+.sigpad{border-radius:14px;box-shadow:inset 0 0 0 1px rgba(24,40,38,.04)}
+.anav{background:rgba(252,251,246,.78);border:1px solid var(--line);border-radius:16px;gap:4px;margin-top:24px;overflow-x:auto;padding:6px;scrollbar-width:none}
+.anav::-webkit-scrollbar{display:none}
+.anav a{background:transparent;border-color:transparent;flex:0 0 auto;font-family:var(--sans);font-size:12px;font-weight:700;min-height:38px;padding:8px 12px}
+.kpis{gap:14px}.kpi,a.kpi{border-radius:16px;padding:18px}.kpi b,a.kpi b{font-size:31px}
+details.sect{border-radius:18px;padding:4px 28px}
+details.sect>summary{padding:19px 0}
+footer{background:rgba(252,251,246,.64);padding:30px 22px}
+.public-home main{display:grid;gap:20px;grid-template-columns:repeat(12,minmax(0,1fr))}
+.public-home main>.card{grid-column:span 6;margin:0}
+.public-home main>.card:first-child{grid-column:1/-1}
+.public-home main>.card:last-child{grid-column:1/-1}
+.public-home .process-list{counter-reset:process;display:grid;gap:12px;grid-template-columns:repeat(4,minmax(0,1fr));list-style:none;margin:22px 0;padding:0}
+.public-home .process-list li{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:16px}
+.public-home .process-list li::before{align-items:center;background:var(--accent-wash);border-radius:50%;color:var(--accent-deep);content:counter(process);counter-increment:process;display:flex;font-family:var(--serif);font-size:17px;font-weight:700;height:34px;justify-content:center;margin-bottom:13px;width:34px}
+.public-home .process-list b{display:block;margin-bottom:5px}
+.public-home .lookup-card{align-self:start;background:linear-gradient(145deg,var(--accent-deep),#173f3d);color:#fff;border:0}
+.public-home .lookup-card h2,.public-home .lookup-card label{color:#fff}
+.public-home .lookup-card .muted{color:#d8e7e2}
+.public-home .lookup-card .pill{background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.22)}
+.public-home .lookup-card button{background:var(--sun-deep);box-shadow:0 9px 24px rgba(0,0,0,.17)}
+.public-home .lookup-card button:hover{background:#933B22}
+.public-home .feature-list{display:grid;gap:0;list-style:none;margin:10px 0;padding:0}
+.public-home .feature-list li{border-bottom:1px solid var(--line);padding:14px 0}
+.public-home .feature-list li:last-child{border-bottom:0}
+.public-home .faq-list{display:grid;gap:10px;min-width:0}
+.public-home .faq-list details{background:var(--paper);border:1px solid var(--line);border-radius:13px;min-width:0;padding:0 16px;width:100%}
+.public-home .faq-list summary{cursor:pointer;font-weight:750;padding:15px 28px 15px 0;position:relative}
+.public-home .faq-list summary::after{color:var(--accent);content:'+';font-size:21px;position:absolute;right:2px;top:9px}
+.public-home .faq-list details[open] summary::after{content:'–'}
+.public-home .faq-list p{color:var(--soft);margin:0;overflow-wrap:anywhere;padding:0 0 16px}
+footer a{align-items:center;display:inline-flex;min-height:44px}
+.admin-mode header h1{font-size:clamp(32px,4vw,50px);max-width:22ch}
+.admin-mode main{max-width:1320px}
+.admin-mode header .wrap{max-width:1320px}
+.admin-mode .card,.admin-mode details.sect{border-radius:16px}
+.status-highlight{background:linear-gradient(140deg,var(--accent-wash),var(--card));border-color:#b8d8d1}
+.action-card{border-color:#b8d8d1;box-shadow:0 18px 48px rgba(30,111,107,.11)}
+.form-actions{align-items:center;display:flex;flex-wrap:wrap;gap:12px}
+@media(prefers-reduced-motion:reduce){
+ *{scroll-behavior:auto!important;transition:none!important}
+ button:hover,a.btn:hover,button:active,a.btn:active{transform:none!important}
+}
+@media(max-width:820px){
+ .public-home main{display:block}
+ .public-home main>.card{margin:18px 0}
+ .public-home .process-list{grid-template-columns:1fr 1fr}
+ header h1{font-size:clamp(34px,8vw,50px)}
+}
 @media(max-width:640px){
- header{padding:34px 18px 24px}
+ header.site-header{padding:26px 18px 24px}
+ .brand{align-items:flex-start;column-gap:8px;line-height:1.35;row-gap:4px}
+ header h1{font-size:clamp(30px,10vw,42px)}
+ header p{font-size:16px}
  main{padding:22px 16px 60px}
- .card{padding:20px 18px}
+ .card{border-radius:16px;padding:21px 18px}
  .review-grid{grid-template-columns:1fr}
  details.sect{padding:2px 18px}
- h1{font-size:clamp(26px,7vw,34px)}
+ .public-home .process-list{grid-template-columns:1fr}
+ .anav{flex-wrap:nowrap;margin-inline:-2px}
  main [style*="grid-template-columns"]{grid-template-columns:1fr!important;gap:8px!important}
+ .form-actions,button,a.btn{width:100%}
  table,thead,tbody,th,td,tr{display:block}
  thead{position:absolute;left:-9999px}
  td{border-bottom:none;padding:3px 0}
@@ -307,11 +395,14 @@ footer{text-align:center;color:var(--faint);font-size:13px;padding:26px 22px;bor
 
 function page(title, headerHtml, bodyHtml, opts) {
   const o = opts || {};
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f4c5c">${o.index ? '' : '<meta name="robots" content="noindex">'}
+  const lang = o.lang || 'en';
+  const bodyClass = o.bodyClass ? ` class="${esc(o.bodyClass)}"` : '';
+  return `<!doctype html><html lang="${esc(lang)}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#155450">${o.index ? '' : '<meta name="robots" content="noindex">'}
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
-<title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body>
-<header><div class="wrap"><p class="brand">Example Island <b>· Unit 405D</b> — Guest Approval</p>${headerHtml}</div></header><main>${bodyHtml}</main>
+<title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body${bodyClass}>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><div class="wrap"><p class="brand"><span>Example Island</span><b>· Unit 405D</b><span>— Guest Approval</span></p>${headerHtml}</div></header><main id="main-content" tabindex="-1">${bodyHtml}</main>
 <footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a></footer>
 </body></html>`;
 }
@@ -330,7 +421,7 @@ const ANAV = [
 function adminPage(title, active, headerHtml, bodyHtml) {
   const nav = `<nav class="anav">${ANAV.map(([href, label]) =>
     `<a href="${href}"${href === active ? ' class="on"' : ''}>${label}</a>`).join('')}</nav>`;
-  return page(title, headerHtml + nav, bodyHtml);
+  return page(title, headerHtml + nav, bodyHtml, { bodyClass: 'admin-mode', lang: 'de' });
 }
 
 // ---------- views ----------
@@ -380,29 +471,30 @@ function landingView() {
     `<h1>Example Island — your bay-view home at Unit 405D</h1>
      <p>A fully furnished one-bedroom condo above Boca Ciega Bay in St. Petersburg, Florida, for monthly stays. Booked through Airbnb — and this is your private portal for the condominium association's rental approval, step by step.</p>
      <span class="chip">Example Island · St. Petersburg, Florida</span>`,
-    `<div class="card"><h2>How it works</h2>
-      <ol>
-        <li><b>Book on Airbnb.</b> After your booking is confirmed, you receive a personal link to this portal via Airbnb chat.</li>
-        <li><b>Complete the paperwork.</b> Your personal page lists exactly which forms the association needs (usually 20–30 minutes; you can save a draft).</li>
-        <li><b>HOA board approval.</b> We submit the safe coordination file to the association. The association controls its review timeline; sensitive vendor material never enters this portal.</li>
-        <li><b>Check-in released.</b> Once approved, you receive the door codes and arrival guide.</li>
+    `<div class="card"><h2>A clear path from booking to arrival</h2>
+      <p class="muted">Four simple stages. Your private status page always shows what is complete and what comes next.</p>
+      <ol class="process-list">
+        <li><b>Book on Airbnb</b><span>After confirmation, you receive your private portal link in Airbnb chat.</span></li>
+        <li><b>Complete the paperwork</b><span>Fill in the safe coordination details, save a draft and sign online.</span></li>
+        <li><b>Board review</b><span>We prepare the coordination file. Sensitive vendor material never enters this portal.</span></li>
+        <li><b>Arrival released</b><span>Check-in details stay locked until written Board approval is documented.</span></li>
       </ol>
       <p class="muted">Paid rentals above 30 nights use the full coordination path. Exactly 30 nights remains blocked pending written HOA clarification. The portal prepares the rules acknowledgment and lease, while sensitive identity or screening material goes only to the association's designated vendor. Simplified guest registration is reserved for separately confirmed, non-paying guests.</p>
      </div>
-     <div class="card"><h2>Already booked? Find your page</h2>
+     <div class="card lookup-card"><h2>Already booked? Open your private page</h2>
       <p>Enter your Airbnb confirmation code (looks like <span class="pill teal">HMDEMO0003</span>, in your booking confirmation) and your last name:</p>
       <form method="post" action="/find" autocomplete="off">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div><label>Confirmation code</label><input name="code" placeholder="HM…" required></div>
-          <div><label>Last name</label><input name="name" required></div>
+          <div><label for="bookingCode">Confirmation code</label><input id="bookingCode" name="code" placeholder="HM…" required></div>
+          <div><label for="bookingName">Last name</label><input id="bookingName" name="name" required></div>
         </div>
         <p><button>Open my paperwork page</button></p>
       </form>
       <p class="muted">Your page is created within about an hour of booking. Can't find it? Just message Owner on Airbnb.</p>
      </div>
-     <div class="card"><h2>The home</h2>
+     <div class="card"><h2>Your home above the bay</h2>
       <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
-      <ul class="steps" style="font-size:15px">
+      <ul class="feature-list">
         <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished for stays above 30 nights. An exact 30-night booking requires written HOA clarification because the governing texts conflict.</span></div></li>
         <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast 700-Mbit internet, smart-lock self-check-in, community pool.</span></div></li>
         <li><div><b>The location</b><br><span class="muted">10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals; about 30 minutes to Tampa International Airport.</span></div></li>
@@ -412,11 +504,12 @@ function landingView() {
       <span class="muted" style="font-size:13.5px">Booking runs exclusively through Airbnb. This site is the official companion portal for the home's approval paperwork.</span></p>
      </div>
      <div class="card"><h2>Frequently asked questions</h2>
-      <ul class="steps" style="font-size:15px">${HOME_FAQ.map(([q, a]) => `
-        <li><div><b>${esc(q)}</b><br><span class="muted">${esc(a)}</span></div></li>`).join('')}
-      </ul>
+      <p class="muted">Straight answers about booking, timing, fees and privacy.</p>
+      <div class="faq-list">${HOME_FAQ.map(([q, a], index) => `
+        <details${index === 0 ? ' open' : ''}><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}
+      </div>
      </div>`,
-    { index: true, extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://portal.example.test/">
+    { index: true, bodyClass: 'public-home', extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://portal.example.test/">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Example Island · Unit 405D">
 <meta property="og:title" content="Example Island Bay-View Condo, St. Petersburg FL — monthly stays">
 <meta property="og:description" content="${esc(HOME_DESC)}"><meta property="og:url" content="https://portal.example.test/">
@@ -461,7 +554,7 @@ St. Petersburg, FL 33716</div>
            </form>`}
     </div>` : '';
   const wizardCard = approved ? '' : `
-    <div class="card"><h2>Complete your forms online</h2>
+    <div class="card action-card"><h2>Complete your forms online</h2>
       <p>Enter your details once and sign online. You can save an unfinished draft and return later. We prepare the association's official PDFs and an AI quality check reviews the complete package for missing data and inconsistencies. Owner confirms the green quality report and explicitly releases the package. Usually takes 20–30 minutes.</p>
       <p><a class="btn" href="/w/${c.token}">${c.wizard ? 'Review / edit your details' : 'Start the paperwork'}</a>
       ${c.wizard ? `<span class="pill ok" style="margin-left:10px">details saved ${esc((c.wizard.savedAt || '').slice(0, 10))}</span>` : ''}</p>
@@ -470,7 +563,7 @@ St. Petersburg, FL 33716</div>
     `<h1>Hi ${esc(c.guestName.split(' ')[0])}, here's where your approval stands</h1>
      <p>Stay: <b>${esc(c.checkIn)} → ${esc(c.checkOut)}</b> (${c.nights} nights, ${c.adults} ${c.adults === 1 ? 'adult' : 'adults'} age 18+${Number(c.expectedMinors || 0) ? `, ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''})${c.reservationCode ? ' · Reservation ' + esc(c.reservationCode) : ''}</p>
      ${banner}`,
-    wizardCard + `<div class="card">
+    wizardCard + `<div class="card status-highlight">
        <h2>Progress</h2>
        <div class="bar"><div style="width:${pct}%"></div></div>
        <p class="muted">${done} of ${total} steps complete</p>
@@ -489,7 +582,7 @@ St. Petersburg, FL 33716</div>
        <p>Your safe coordination documents are with the association — nothing to do on your end${feeState === 'required' && !c.feeMailed ? ' except mailing the $100 fee' : ''}. Any screening occurs directly with the association's external vendor. Written Board approval remains required before check-in details can be released.</p>
      </div>` : ''}
      ${approved ? `
-     <div class="card"><h2>You're all set 🎉</h2>
+     <div class="card status-highlight"><h2>You're all set 🎉</h2>
        <p>The board has approved your stay. Your check-in details (door codes, arrival guide) will reach you well before arrival — usually via Airbnb chat. Safe travels, and see you at Example Island!</p>
      </div>` : ''}
      <div class="card"><h2>Good to know</h2>

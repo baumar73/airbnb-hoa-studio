@@ -1,0 +1,122 @@
+/* Large-screen display refinement, aligned with the owner dashboard. */
+.display-body {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(50, 149, 139, 0.18), transparent 42rem),
+    radial-gradient(circle at 94% 8%, rgba(217, 107, 72, 0.12), transparent 34rem),
+    linear-gradient(155deg, #0b1c1b 0%, #112624 48%, #081514 100%);
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+}
+
+.display-shell {
+  gap: 26px;
+  margin: 0 auto;
+  max-width: 1920px;
+  padding: clamp(22px, 2.5vw, 46px);
+}
+
+.display-hero {
+  align-items: end;
+}
+
+.display-hero h1,
+.display-section-heading h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: -0.03em;
+}
+
+.display-hero h1 {
+  font-size: clamp(46px, 5vw, 82px);
+  max-width: 14ch;
+}
+
+.display-clock,
+.display-metric,
+.display-panel {
+  backdrop-filter: blur(16px);
+  background: rgba(250, 253, 250, 0.075);
+  border-color: rgba(218, 234, 226, 0.18);
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+}
+
+.display-clock {
+  border-radius: 18px;
+  padding: 22px;
+}
+
+.display-metric {
+  border-top: 4px solid rgba(123, 198, 183, 0.64);
+  min-height: 154px;
+  padding: 22px;
+}
+
+.display-metric.red { border-top-color: #e38177; }
+.display-metric.amber { border-top-color: #e8b55e; }
+
+.display-metric strong {
+  font-family: Georgia, serif;
+}
+
+.display-grid {
+  grid-template-columns: minmax(0, 1.42fr) minmax(320px, 0.88fr) minmax(260px, 0.7fr);
+}
+
+.display-panel {
+  padding: 23px;
+}
+
+.display-work-item,
+.display-case,
+.display-access-card,
+.display-empty {
+  background: rgba(3, 13, 12, 0.34);
+  border-color: rgba(218, 234, 226, 0.17);
+  border-radius: 14px;
+}
+
+.display-work-item.red,
+.display-case.red {
+  box-shadow: inset 4px 0 0 #e38177;
+}
+
+.display-work-item.amber,
+.display-case.amber {
+  box-shadow: inset 4px 0 0 #e8b55e;
+}
+
+.display-work-item.green,
+.display-case.green {
+  box-shadow: inset 4px 0 0 #82c99f;
+}
+
+.display-work-number {
+  border-radius: 50%;
+}
+
+@media (max-width: 1180px) {
+  .display-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .display-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .display-grid,
+  .display-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .display-grid > :first-child {
+    grid-column: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

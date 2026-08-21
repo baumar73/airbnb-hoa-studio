@@ -6,12 +6,18 @@
   <title>Airbnb HOA Operations</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/refinement.css" />
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">Zum Inhalt springen</a>
   <header class="topbar">
-    <div>
-      <p class="eyebrow">Owner Operations</p>
-      <h1>Airbnb HOA Operations</h1>
+    <div class="brand-lockup">
+      <span class="brand-mark" aria-hidden="true">IS</span>
+      <div>
+        <p class="eyebrow">Owner Operations · Unit 405D</p>
+        <h1>Airbnb HOA Operations</h1>
+        <p class="topbar-subtitle">Entscheidungen, Fristen und Freigaben an einem sicheren Ort.</p>
+      </div>
     </div>
     <div class="topbar-actions">
       <span id="dailyStatusPill" class="pill blue">Laedt</span>
@@ -19,7 +25,25 @@
     </div>
   </header>
 
-  <main>
+  <nav class="section-nav" aria-label="Bereiche">
+    <a href="#overview">Übersicht</a>
+    <a href="#casePanel">Fallakte</a>
+    <a href="#calendarPanel">Kalender</a>
+    <a href="#cleaningPanel">Reinigung</a>
+    <a href="#paymentsPanel">Zahlungen</a>
+    <a href="#maintenancePanel">Mängel</a>
+    <a href="#systemsPanel">Systeme</a>
+  </nav>
+
+  <main id="mainContent" class="app-main" tabindex="-1">
+    <section id="overview" class="section-intro" aria-labelledby="overviewTitle">
+      <div>
+        <p class="section-kicker">Arbeitsübersicht</p>
+        <h2 id="overviewTitle">Was heute Aufmerksamkeit braucht</h2>
+      </div>
+      <p>Rot zuerst, dann Fristen. Alles Weitere bleibt sichtbar, ohne den aktuellen Arbeitsschritt zu überdecken.</p>
+    </section>
+
     <section class="metrics" aria-label="Kennzahlen">
       <div class="metric"><span class="metric-label">Offene Faelle</span><strong id="metricOpen">-</strong></div>
       <div class="metric"><span class="metric-label">Reminder</span><strong id="metricReminder">-</strong></div>
@@ -69,7 +93,7 @@
       <section id="casePanel" class="panel" aria-label="Fallakte">
         <div class="panel-heading case-heading">
           <h2>Fallakte</h2>
-          <select id="caseStatus" class="select"></select>
+          <select id="caseStatus" class="select" aria-label="Fallstatus auswählen"></select>
         </div>
         <h3 id="caseTitle">-</h3>
         <p class="muted" id="caseSubtitle">-</p>
@@ -124,7 +148,7 @@
               <span>Vorlage waehlen (nur Kopiervorschau, kein automatischer Versand)</span>
               <select id="templateSelect" class="select"></select>
             </label>
-            <textarea id="templateText" rows="10" readonly></textarea>
+            <textarea id="templateText" rows="10" readonly aria-label="Vorschau der Kommunikationsvorlage"></textarea>
             <div class="focus-actions">
               <button id="copyTemplate" type="button" class="button secondary">Text kopieren</button>
             </div>
@@ -152,7 +176,7 @@
       </section>
     </div>
 
-    <section class="panel daily-section" aria-label="Tagescheck">
+    <section class="panel daily-section section-block" aria-label="Tagescheck">
       <div class="panel-heading">
         <h2>Tagescheck</h2>
         <button id="refreshDailyCheck" type="button" class="button secondary mini">Tagescheck aktualisieren</button>
@@ -160,7 +184,7 @@
       <div id="dailyCheck" class="daily-check"></div>
     </section>
 
-    <section class="panel" aria-label="Kalender">
+    <section id="calendarPanel" class="panel section-block" aria-label="Kalender">
       <div class="panel-heading">
         <h2>Airbnb-Kalender</h2>
         <div class="focus-actions">
@@ -172,7 +196,7 @@
       <div id="calendarList" class="calendar-list"></div>
     </section>
 
-    <section id="cleaningPanel" class="panel cleaning-panel" aria-label="Reinigung">
+    <section id="cleaningPanel" class="panel cleaning-panel section-block" aria-label="Reinigung">
       <div class="panel-heading cleaning-heading">
         <h2>Turno-Reinigung</h2>
         <span id="cleaningStatusPill" class="pill blue">-</span>
@@ -182,7 +206,7 @@
       <div id="cleaningProjects" class="cleaning-projects"></div>
     </section>
 
-    <section id="paymentsPanel" class="panel payments-panel" aria-label="Zahlungen">
+    <section id="paymentsPanel" class="panel payments-panel section-block" aria-label="Zahlungen">
       <div class="panel-heading payments-heading">
         <h2>Airbnb-Zahlungen</h2>
         <span id="paymentsStatusPill" class="pill blue">-</span>
@@ -192,7 +216,7 @@
       <div id="paymentsList" class="payments-list"></div>
     </section>
 
-    <section id="maintenancePanel" class="panel maintenance-panel" aria-label="Maengel">
+    <section id="maintenancePanel" class="panel maintenance-panel section-block" aria-label="Maengel">
       <div class="panel-heading maintenance-heading">
         <h2>Maengel</h2>
         <span id="maintenanceStatusPill" class="pill blue">-</span>
@@ -227,7 +251,7 @@
       <div id="maintenanceList" class="maintenance-list"></div>
     </section>
 
-    <section id="telephonyPanel" class="panel telephony-panel" aria-label="Telefonie">
+    <section id="telephonyPanel" class="panel telephony-panel section-block" aria-label="Telefonie">
       <div class="panel-heading telephony-heading">
         <h2>Telefonie</h2>
         <span id="telephonyStatusPill" class="pill blue">-</span>
@@ -253,7 +277,7 @@
       <div id="telephonyCallLog" class="telephony-call-log"></div>
     </section>
 
-    <section class="panel listing-panel" aria-label="Inseratswissen">
+    <section class="panel listing-panel section-block" aria-label="Inseratswissen">
       <div class="panel-heading listing-heading">
         <h2>Inseratswissen</h2>
         <span id="listingStatusPill" class="pill blue">-</span>
@@ -263,7 +287,15 @@
       <div id="listingDetails" class="listing-details"></div>
     </section>
 
-    <section class="panel integration-panel" aria-label="Integrationen">
+    <div id="systemsPanel" class="section-intro section-intro-spaced">
+      <div>
+        <p class="section-kicker">Systeme &amp; Zugriff</p>
+        <h2>Verbindungen und Betriebsstatus</h2>
+      </div>
+      <p>Technische Details sind bewusst nach den täglichen Arbeitsbereichen angeordnet.</p>
+    </div>
+
+    <section class="panel integration-panel section-block" aria-label="Integrationen">
       <div class="panel-heading integration-heading">
         <h2>Integrationen</h2>
         <div class="integration-actions">
@@ -275,7 +307,7 @@
       <div id="integrationStatusList" class="integration-status-list"></div>
     </section>
 
-    <section class="panel device-panel" aria-label="Geraetezugriff">
+    <section class="panel device-panel section-block" aria-label="Geraetezugriff">
       <div class="panel-heading device-heading">
         <h2>Geraete &amp; Anzeige</h2>
         <div class="device-actions">
@@ -292,7 +324,7 @@
       <div id="deviceAccessList" class="device-access-list"></div>
     </section>
 
-    <section class="panel operations-tree-panel" aria-label="Operations-Baum">
+    <section class="panel operations-tree-panel section-block" aria-label="Operations-Baum">
       <div class="panel-heading operations-tree-heading">
         <h2>Operations-Baum</h2>
         <span id="operationsTreePill" class="pill blue">-</span>
