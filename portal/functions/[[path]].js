@@ -1222,7 +1222,7 @@ export async function onRequest(context) {
   const waitUntil = context.waitUntil ? context.waitUntil.bind(context) : (p) => p;
   const url = new URL(request.url);
   const p = url.pathname;
-  if (request.method === 'POST' && p !== '/find' && !isAllowedMutationOrigin(request.headers.get('Origin'), url.origin)) {
+  if (request.method === 'POST' && !isAllowedMutationOrigin(request.headers.get('Origin'), url.origin)) {
     return new Response('Forbidden: invalid request origin', { status: 403, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
   }
 

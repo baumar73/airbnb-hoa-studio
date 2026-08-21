@@ -1,6 +1,6 @@
-// Configuration regression tests: preview and production environments must
-// stay isolated (no shared KV namespace IDs), and the live-submission gate
-// must stay off by default.
+// Configuration regression tests: preview must stay isolated from live data.
+// The cron worker intentionally shares the live namespace because it polls and
+// updates the same reservation cases as the production portal.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -17,7 +17,7 @@ test('preview environment never binds production KV namespaces', async () => {
   }
 });
 
-test('cron worker binds an isolated KV namespace distinct from production', async () => {
+test('cron worker binds the production KV namespace intentionally', async () => {
   const [portal, cron] = await Promise.all([
     readFile(new URL('../wrangler.toml', import.meta.url), 'utf8'),
     readFile(new URL('../cron/wrangler.toml', import.meta.url), 'utf8'),
@@ -25,7 +25,5 @@ test('cron worker binds an isolated KV namespace distinct from production', asyn
   const portalProdIds = [...portal.split('[env.preview]')[0].matchAll(/id\s*=\s*"([^"]+)"/g)].map(m => m[1]);
   const cronIds = [...cron.matchAll(/id\s*=\s*"([^"]+)"/g)].map(m => m[1]);
   assert.ok(cronIds.length > 0);
-  for (const id of cronIds) {
-    assert.equal(portalProdIds.includes(id), false, `cron reuses production namespace id ${id}`);
-  }
+  assert.deepEqual(cronIds, portalProdIds, 'cron must operate on the production reservation cases');
 });

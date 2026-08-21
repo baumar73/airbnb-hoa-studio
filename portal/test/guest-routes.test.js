@@ -1,13 +1,14 @@
-// Route-level tests for state-changing guest POST paths.
-// Storage and outbound integrations are mocked; the tests assert that a guest
-// draft save never triggers an outbound HOA submission or any outbound email,
-// that same-origin mutation checks hold, and that canceled cases stay closed.
+// Route-level tests for state-changing guest paths.
+// Storage is mocked and Cloudflare sockets are disabled. The tests assert that
+// guest saves never create an HOA submission, same-origin mutation checks hold,
+// and canceled cases stay closed for both reads and writes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 
 register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
 
+const { socketAttempts, resetSocketAttempts } = await import('cloudflare:sockets');
 const { onRequest } = await import('../functions/[[path]].js');
 const { shouldAutoSubmitAfterGuestSave, isGuestAccessibleCase } = await import('../functions/lib/workflow.js');
 
@@ -16,7 +17,6 @@ const TOKEN = 'testtoken123';
 
 function mockEnv() {
   const store = new Map();
-  const outbound = { gmailCalls: [], telegramCalls: [], socketAttempts: 0 };
   const env = {
     CASES: {
       async get(key) { return store.has(key) ? store.get(key) : null; },
@@ -28,11 +28,8 @@ function mockEnv() {
     },
     ADMIN_USER: 'markus',
     ADMIN_PASSWORD: 'unused-in-tests',
-    // Outbound integrations are mocked: every send is recorded, never performed.
-    async __recordGmail(call) { outbound.gmailCalls.push(call); return true; },
-    __outbound: outbound,
   };
-  return { env, store, outbound };
+  return { env, store };
 }
 
 function guestRequest(path, { method = 'POST', form, origin = ORIGIN } = {}) {
@@ -58,8 +55,36 @@ function seedCase(store) {
   return c;
 }
 
-test('guest draft save persists only a draft and performs no outbound HOA submission or email', async () => {
-  const { env, store, outbound } = mockEnv();
+function validSignaturePng() {
+  const bytes = Buffer.alloc(120);
+  Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes, 0);
+  Buffer.from('IHDR').copy(bytes, 12);
+  bytes.writeUInt32BE(640, 16);
+  bytes.writeUInt32BE(170, 20);
+  return bytes.toString('base64');
+}
+
+function completeGuestForm() {
+  return {
+    saveMode: 'complete',
+    a0_firstName: 'DemoGuest', a0_middleName: 'None', a0_lastName: 'DemoSurname',
+    a0_birthDate: '1980-01-01', a0_gender: 'F', a0_phone: '+1 555 555 1212',
+    a0_email: 'guest@example.test', a0_street: '1 Main St', a0_city: 'St Petersburg',
+    a0_state: 'FL', a0_zip: '33715', a0_idType: 'drivers_license',
+    a0_idNumber: 'X1234567', a0_idState: 'FL', a0_employer: 'Retired',
+    a0_employerPhone: 'N/A', a0_esign_consent: 'yes',
+    a0_sig: `data:image/png;base64,${validSignaturePng()}`,
+    ref0_name: 'Reference One', ref0_phone: '+1 555 000 0001', ref0_address: '1 Ref St, Tampa, FL',
+    ref1_name: 'Reference Two', ref1_phone: '+1 555 000 0002', ref1_address: '2 Ref St, Tampa, FL',
+    em0_name: 'Emergency One', em0_phone: '+1 555 100 0001',
+    em1_name: 'Emergency Two', em1_phone: '+1 555 100 0002',
+    rules_acknowledged: 'yes',
+  };
+}
+
+test('guest draft save persists only a draft and performs no outbound HOA submission', async () => {
+  resetSocketAttempts();
+  const { env, store } = mockEnv();
   seedCase(store);
   const res = await onRequest({
     request: guestRequest(`/w/${TOKEN}`, { form: { saveMode: 'draft', a0_firstName: 'DemoGuest' } }),
@@ -71,16 +96,19 @@ test('guest draft save persists only a draft and performs no outbound HOA submis
   assert.equal(cases[0].submission, undefined);
   assert.equal(cases[0].testSubmission, undefined);
   assert.equal(cases[0].wizard.adults.length, 2); // fixed slots preserved
-  // No outbound email or HOA submission occurred from the guest save path.
-  assert.deepEqual(outbound.gmailCalls, []);
   assert.equal(shouldAutoSubmitAfterGuestSave(cases[0]), false);
+  assert.equal(socketAttempts(), 0);
 });
 
-test('guest complete-mode save still only prepares a package for owner review (no submission, no email)', async () => {
-  const { env, store, outbound } = mockEnv();
-  seedCase(store);
+test('materially complete guest save reaches owner review but never opens an email socket', async () => {
+  resetSocketAttempts();
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.adults = 1;
+  store.set('cases', JSON.stringify([c]));
+  store.set('owner-signature-png', validSignaturePng());
   const res = await onRequest({
-    request: guestRequest(`/w/${TOKEN}`, { form: { saveMode: 'complete', a0_firstName: 'DemoGuest' } }),
+    request: guestRequest(`/w/${TOKEN}`, { form: completeGuestForm() }),
     env,
     waitUntil: () => {},
   });
@@ -88,7 +116,8 @@ test('guest complete-mode save still only prepares a package for owner review (n
   const cases = JSON.parse(store.get('cases'));
   assert.equal(cases[0].submission, undefined);
   assert.equal(cases[0].ownerApprovedAt, undefined);
-  assert.deepEqual(outbound.gmailCalls, []);
+  assert.ok(cases[0].ownerReviewReadyAt);
+  assert.equal(socketAttempts(), 0);
 });
 
 test('guest POST from a foreign origin is rejected before any state change', async () => {
@@ -102,6 +131,17 @@ test('guest POST from a foreign origin is rejected before any state change', asy
   assert.equal(res.status, 403);
   const cases = JSON.parse(store.get('cases'));
   assert.equal(cases[0].wizard, undefined); // nothing was persisted
+});
+
+test('cross-origin public lookup is rejected before consuming rate-limit state', async () => {
+  const { env, store } = mockEnv();
+  const res = await onRequest({
+    request: guestRequest('/find', { form: { code: 'HMDEMO0002', name: 'DemoNameL' }, origin: 'https://evil.example' }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 403);
+  assert.deepEqual([...store.keys()], []);
 });
 
 test('canceled cases reject guest draft saves and stay closed', async () => {
@@ -118,4 +158,18 @@ test('canceled cases reject guest draft saves and stay closed', async () => {
   assert.equal(res.status, 410);
   const cases = JSON.parse(store.get('cases'));
   assert.equal(cases[0].wizard, undefined);
+});
+
+test('canceled cases reject guest wizard views and stay closed', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.status = 'canceled';
+  store.set('cases', JSON.stringify([c]));
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { method: 'GET' }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 410);
+  assert.match(await res.text(), /reservation is no longer active/i);
 });
