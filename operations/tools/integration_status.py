@@ -20,10 +20,18 @@ DATA_DIR = ROOT / "data"
 CALENDAR_SNAPSHOT = DATA_DIR / "airbnb-florida-calendar-snapshot.json"
 DEADLINES_ICS = DATA_DIR / "airbnb-hoa-deadlines.ics"
 DAILY_REMINDER_STATUS = DATA_DIR / "daily-reminder-status.json"
-DAILY_REMINDER_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.demo-user.airbnb-hoa.daily-reminder.plist"
+DAILY_REMINDER_PLIST = Path(
+    os.environ.get(
+        "AIRBNB_HOA_DAILY_REMINDER_PLIST",
+        str(Path.home() / "Library" / "LaunchAgents" / "com.markusbauer.airbnb-hoa.daily-reminder.plist"),
+    )
+).expanduser()
 
-HERMES_HOST = os.environ.get("HERMES_HOST", "markus@192.0.2.10")
-MACMINI_HOST = os.environ.get("HERMES_IMESSAGE_HOST", "demo-user@192.0.2.11")
+HERMES_HOST = os.environ.get("HERMES_HOST", "").strip()
+HERMES_REMOTE_STATE_PATH = os.environ.get("HERMES_REMOTE_STATE_PATH", "").strip()
+HERMES_REMOTE_HOME = os.environ.get("HERMES_REMOTE_HOME", "").strip()
+MACMINI_HOST = os.environ.get("HERMES_IMESSAGE_HOST", "").strip()
+IMESSAGE_BRIDGE_PATH = os.environ.get("HERMES_IMESSAGE_BRIDGE_PATH", "").strip()
 
 
 def utc_now() -> str:
@@ -162,12 +170,15 @@ def daily_reminder_item() -> dict[str, str]:
 
 
 def remote_status() -> dict[str, Any] | None:
+    if not HERMES_HOST:
+        return {"error": "HERMES_HOST is not configured"}
     remote_script = textwrap.dedent(
         f"""
         import getpass
         import json
         import os
         import pathlib
+        import shlex
         import socket
         import subprocess
         from datetime import datetime, timezone
@@ -205,37 +216,51 @@ def remote_status() -> dict[str, Any] | None:
             "user": getpass.getuser(),
         }}
 
-        state_path = pathlib.Path("/home/demo-user/.hermes/gateway_state.json")
-        out["statePath"] = str(state_path)
-        out["statePathExists"] = state_path.exists()
-        if state_path.exists():
+        state_path_value = {json.dumps(HERMES_REMOTE_STATE_PATH)}
+        state_path = pathlib.Path(state_path_value) if state_path_value else None
+        out["statePath"] = str(state_path) if state_path else ""
+        out["statePathExists"] = bool(state_path and state_path.exists())
+        if state_path and state_path.exists():
             try:
                 out["state"] = json.loads(state_path.read_text())
             except Exception as exc:
                 out["stateError"] = str(exc)
 
-        link = pathlib.Path("/srv/agents/hermes/home")
+        remote_home_value = {json.dumps(HERMES_REMOTE_HOME)}
+        remote_home = pathlib.Path(remote_home_value).expanduser() if remote_home_value else None
+        hermes_home = remote_home / ".hermes" if remote_home else None
         out["homeLink"] = {{
-            "path": str(link),
-            "exists": link.exists(),
-            "isSymlink": link.is_symlink(),
-            "target": os.path.realpath(link),
-            "targetExists": pathlib.Path(os.path.realpath(link)).exists(),
+            "configured": bool(remote_home),
+            "path": str(hermes_home) if hermes_home else "",
+            "exists": bool(hermes_home and hermes_home.exists()),
+            "isSymlink": bool(hermes_home and hermes_home.is_symlink()),
+            "target": os.path.realpath(hermes_home) if hermes_home else "",
+            "targetExists": bool(hermes_home and pathlib.Path(os.path.realpath(hermes_home)).exists()),
         }}
         out["gatewayProcess"] = run(["pgrep", "-af", "hermes_cli.main gateway run"])
         out["gbrainStats"] = run(["gbrain", "stats"], timeout=12)
         out["gbrainProject"] = run(["gbrain", "get", "projects/airbnb-hoa-operations"], timeout=15)
         out["gbrainListProbe"] = run(["gbrain", "list", "--tag", "airbnb", "-n", "5"], timeout=15)
         out["whatsappBridgePortOpen"] = tcp_open("127.0.0.1", 3000)
-        out["imessageHealth"] = run([
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=5",
-            "{MACMINI_HOST}",
-            "python3 ~/hermes-bridges/apple-messages/macmini_imessage_bridge.py --redact health",
-        ], timeout=15)
+        imessage_host = {json.dumps(MACMINI_HOST)}
+        imessage_bridge_path = {json.dumps(IMESSAGE_BRIDGE_PATH)}
+        if imessage_host and imessage_bridge_path:
+            out["imessageHealth"] = run([
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
+                imessage_host,
+                f"python3 {{shlex.quote(imessage_bridge_path)}} --redact health",
+            ], timeout=15)
+        else:
+            out["imessageHealth"] = {{
+                "ok": False,
+                "returncode": None,
+                "stdout": "",
+                "stderr": "HERMES_IMESSAGE_HOST or HERMES_IMESSAGE_BRIDGE_PATH is not configured",
+            }}
         print(json.dumps(out, ensure_ascii=False))
         """
     ).strip()
@@ -356,12 +381,12 @@ def remote_items(remote: dict[str, Any] | None) -> list[dict[str, str]]:
         imessage_action = "Mac mini und SSH-Verbindung pruefen."
 
     home_link = remote.get("homeLink") or {}
-    target = home_link.get("target", "")
-    target_exists = bool(home_link.get("targetExists"))
-    home_status = "ok" if target == "/home/demo-user/.hermes" and target_exists else "warn"
-    home_title = "Hermes-Ablage korrekt" if home_status == "ok" else "Alter Hermes-Pfad auffaellig"
-    home_detail = f"{home_link.get('path', '-')} -> {target or '-'}; Ziel existiert: {'ja' if target_exists else 'nein'}"
-    home_action = "" if home_status == "ok" else "Vor einer Korrektur erst bestaetigen, weil dies Hermes-Infrastruktur betrifft."
+    configured_home = bool(home_link.get("configured"))
+    home_exists = bool(home_link.get("exists"))
+    home_status = "ok" if configured_home and home_exists else "warn"
+    home_title = "Hermes-Ablage konfiguriert" if home_status == "ok" else "Hermes-Ablage nicht konfiguriert oder nicht erreichbar"
+    home_detail = f"Konfigurierter Pfad: {home_link.get('path') or '-'}; existiert: {'ja' if home_exists else 'nein'}"
+    home_action = "" if home_status == "ok" else "HERMES_REMOTE_HOME explizit setzen und den Pfad read-only erneut pruefen."
 
     return [
         item("hermesGateway", "Hermes", gateway_status, gateway_title, gateway_detail),

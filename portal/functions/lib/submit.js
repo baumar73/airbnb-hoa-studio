@@ -5,9 +5,7 @@ import { generateLeaseAgreement } from './lease.js';
 import { sendViaGmail, sendTelegram } from './email.js';
 import { isReadyForOwnerReview as workflowReadyForOwnerReview, submissionRecipients, paperworkState, requiredPackageDocuments, applicationFeeState, bundleDigest } from './workflow.js';
 import { assertNoProhibitedSensitiveData } from './hoa-rules.js';
-
-const PORTAL = 'https://portal.example.test';
-const OWNER = 'contact008@example.test';
+import { PROPERTY_CONFIG, configuredOwnerEmail, configuredPortalOrigin, liveSubmissionEnabled } from './property-config.js';
 
 export function docStates(c, ownerSigOnFile) {
   const state = paperworkState(c, ownerSigOnFile);
@@ -37,7 +35,7 @@ async function generatePackage(c, env) {
   const data = { checkIn: c.checkIn, checkOut: c.checkOut, reservationCode: c.reservationCode,
     applicationType: c.applicationType || 'lease', ownerSigPng, todayISO: new Date().toISOString().slice(0, 10), ...c.wizard };
   const tpl = async (name) => {
-    const response = await env.ASSETS.fetch(new Request(`${PORTAL}/forms/${name}.pdf`));
+    const response = await env.ASSETS.fetch(new Request(`${configuredPortalOrigin(env)}/forms/${name}.pdf`));
     if (!response.ok) throw new Error(`form template unavailable: ${name}`);
     return new Uint8Array(await response.arrayBuffer());
   };
@@ -53,8 +51,12 @@ async function generatePackage(c, env) {
 }
 
 export async function submitApprovedPackage(c, cases, env) {
-  const live = (await env.CASES.get('submit-live')) === 'yes';
-  const stayRef = `Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
+  // Production-state independent: neither environment variables nor stale KV
+  // can enable live HOA delivery before a reviewed atomic coordinator exists.
+  const live = liveSubmissionEnabled();
+  const owner = configuredOwnerEmail(env);
+  const portal = configuredPortalOrigin(env);
+  const stayRef = `${PROPERTY_CONFIG.unit} / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
   const renewal = c.sameLesseeRenewal === true;
   const feeState = applicationFeeState(c);
   const feeText = feeState === 'not_required'
@@ -70,11 +72,11 @@ export async function submitApprovedPackage(c, cases, env) {
       ? `${renewal ? 'Lease renewal package' : 'Lease application package'} — ${stayRef}`
       : `Guest registration — ${stayRef}`);
     const text = c.pathType === 'full'
-      ? `Dear Example Property Management / Example Condominium,\n\nPlease find attached the owner-prepared coordination documents for the upcoming ${renewal ? 'lease renewal' : 'rental'}:\n\n${stayRef}\n\nAttached:\n1. Rules & Regulations with signed acknowledgment\n2. Short-Term Residential Lease Agreement (signed by tenant(s) and owner)\n\nAny identity verification or screening is handled directly by the association's external vendor. This portal does not collect, store, or transmit identity documents, dates of birth, screening reports, employment data, or financial data. The owner workflow records only the vendor handoff and completion status. ${feeText}\n\nPlease confirm receipt and provide written Board approval when the association process is complete.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D / 6219 Palma Del Mar Blvd S${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`
-      : `Dear Example Property Management / Example Condominium,\n\nPlease find attached the completed Guest Registration for:\n\n${stayRef}\n\nSigned by the guest and by me as unit owner. Please confirm receipt.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`;
+      ? `Dear ${PROPERTY_CONFIG.managementName} / ${PROPERTY_CONFIG.condominiumName},\n\nPlease find attached the owner-prepared coordination documents for the upcoming ${renewal ? 'lease renewal' : 'rental'}:\n\n${stayRef}\n\nAttached:\n1. Rules & Regulations with signed acknowledgment\n2. Short-Term Residential Lease Agreement (signed by tenant(s) and owner)\n\nAny identity verification or screening is handled directly by the association's external vendor. This portal does not collect, store, or transmit identity documents, dates of birth, screening reports, employment data, or financial data. The owner workflow records only the vendor handoff and completion status. ${feeText}\n\nPlease confirm receipt and provide written Board approval when the association process is complete.\n\nBest regards,\nProperty Owner\nOwner, ${PROPERTY_CONFIG.unit} / ${PROPERTY_CONFIG.streetAddress}${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an die konfigurierte Owner-Adresse, nicht an die Verwaltung.]'}`
+      : `Dear ${PROPERTY_CONFIG.managementName} / ${PROPERTY_CONFIG.condominiumName},\n\nPlease find attached the completed Guest Registration for:\n\n${stayRef}\n\nSigned by the guest and by me as unit owner. Please confirm receipt.\n\nBest regards,\nProperty Owner\nOwner, ${PROPERTY_CONFIG.unit}${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an die konfigurierte Owner-Adresse, nicht an die Verwaltung.]'}`;
     const recipients = submissionRecipients();
     await sendViaGmail(env, {
-      to: live ? recipients.to : [OWNER],
+      to: live ? recipients.to : [owner],
       cc: live ? recipients.cc : [],
       subject, text, attachments,
     });
@@ -92,13 +94,13 @@ export async function submitApprovedPackage(c, cases, env) {
     assertNoProhibitedSensitiveData(cases);
     await env.CASES.put('cases', JSON.stringify(cases));
     const sentDocs = live ? c.submission.docs : c.testSubmission.docs;
-    await sendTelegram(env, `📬 ${c.guestName} (${c.checkIn}): Das von dir geprüfte Paket wurde ${live ? 'an die Verwaltung' : 'im TESTMODUS nur an dich'} gesendet (${sentDocs.join(', ')}). Portal: ${PORTAL}/admin`);
+    await sendTelegram(env, `📬 ${c.guestName} (${c.checkIn}): Das von dir geprüfte Paket wurde ${live ? 'an die Verwaltung' : 'im TESTMODUS nur an dich'} gesendet (${sentDocs.join(', ')}). Portal: ${portal}/admin`);
     return true;
   } catch (e) {
     c.submissionError = { at: new Date().toISOString(), message: String(e && e.message || e).slice(0, 300) };
     assertNoProhibitedSensitiveData(cases);
     await env.CASES.put('cases', JSON.stringify(cases));
-    await sendTelegram(env, `🚨 STÖRUNG bei ${c.guestName} (${c.checkIn}): Der manuell freigegebene Paketversand ist fehlgeschlagen — ${c.submissionError.message}. Es erfolgt kein automatischer Wiederholungsversuch. Bitte im Admin erneut prüfen: ${PORTAL}/admin`);
+    await sendTelegram(env, `🚨 STÖRUNG bei ${c.guestName} (${c.checkIn}): Der manuell freigegebene Paketversand ist fehlgeschlagen — ${c.submissionError.message}. Es erfolgt kein automatischer Wiederholungsversuch. Bitte im Admin erneut prüfen: ${portal}/admin`);
     return false;
   }
 }

@@ -1,5 +1,5 @@
 // Short-Term Residential Lease Agreement — generated from scratch (owner's own document).
-// Reproduces the wording of the version used for the DemoSurnameA/DemoSurnameD HOA files.
+// Reproduces the owner-reviewed wording used for prior Unit 405D HOA files.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { UNIT } from './fill.js';
 

@@ -76,8 +76,8 @@ def main() -> int:
 
     payload = {
         "source": "airbnb_ical",
-        "listing_id": "DEMOID0002",
-        "listing_name": "Example Island, Meerblick",
+        "listing_id": "1097686557541958107",
+        "listing_name": "Isla del Sol, Meerblick",
         "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "events": parse_events(ics_text),
     }

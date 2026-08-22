@@ -1,11 +1,12 @@
 {
   "name": "isla-portal",
   "version": "1.1.0",
-  "description": "Private HOA guest-paperwork and owner-review portal for Example Island Unit 405D",
+  "description": "Private HOA guest-paperwork and owner-review portal for Isla del Sol Unit 405D",
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "bash -lc 'for f in functions/[[path]].js functions/lib/*.js cron/src/*.js; do node --check \"$f\" || exit 1; done'",
-    "build": "wrangler pages functions build --outdir .wrangler/build"
+    "build": "wrangler pages functions build --outdir .wrangler/build",
+    "preflight:production": "node scripts/production_preflight.mjs"
   },
   "keywords": [],
   "author": "",

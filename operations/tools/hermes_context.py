@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import date, datetime
@@ -338,12 +339,11 @@ def build_context(refresh_calendar: bool, today_value: date) -> dict:
                 "sendPolicy": "No WhatsApp send without Owner approving exact recipient and exact text.",
             },
             "imessage": {
-                "owner": "Mac mini in same house",
-                "host": "192.0.2.11",
-                "user": "demo-user",
-                "bridgePath": "~/hermes-bridges/apple-messages/macmini_imessage_bridge.py",
-                "healthCommand": "ssh demo-user@192.0.2.11 'python3 ~/hermes-bridges/apple-messages/macmini_imessage_bridge.py --redact health'",
-                "searchCommandTemplate": "ssh demo-user@192.0.2.11 'python3 ~/hermes-bridges/apple-messages/macmini_imessage_bridge.py search \"SEARCH_TERM\" --limit 20 --since-days 365'",
+                "owner": "Configured Mac mini bridge",
+                "configured": bool(os.environ.get("HERMES_IMESSAGE_HOST", "").strip() and os.environ.get("HERMES_IMESSAGE_BRIDGE_PATH", "").strip()),
+                "bridgePath": os.environ.get("HERMES_IMESSAGE_BRIDGE_PATH", "").strip(),
+                "healthCommand": "configured externally" if os.environ.get("HERMES_IMESSAGE_HOST", "").strip() and os.environ.get("HERMES_IMESSAGE_BRIDGE_PATH", "").strip() else "disabled",
+                "searchCommandTemplate": "configured externally" if os.environ.get("HERMES_IMESSAGE_HOST", "").strip() and os.environ.get("HERMES_IMESSAGE_BRIDGE_PATH", "").strip() else "disabled",
                 "sendDefault": "disabled",
                 "sendPolicy": "No iMessage send unless HERMES_IMESSAGE_ALLOW_SEND=1 is deliberately set for an approved exact message and --approval-token SEND-IMESSAGE is supplied.",
             },

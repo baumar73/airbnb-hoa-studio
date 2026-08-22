@@ -1,9 +1,8 @@
 User-agent: *
+Allow: /
+Disallow: /admin
 Disallow: /v/
 Disallow: /w/
-Disallow: /admin
-Disallow: /find
 Disallow: /api/
-Disallow: /forms/
 
-Sitemap: https://portal.example.test/sitemap.xml
+Sitemap: https://isladelsol405d.com/sitemap.xml

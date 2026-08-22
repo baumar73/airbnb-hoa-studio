@@ -1,6 +1,7 @@
 // Safe PDF helpers for owner-reviewed coordination documents.
 // Screening and identity data are deliberately outside this portal.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PROPERTY_CONFIG } from './property-config.js';
 
 const SCALE = 612 / 1275;
 const px = (x, y) => ({ x: x * SCALE, y: 792 - y * SCALE });
@@ -24,9 +25,9 @@ function drawDraft(page, font) {
 }
 
 export const UNIT = {
-  address: '100 Example Avenue, Example City, FL 00000',
-  number: '405D',
-  owner: 'Owner Oliver DemoNameB',
+  address: `${PROPERTY_CONFIG.streetAddress}, ${PROPERTY_CONFIG.city}, ${PROPERTY_CONFIG.state} ${PROPERTY_CONFIG.postalCode}`,
+  number: PROPERTY_CONFIG.unit.replace(/^Unit\s+/i, ''),
+  owner: PROPERTY_CONFIG.ownerName,
 };
 
 const fmtDate = (iso) => {
@@ -64,7 +65,7 @@ export async function buildRulesAcknowledgment(templateBytes, data) {
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const page = doc.addPage([612, 792]);
   page.drawText('Rules & Regulations Acknowledgment', { x: 54, y: 730, size: 20, font: bold, color: INK });
-  page.drawText('Example Condominium · Unit 405D', { x: 54, y: 702, size: 12, font, color: INK });
+  page.drawText('Palma del Mar No. 2 · Unit 405D', { x: 54, y: 702, size: 12, font, color: INK });
   page.drawText(`Stay: ${data.checkIn || ''} through ${data.checkOut || ''}`, { x: 54, y: 680, size: 11, font, color: INK });
   page.drawText('Each adult below confirms that they received, reviewed, and agree to comply with the attached Rules & Regulations.', {
     x: 54, y: 646, size: 10, font, color: INK, maxWidth: 500, lineHeight: 14,

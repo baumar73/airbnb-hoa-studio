@@ -315,7 +315,7 @@ function nextAction(caseItem) {
     return ["Ruecklauf abwarten / nachfassen", "Koordinationsunterlagen oder Vendor-Bestaetigung fehlen noch. Check-in bleibt gesperrt."];
   }
   if (!caseItem.checklist?.shortTermLeaseOwnerSigned) return ["Owner-Signatur ergaenzen", "HOA akzeptiert den Lease nur, wenn Tenant und Owner signiert haben."];
-  if (!caseItem.checklist?.submittedToHoa) return ["An HOA einreichen", "Vollstaendiges Paket an Example Property Management / Tenant Evaluation einreichen."];
+  if (!caseItem.checklist?.submittedToHoa) return ["An HOA einreichen", "Vollstaendiges Paket an Condominium Associates / den verifizierten externen Vendor einreichen."];
   if (!caseItem.checklist?.boardApproval) return ["Board Approval abwarten", "Keine Check-in-Daten senden, bis die Approval-Mail vorliegt."];
   return ["Freigegeben", "HOA Approval liegt vor. Normale Check-in-Kommunikation ist erlaubt."];
 }
@@ -455,10 +455,10 @@ function fillTemplate(template, caseItem) {
     .replaceAll("{{decisionBy}}", formatDate(caseItem.decisionBy))
     .replaceAll("{{reservationCode}}", caseItem.reservationCode || "unknown")
     .replaceAll("{{guestName}}", caseItem.guestName || "guest")
-    .replaceAll("{{hoaEmail}}", property.hoaEmail || "contact005@example.test")
+    .replaceAll("{{hoaEmail}}", property.hoaEmail || "info@condominiumassociates.com")
     .replaceAll("{{hoaAddress}}", property.hoaAddress || "")
     .replaceAll("{{unit}}", property.unit || "Unit 405D")
-    .replaceAll("{{fee}}", property.fee || "USD 100 check or money order payable to Example Condominium");
+    .replaceAll("{{fee}}", property.fee || "USD 100 check or money order payable to Palma del Mar No. 2");
 }
 
 function ensureAISuggestions() {
@@ -1090,7 +1090,7 @@ function hermesTask(caseItem) {
     "1. Build/read the Hermes operations context, including Airbnb iCal calendar and deadline calendar.",
     "2. Search Gmail for guest replies, returned documents, attachments, and HOA/management messages.",
     "3. Check WhatsApp if the Hermes WhatsApp bridge is active; report bridge downtime if it is not available.",
-    "4. Check iMessage through the Mac mini bridge when relevant: ssh demo-user@192.0.2.11 'python3 ~/hermes-bridges/apple-messages/macmini_imessage_bridge.py search \"SEARCH_TERM\" --limit 20 --since-days 365'.",
+    "4. Check iMessage through the configured Mac mini bridge when relevant. If HERMES_IMESSAGE_HOST or the bridge path is not configured, report iMessage as unavailable; never guess and never send.",
     "5. Classify whether the HOA package is complete, incomplete, or missing.",
     "6. Include payment, Turno cleaning, maintenance, WhatsApp and iMessage findings as compact evidence pointers only.",
     "7. Write a safe sync report for the app's KI-Vorschlaege inbox.",
@@ -2189,7 +2189,7 @@ function decisionPathSteps(caseItem) {
       detail: submitted
         ? "Paket ist bei HOA/Verwaltung eingereicht."
         : docsReady
-          ? "Jetzt an Example Property Management / Tenant Evaluation einreichen."
+          ? "Jetzt an Condominium Associates und den verifizierten externen Vendor weitergeben."
           : "Einreichung ist blockiert, solange Pflichtunterlagen fehlen.",
     },
     {

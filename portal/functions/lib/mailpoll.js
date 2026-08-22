@@ -6,8 +6,7 @@ import { parseBooking, parseCancellation, looksLikeApproval } from './parse.js';
 import { sendTelegram } from './email.js';
 import { validateAirbnbCaseInput, shouldAutoApproveFromEmail } from './workflow.js';
 import { assertNoProhibitedSensitiveData, stripProhibitedSensitiveData } from './hoa-rules.js';
-
-const PORTAL = 'https://portal.example.test';
+import { PROPERTY_CONFIG, configuredPortalOrigin } from './property-config.js';
 
 function newCaseFrom(b) {
   const validation = validateAirbnbCaseInput({ guestName: b.guestName, checkIn: b.checkIn, checkOut: b.checkOut, adults: b.adults });
@@ -16,7 +15,7 @@ function newCaseFrom(b) {
   const pathType = validation.pathType;
   const STEPS = pathType === 'full'
     ? [['forms_sent','Guest portal opened and coordination paperwork started'],['vendor_handoff_confirmed','External screening-vendor handoff confirmed'],['vendor_status_confirmed','External vendor completion status confirmed'],['rules_ack','Rules & Regulations — reviewed & signed acknowledgment'],['lease_signed','Lease Agreement — signed by guest(s) and owner'],['fee_sent','$100 fee confirmed received by association when applicable'],['owner_reviewed','Owner confirmed the exact generated package'],['submitted_hoa','Safe coordination package submitted to management'],['board_approved','Written Board approval received'],['checkin_released','Check-in instructions released']]
-    : [['forms_sent','Guest Registration Form sent to guest'],['registration','Guest Registration Form — completed & signed'],['submitted_hoa','Registration submitted to Example Property Management'],['board_approved','HOA confirmation received'],['checkin_released','Check-in instructions released']];
+    : [['forms_sent','Guest Registration Form sent to guest'],['registration','Guest Registration Form — completed & signed'],['submitted_hoa',`Registration submitted to ${PROPERTY_CONFIG.managementName}`],['board_approved','HOA confirmation received'],['checkin_released','Check-in instructions released']];
   const tokenBytes = new Uint8Array(16);
   crypto.getRandomValues(tokenBytes);
   return {
@@ -40,13 +39,16 @@ function newCaseFrom(b) {
 }
 
 export async function pollMail(env) {
+  const portal = configuredPortalOrigin(env);
+  const gmailUser = String(env.GMAIL_USER || '').trim();
+  if (!gmailUser) throw new Error('GMAIL_USER is required for mailbox polling');
   const seenRaw = await env.CASES.get('mail-seen');
   const seen = seenRaw ? JSON.parse(seenRaw) : { uids: [] };
   const seenSet = new Set(seen.uids);
   const imap = new Imap();
   const summary = { bookings: 0, cancellations: 0, approvals: 0, alerts: 0 };
   try {
-    await imap.open(env.GMAIL_USER || 'contact008@example.test', env.GMAIL_APP_PASSWORD);
+    await imap.open(gmailUser, env.GMAIL_APP_PASSWORD);
 
     // NOTE: query must stay ASCII-only — non-ASCII breaks IMAP quoted strings ("buchung" also matches "Buchung bestätigt")
     const bookingUids = await imap.searchRaw('from:airbnb.com subject:("reservation confirmed" OR buchung) newer_than:30d');
@@ -71,19 +73,19 @@ export async function pollMail(env) {
           const termNotice = c.minimumTermDecision?.status === 'owner_review_required'
             ? `\n⚠️ Kurzvermietung: ${c.nights} tatsächliche Mietnächte. Wartungsblöcke zählen nicht als Mietzeit; Owner- und HOA-Prüfung bleiben erforderlich.`
             : '';
-          await sendTelegram(env, `🆕 Buchung erkannt & Vorgang angelegt: ${b.guestName}, ${b.checkIn} → ${b.checkOut} (${c.nights} Nächte, ${c.pathType}, ${b.code}, ${b.adults} Erwachsene).${termNotice}\n\n➡️ Bitte Daten im Admin prüfen und den Portalzugang per Airbnb-Chat senden:\n${PORTAL}/admin`);
+          await sendTelegram(env, `🆕 Buchung erkannt & Vorgang angelegt: ${b.guestName}, ${b.checkIn} → ${b.checkOut} (${c.nights} Nächte, ${c.pathType}, ${b.code}, ${b.adults} Erwachsene).${termNotice}\n\n➡️ Bitte Daten im Admin prüfen und den Portalzugang per Airbnb-Chat senden:\n${portal}/admin`);
         } catch (e) {
           summary.alerts++;
           if (!ambiguous[uid]) {
             ambiguous[uid] = { firstSeenAt: new Date().toISOString(), subject: msg.subject.slice(0, 160), reason: String(e && e.message || e).slice(0, 200) };
-            await sendTelegram(env, `📥 Airbnb-Buchung braucht manuelle Bearbeitung: ${b.guestName || msg.subject.slice(0, 80)} — ${String(e && e.message || e).slice(0, 160)}. Kein unvollständiger Vorgang wurde angelegt. ${PORTAL}/admin`);
+            await sendTelegram(env, `📥 Airbnb-Buchung braucht manuelle Bearbeitung: ${b.guestName || msg.subject.slice(0, 80)} — ${String(e && e.message || e).slice(0, 160)}. Kein unvollständiger Vorgang wurde angelegt. ${portal}/admin`);
           }
         }
       } else {
         summary.alerts++;
         if (!ambiguous[uid]) {
           ambiguous[uid] = { firstSeenAt: new Date().toISOString(), subject: msg.subject.slice(0, 160) };
-          await sendTelegram(env, `📥 Airbnb-Mail erkannt, aber nicht sicher parsebar („${msg.subject.slice(0, 80)}"). Kein Vorgang wurde geraten oder angelegt. Bitte im Admin prüfen: ${PORTAL}/admin`);
+          await sendTelegram(env, `📥 Airbnb-Mail erkannt, aber nicht sicher parsebar („${msg.subject.slice(0, 80)}“). Kein Vorgang wurde geraten oder angelegt. Bitte im Admin prüfen: ${portal}/admin`);
         }
       }
     }
@@ -129,7 +131,7 @@ export async function pollMail(env) {
       if (!news.some(n => n.subject === msg.subject && (n.at || '').slice(0, 10) === day)) {
         news.unshift(stripProhibitedSensitiveData({
           at: msg.date || new Date().toISOString(),
-          from: msg.from.replace(/<[^>]*>/g, '').replace(/"/g, '').trim() || 'Example Property Management',
+          from: msg.from.replace(/<[^>]*>/g, '').replace(/"/g, '').trim() || PROPERTY_CONFIG.managementName,
           subject: msg.subject,
         }));
         newsDirty = true;
@@ -149,7 +151,7 @@ export async function pollMail(env) {
           autoApproved: shouldAutoApproveFromEmail(),
         };
         dirty = true; summary.approvals++;
-        await sendTelegram(env, `🏛️ Mögliche Board-Freigabe für ${hit.guestName} (${hit.checkIn}) erkannt: „${msg.subject.slice(0, 70)}“. Aus Sicherheitsgründen wurde nichts automatisch bestätigt und keine Gastmail gesendet. Bitte im Admin prüfen: ${PORTAL}/admin/cases`);
+        await sendTelegram(env, `🏛️ Mögliche Board-Freigabe für ${hit.guestName} (${hit.checkIn}) erkannt: „${msg.subject.slice(0, 70)}“. Aus Sicherheitsgründen wurde nichts automatisch bestätigt und keine Gastmail gesendet. Bitte im Admin prüfen: ${portal}/admin/cases`);
       } else {
         summary.alerts++;
         await sendTelegram(env, `🏛️ Mail der Verwaltung sieht nach Approval aus, passt aber zu keinem offenen Vorgang: „${msg.subject.slice(0, 80)}" — bitte selbst prüfen.`);

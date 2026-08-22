@@ -120,7 +120,7 @@ function renderCases(displayState) {
 
 function renderDisplay(displayState) {
   $("displayTitle").textContent = displayState.property?.listingName || "Airbnb HOA";
-  $("displaySubtitle").textContent = displayState.property?.unit || "Example Condominium";
+  $("displaySubtitle").textContent = displayState.property?.unit || "Palma del Mar No. 2, Unit 405D";
   $("displayToday").textContent = formatDate(displayState.today);
   $("displayUpdated").textContent = `Stand ${formatUpdated(displayState.generatedAt)}`;
   $("displayRed").textContent = displayState.summary?.dailyRed ?? 0;

@@ -58,7 +58,7 @@ function seedCase(store) {
   const c = {
     id: 'case-1', token: TOKEN, guestName: 'DemoGuest DemoNameL',
     reservationCode: 'HMDEMO0002', checkIn: '2026-10-17', checkOut: '2026-12-20',
-    nights: 64, adults: 2, pathType: 'full', createdAt: new Date().toISOString(),
+    nights: 64, adults: 2, pathType: 'full', createdAt: '2026-08-20T00:00:00Z',
     notes: '', status: null, hoaOccupancyConfirmedAt: '2026-07-27T12:00:00Z',
     steps: [
       { id: 'forms_sent', label: 'First paperwork draft saved', done: false, date: null },
@@ -433,8 +433,9 @@ test('review payload binds the transparent minimum-term decision without countin
   });
 });
 
-test('live submission mode cannot be enabled without an atomic coordinator', async () => {
+test('live submission mode cannot be enabled and stale mutable state is removed', async () => {
   const { env, store } = mockEnv();
+  store.set('submit-live', 'yes');
   const res = await onRequest({
     request: adminRequest('/admin/submit-live', { mode: 'yes', confirm: 'LIVE' }),
     env,
@@ -444,8 +445,72 @@ test('live submission mode cannot be enabled without an atomic coordinator', asy
   assert.equal(store.has('submit-live'), false);
 });
 
-test('binary uploads fail closed until content-level DLP is configured', async () => {
-  for (const path of ['/admin/library/upload', '/admin/receipts/upload']) {
+async function readyCaseForSubmissionGate(env, store) {
+  const c = seedCase(store);
+  c.adults = 1;
+  store.set('cases', JSON.stringify([c]));
+  store.set('owner-signature-png', validSignaturePng());
+  const save = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: completeGuestForm() }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(save.status, 303);
+  return JSON.parse(store.get('cases'))[0];
+}
+
+test('submission route rejects incomplete vendor prerequisites before sockets or state mutation', async () => {
+  resetSocketAttempts();
+  const { env, store } = mockEnv();
+  const c = await readyCaseForSubmissionGate(env, store);
+  c.steps.find(step => step.id === 'fee_sent').done = true;
+  store.set('cases', JSON.stringify([c]));
+  const response = await onRequest({
+    request: adminRequest('/admin/submit', { id: c.id, reviewHash: c.reviewHash }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(response.status, 409);
+  assert.match(await response.text(), /vendor_handoff_confirmed, vendor_status_confirmed/);
+  const persisted = JSON.parse(store.get('cases'))[0];
+  assert.equal(persisted.ownerApprovedAt, undefined);
+  assert.equal([...store.keys()].some(key => key.startsWith('send-claim:')), false);
+  assert.equal(socketAttempts(), 0);
+});
+
+test('submission route rejects an incomplete fee prerequisite before sockets or state mutation', async () => {
+  resetSocketAttempts();
+  const { env, store } = mockEnv();
+  const c = await readyCaseForSubmissionGate(env, store);
+  c.steps.find(step => step.id === 'vendor_handoff_confirmed').done = true;
+  c.steps.find(step => step.id === 'vendor_status_confirmed').done = true;
+  store.set('cases', JSON.stringify([c]));
+  const response = await onRequest({
+    request: adminRequest('/admin/submit', { id: c.id, reviewHash: c.reviewHash }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(response.status, 409);
+  assert.match(await response.text(), /fee_sent/);
+  const persisted = JSON.parse(store.get('cases'))[0];
+  assert.equal(persisted.ownerApprovedAt, undefined);
+  assert.equal([...store.keys()].some(key => key.startsWith('send-claim:')), false);
+  assert.equal(socketAttempts(), 0);
+});
+
+test('legacy public hostname redirects to the canonical origin', async () => {
+  const { env } = mockEnv();
+  const res = await onRequest({
+    request: new Request('https://isla.bauerpanama.de/privacy?from=legacy'),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 301);
+  assert.equal(res.headers.get('location'), 'https://isladelsol405d.com/privacy?from=legacy');
+});
+
+test('binary uploads and receipt email export fail closed', async () => {
+  for (const path of ['/admin/library/upload', '/admin/receipts/upload', '/admin/receipts/export']) {
     const { env, store } = mockEnv();
     const res = await onRequest({
       request: adminRequest(path),

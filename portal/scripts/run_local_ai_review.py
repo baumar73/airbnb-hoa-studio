@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Purpose-bound OpenAI preflight for Demo Unit HOA packets.
+"""Purpose-bound OpenAI preflight for Isla del Sol Unit 405D HOA packets.
 
 Reads the Cloudflare KV case list through the authenticated Mac mini, renders
 and checks final PDFs locally, asks OpenAI through Hermes OAuth to inspect the
@@ -24,12 +24,14 @@ import uuid
 import fitz
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SSH_HOST = os.environ.get("ISLA_DEPLOY_HOST", "contact007@example.test")
-REMOTE_ROOT = os.environ.get("ISLA_REMOTE_ROOT", "/Users/demo-user/Infrastruktur verbessern/isla-portal")
+SSH_HOST = os.environ.get("ISLA_DEPLOY_HOST", "").strip()
+REMOTE_ROOT = os.environ.get("ISLA_REMOTE_ROOT", "").strip()
 MODEL = os.environ.get("ISLA_AI_MODEL", "openai-codex/gpt-5.6-sol")
 
 
 def remote_kv_get(key: str) -> str:
+    if not SSH_HOST or not REMOTE_ROOT:
+        raise RuntimeError("ISLA_DEPLOY_HOST and ISLA_REMOTE_ROOT must be explicitly configured")
     command = f'cd {shlex_quote(REMOTE_ROOT)} && npx wrangler kv key get {shlex_quote(key)} --binding CASES --remote'
     run = subprocess.run(["ssh", "-o", "BatchMode=yes", SSH_HOST, command], text=True, capture_output=True, check=True)
     return run.stdout

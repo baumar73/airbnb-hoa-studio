@@ -2,6 +2,7 @@
 // Guest actions may prepare a package, but only an authenticated owner action
 // may submit it or confirm an approval.
 import { HOA_RULE_REGISTRY, classifyOccupancy, evaluateApplicationFee, evaluateMinimumRentalTerm, evaluatePetRule } from './hoa-rules.js';
+import { PROPERTY_CONFIG } from './property-config.js';
 
 export async function bundleDigest(orderedPdfBytes) {
   const parts = (orderedPdfBytes || []).map(value => value instanceof Uint8Array ? value : new Uint8Array(value));
@@ -211,8 +212,8 @@ export function isAllowedMutationOrigin(origin, expectedOrigin) {
 
 export function submissionRecipients() {
   return {
-    to: ['contact005@example.test', 'contact006@example.test'],
-    cc: ['contact008@example.test'],
+    to: [...PROPERTY_CONFIG.hoaTo],
+    cc: [...PROPERTY_CONFIG.hoaCc],
   };
 }
 

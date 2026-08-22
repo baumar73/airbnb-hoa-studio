@@ -4,7 +4,6 @@
 // already nudged in case.notify to avoid spam.
 
 const DAY = 86400000;
-const PORTAL = 'https://portal.example.test';
 
 function daysUntil(dateStr, now) {
   return Math.ceil((new Date(dateStr + 'T12:00:00Z') - now) / DAY);
@@ -16,7 +15,7 @@ function stepDone(c, id) {
   return c.steps.find(s => s.id === id && s.done);
 }
 
-export function computeAlerts(cases, now) {
+export function computeAlerts(cases, now, portal = PROPERTY_CONFIG.portalOrigin) {
   const alerts = [];
   for (const c of cases) {
     c.notify = c.notify || {};
@@ -26,18 +25,18 @@ export function computeAlerts(cases, now) {
     const released = stepDone(c, 'checkin_released');
     if (days < -1 || (approved && released)) continue; // done or past
 
-    const link = `${PORTAL}/admin`;
+    const link = `${portal}/admin`;
     const who = `${c.guestName} (${c.checkIn} → ${c.checkOut})`;
 
     if (!c.wizard && ageDays(c.createdAt, now) >= 3 && ageDays(n.wizardNudge, now) >= 3) {
-      alerts.push({ c, key: 'wizardNudge', text: `📝 ${who}: Gast hat den Formular-Wizard noch nicht ausgefüllt. Erinnerung über den Airbnb-Chat senden? Magic-Link: ${PORTAL}/v/${c.token}` });
+      alerts.push({ c, key: 'wizardNudge', text: `📝 ${who}: Gast hat den Formular-Wizard noch nicht ausgefüllt. Erinnerung über den Airbnb-Chat senden? Magic-Link: ${portal}/v/${c.token}` });
     }
     if (c.wizard && !stepDone(c, 'submitted_hoa') && ageDays(c.wizard.savedAt, now) >= 2 && ageDays(n.submitNudge, now) >= 3) {
       alerts.push({ c, key: 'submitNudge', text: `📤 ${who}: Wizard-Daten liegen seit ${Math.floor(ageDays(c.wizard.savedAt, now))} Tagen vor, aber das Paket ist noch nicht bei der HOA eingereicht. ${link}` });
     }
     const submitted = c.steps.find(s => s.id === 'submitted_hoa');
     if (submitted && submitted.done && !approved && ageDays(submitted.date, now) >= 5 && ageDays(n.hoaNudge, now) >= 3) {
-      alerts.push({ c, key: 'hoaNudge', text: `🏛️ ${who}: HOA-Einreichung liegt ${Math.floor(ageDays(submitted.date, now))} Tage zurück ohne Board-Approval. Bei Example Property Management nachfassen (info@ / kruiz@, +1-555-000-001).` });
+      alerts.push({ c, key: 'hoaNudge', text: `🏛️ ${who}: HOA-Einreichung liegt ${Math.floor(ageDays(submitted.date, now))} Tage zurück ohne Board-Approval. Bei ${PROPERTY_CONFIG.managementName} nachfassen (${PROPERTY_CONFIG.hoaTo.join(' / ')}, 727-573-9300).` });
     }
     // fee tracking applies only when the association fee is actually required.
     if (applicationFeeState(c) === 'required') {
@@ -59,14 +58,14 @@ export function computeAlerts(cases, now) {
   return alerts;
 }
 
-export function buildDigest(cases, now) {
+export function buildDigest(cases, now, portal = PROPERTY_CONFIG.portalOrigin) {
   const active = cases.filter(c => daysUntil(c.checkIn, now) >= -1 && !(stepDone(c, 'board_approved') && stepDone(c, 'checkin_released')));
-  if (!active.length) return '🌴 Demo Unit Wochen-Digest: keine offenen Vorgänge.';
+  if (!active.length) return '🌴 Isla 405D Wochen-Digest: keine offenen Vorgänge.';
   const lines = active.map(c => {
     const done = c.steps.filter(s => s.done).length;
     return `• ${c.guestName} ${c.checkIn}→${c.checkOut}: ${done}/${c.steps.length} Schritte${c.wizard ? ', Wizard ✓' : ', Wizard ✗'}${stepDone(c, 'board_approved') ? ', Approved ✓' : ''}`;
   });
-  return `🌴 Demo Unit Wochen-Digest (${active.length} offen):\n` + lines.join('\n') + `\n${PORTAL}/admin`;
+  return `🌴 Isla 405D Wochen-Digest (${active.length} offen):\n` + lines.join('\n') + `\n${portal}/admin`;
 }
 
 async function sendTelegram(env, text) {
@@ -82,10 +81,12 @@ async function sendTelegram(env, text) {
 import { purgeExpiredCases, applicationFeeState } from '../../functions/lib/workflow.js';
 import { pollMail } from '../../functions/lib/mailpoll.js';
 import { assertNoProhibitedSensitiveData, stripProhibitedSensitiveData } from '../../functions/lib/hoa-rules.js';
+import { PROPERTY_CONFIG, configuredPortalOrigin } from '../../functions/lib/property-config.js';
 
 export default {
   async scheduled(event, env, ctx) {
     const now = new Date();
+    const portal = configuredPortalOrigin(env);
 
     // half-hourly runs: mail polling only
     if (event.cron === '*/30 * * * *') {
@@ -110,11 +111,11 @@ export default {
       }
     }
 
-    const alerts = computeAlerts(cases, now);
+    const alerts = computeAlerts(cases, now, portal);
     for (const a of alerts) {
       if (await sendTelegram(env, a.text)) a.c.notify[a.key] = now.toISOString();
     }
-    if (now.getUTCDay() === 0) await sendTelegram(env, buildDigest(cases, now));
+    if (now.getUTCDay() === 0) await sendTelegram(env, buildDigest(cases, now, portal));
     if (alerts.length) {
       assertNoProhibitedSensitiveData(cases);
       await env.CASES.put('cases', JSON.stringify(cases));

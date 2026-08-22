@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="/Users/demo-user/Documents/Projekt Management Owner"
+SCRIPT_DIR="${0:A:h}"
+PROJECT_DIR="${AIRBNB_HOA_PROJECT_DIR:-${SCRIPT_DIR:h}}"
 OPEN_PATH="/"
 LISTEN_HOST="127.0.0.1"
 ALLOW_LAN_DISPLAY="0"

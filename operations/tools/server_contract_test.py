@@ -38,6 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "server.mjs"
 UI_CHECK = ROOT / "tools" / "ui_contract_check.py"
+SYNTHETIC_STATE = ROOT / "test" / "fixtures" / "synthetic-state.json"
 
 
 def header_value(headers: dict, name: str) -> str:
@@ -146,6 +147,10 @@ class ServerTests(unittest.TestCase):
         manifest_fixture = self.data_dir / "markus-operations-manifest.json"
         if not manifest_fixture.exists():
             manifest_fixture.write_text('{"version": 1, "domains": [], "runtimePolicy": {}}\n', encoding="utf-8")
+        # Regular contract tests need representative cases. The production
+        # server now seeds an empty state, so test data lives only in this
+        # explicit fixture and can never be written by a clean deployment.
+        shutil.copy(SYNTHETIC_STATE, self.data_dir / "airbnb-hoa-state.json")
         self.port = free_port()
         self.server = ServerFixture(self.data_dir, self.port)
         self.assertTrue(self.server.wait_ready(), "server did not become ready")
@@ -199,6 +204,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(bootstrap["state"]["updatedAt"], disk_state["updatedAt"])
         self.assertEqual(state_file.stat().st_mode & 0o777, 0o600)
         self.assertEqual(list(blank_dir.glob("*.tmp-init-*")), [])
+        self.assertEqual(disk_state["cases"], [], "production clean seed must contain no demo or guest cases")
+        self.assertEqual(disk_state["property"]["listingId"], "1097686557541958107")
+        serialized = json.dumps(disk_state)
+        for placeholder in ("Example", "DEMOID", "example.test", "DemoGivenName", "DemoSurname"):
+            self.assertNotIn(placeholder, serialized)
 
         unsafe = [
             case

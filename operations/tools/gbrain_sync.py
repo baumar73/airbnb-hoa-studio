@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -16,8 +18,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = ROOT / "gbrain-import" / "airbnb-hoa-operations"
-REMOTE_HOST = "markus@192.0.2.10"
-REMOTE_BASE = "/tmp/airbnb-hoa-gbrain-import"
+REMOTE_HOST = os.environ.get("AIRBNB_HOA_GBRAIN_HOST", "").strip()
+REMOTE_BASE = os.environ.get("AIRBNB_HOA_GBRAIN_REMOTE_BASE", "").strip()
+REMOTE_CWD = os.environ.get("AIRBNB_HOA_GBRAIN_REMOTE_CWD", "").strip()
 
 sys.path.insert(0, str(ROOT / "tools"))
 import gbrain_export  # noqa: E402
@@ -79,10 +82,23 @@ def make_import_staging() -> Path:
     return staging
 
 
+def missing_remote_config() -> list[str]:
+    return [
+        name for name, value in (
+            ("AIRBNB_HOA_GBRAIN_HOST", REMOTE_HOST),
+            ("AIRBNB_HOA_GBRAIN_REMOTE_BASE", REMOTE_BASE),
+            ("AIRBNB_HOA_GBRAIN_REMOTE_CWD", REMOTE_CWD),
+        ) if not value
+    ]
+
+
 def sync_remote(archive: Path) -> dict[str, Any]:
+    missing_config = missing_remote_config()
+    if missing_config:
+        return {"configured": False, "status": "disabled", "missing": missing_config, "steps": []}
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     remote_dir = f"{REMOTE_BASE}-{stamp}"
-    remote_archive = f"/tmp/airbnb-hoa-gbrain-import-{stamp}.tgz"
+    remote_archive = f"{REMOTE_BASE}-archive-{stamp}.tgz"
 
     steps: list[dict[str, Any]] = []
     steps.append(run(["scp", "-q", str(archive), f"{REMOTE_HOST}:{remote_archive}"], timeout=60))
@@ -122,15 +138,15 @@ for path in sorted(root.glob("*.md")):
 print(json.dumps({{"count": len(results), "errors": errors, "results": results}}, ensure_ascii=False))
 sys.exit(1 if errors else 0)
 """.strip()
-    put_cmd = f"cd /srv/agents/hermes/app && python3 - <<'PY'\n{put_script}\nPY"
+    put_cmd = f"cd {shlex.quote(REMOTE_CWD)} && python3 - <<'PY'\n{put_script}\nPY"
     steps.append(run(["ssh", REMOTE_HOST, put_cmd], timeout=240))
     require_ok(steps[-1], "gbrain exact put")
 
-    embed_cmd = "cd /srv/agents/hermes/app && gbrain embed --stale"
+    embed_cmd = f"cd {shlex.quote(REMOTE_CWD)} && gbrain embed --stale"
     steps.append(run(["ssh", REMOTE_HOST, embed_cmd], timeout=240))
     require_ok(steps[-1], "gbrain embed")
 
-    verify_cmd = "gbrain query 'Airbnb HOA DemoSurnameC documents missing Board Approval GBrain sync' | sed -n '1,80p'"
+    verify_cmd = "gbrain query 'Airbnb HOA Unit 405D Board Approval GBrain sync' | sed -n '1,80p'"
     steps.append(run(["ssh", REMOTE_HOST, verify_cmd], timeout=60))
     require_ok(steps[-1], "gbrain verify query")
 
@@ -160,6 +176,20 @@ def main() -> int:
     today_value = gbrain_export.parse_day(args.today) if args.today else gbrain_export.today_panama()
     if not today_value:
         raise SystemExit("Invalid --today")
+
+    missing_config = missing_remote_config()
+    if not args.export_only and missing_config:
+        result = {
+            "ok": False,
+            "generatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "manifest": None,
+            "remote": {"configured": False, "status": "disabled", "missing": missing_config, "steps": []},
+        }
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(f"Remote GBrain sync disabled; configure {', '.join(missing_config)}.")
+        return 0
 
     manifest = gbrain_export.export_pages(today_value=today_value)
     result: dict[str, Any] = {

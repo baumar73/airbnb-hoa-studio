@@ -1,13 +1,14 @@
-// Demo Unit — HOA Approval Portal (Cloudflare Pages Functions)
+// Isla del Sol Unit 405D — HOA Approval Portal (Cloudflare Pages Functions)
 // Storage: Workers KV (binding CASES, key "cases" = JSON array).
 // Admin: HTTP Basic Auth (env ADMIN_USER / ADMIN_PASSWORD).
 import { fillGuestRegistration, buildRulesAcknowledgment } from './lib/fill.js';
 import { generateLeaseAgreement } from './lib/lease.js';
 import { submitApprovedPackage, isReadyForOwnerReview, docStates } from './lib/submit.js';
-import { validateAirbnbCaseInput, isAllowedMutationOrigin, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isValidISODate } from './lib/workflow.js';
-import { sendViaGmail, sendTelegram } from './lib/email.js';
+import { validateAirbnbCaseInput, isAllowedMutationOrigin, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isValidISODate, validateLiveSubmissionPrerequisites } from './lib/workflow.js';
+import { sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
 import { assertNoProhibitedSensitiveData, containsProhibitedSensitiveData, evaluateMinimumRentalTerm, stripProhibitedSensitiveData } from './lib/hoa-rules.js';
+import { PROPERTY_CONFIG, configuredPortalOrigin, liveSubmissionEnabled } from './lib/property-config.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -19,14 +20,14 @@ const STEP_TEMPLATES = {
     ['lease_signed',    'Lease Agreement — signed by guest(s) and owner'],
     ['fee_sent',        '$100 fee confirmed received by association'],
     ['owner_reviewed',  'Owner confirmed the green quality report and released the package'],
-    ['submitted_hoa',   'Complete file submitted to Example Property Management'],
+    ['submitted_hoa',   `Complete file submitted to ${PROPERTY_CONFIG.managementName}`],
     ['board_approved',  'HOA Board approval received'],
     ['checkin_released','Check-in instructions released'],
   ],
   'guest-registration': [
     ['forms_sent',      'Guest Registration Form sent to guest'],
     ['registration',    'Guest Registration Form — completed & signed'],
-    ['submitted_hoa',   'Registration submitted to Example Property Management'],
+    ['submitted_hoa',   `Registration submitted to ${PROPERTY_CONFIG.managementName}`],
     ['board_approved',  'HOA confirmation received'],
     ['checkin_released','Check-in instructions released'],
   ],
@@ -198,7 +199,7 @@ async function checkAdmin(request, env) {
     }
   }
   return new Response('Authentication required', { status: 401, headers: {
-    'WWW-Authenticate': 'Basic realm="Demo Unit Admin"', ...SEC_HEADERS,
+    'WWW-Authenticate': 'Basic realm="Isla 405D Admin"', ...SEC_HEADERS,
     'Cache-Control': 'private, no-store, max-age=0', 'X-Robots-Tag': 'noindex'
   } });
 }
@@ -402,8 +403,8 @@ function page(title, headerHtml, bodyHtml, opts) {
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
 <title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body${bodyClass}>
 <a class="skip-link" href="#main-content">Skip to content</a>
-<header class="site-header"><div class="wrap"><p class="brand"><span>Example Island</span><b>· Unit 405D</b><span>— Guest Approval</span></p>${headerHtml}</div></header><main id="main-content" tabindex="-1">${bodyHtml}</main>
-<footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a></footer>
+<header class="site-header"><div class="wrap"><p class="brand"><span>Isla del Sol</span><b>· Unit 405D</b><span>— Guest Approval</span></p>${headerHtml}</div></header><main id="main-content" tabindex="-1">${bodyHtml}</main>
+<footer>Isla del Sol · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a></footer>
 </body></html>`;
 }
 
@@ -425,18 +426,18 @@ function adminPage(title, active, headerHtml, bodyHtml) {
 }
 
 // ---------- views ----------
-const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Example Island, St. Petersburg, Florida. Fully furnished for paid stays above 30 nights; exactly 30 nights requires written HOA clarification: in-unit washer & dryer, dishwasher, full kitchen, fast 700-Mbit internet, community pool, smart-lock self-check-in. Minutes from St. Pete Beach, Fort De Soto Park and downtown St. Petersburg. Booking exclusively via Airbnb.';
+const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Isla del Sol, St. Petersburg, Florida. Monthly-stay focus with transparent owner review for shorter paid stays; exactly 30 nights requires written HOA clarification. In-unit washer & dryer, dishwasher, full kitchen, fast 700-Mbit internet, community pool and smart-lock self-check-in. Booking exclusively via Airbnb.';
 const HOME_FAQ = [
   ['Can I book the condo on this website?',
-   'No — booking runs exclusively through Airbnb (airbnb.com/rooms/DEMOID0002). This site is the official companion portal that handles the condominium association\'s approval paperwork after you book.'],
+   'No — booking runs exclusively through Airbnb (airbnb.com/rooms/1097686557541958107). This site is the official companion portal that handles the condominium association\'s approval paperwork after you book.'],
   ['What is the minimum stay?',
-   'The source rules conflict at exactly 30 nights. This portal therefore accepts paid rentals only above 30 nights; an exact 30-night stay requires written HOA clarification before a case is opened.'],
+   'The source rules conflict at exactly 30 nights. More than 30 actual rental nights follows the normal path. A shorter paid stay can be tracked transparently but always requires owner and HOA review. Exactly 30 nights requires written HOA clarification. Maintenance blocks are shown separately and never count as rental nights.'],
   ['Why does my rental need approval?',
-   'Example Condominium is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. This portal makes the paperwork as painless as possible: forms are filled and signed online, checked automatically with AI and released by Owner only after the quality report is green.'],
+   'Palma del Mar No. 2 is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. This portal makes the paperwork as painless as possible: forms are filled and signed online, checked automatically with AI and released by Owner only after the quality report is green.'],
   ['How long does the approval take?',
    'The association asks applicants to allow up to 15 days after the complete file and fee arrive. Complete the portal early; your personal status page shows live progress.'],
   ['What is the $100 fee?',
-   'The association charges a non-refundable $100 application fee ($50 community fee plus $50 document-processing fee), paid by the guest via check or money order payable to "Example Condominium". Your status page has the exact mailing instructions.'],
+   'The association charges a non-refundable $100 application fee ($50 community fee plus $50 document-processing fee), paid by the guest via check or money order payable to "Palma del Mar No. 2". Your status page has the exact mailing instructions.'],
   ['Are pets allowed?',
    'The current association rule does not permit renter pets. Assistance-animal accommodation requests are not auto-denied and must be routed to the Board for individual review. The home is non-smoking.'],
   ['Can my AI assistant help me with the paperwork?',
@@ -451,7 +452,7 @@ const FAQ_JSONLD = JSON.stringify({
 const HOME_JSONLD = JSON.stringify({
   '@context': 'https://schema.org',
   '@type': 'Apartment',
-  name: 'Example Island Bay-View Condo — Unit 405D, Example Condominium',
+  name: 'Isla del Sol Bay-View Condo — Unit 405D, Palma del Mar No. 2',
   description: HOME_DESC,
   address: { '@type': 'PostalAddress', streetAddress: '6219 Palma Del Mar Blvd S, Unit 405D',
     addressLocality: 'St. Petersburg', addressRegion: 'FL', postalCode: '33715', addressCountry: 'US' },
@@ -461,16 +462,16 @@ const HOME_JSONLD = JSON.stringify({
   amenityFeature: ['Water view (Boca Ciega Bay)', 'In-unit washer & dryer', 'Dishwasher', 'Full kitchen',
     '700 Mbit internet (Spectrum)', 'Community pool', 'Smart-lock self-check-in', 'Air conditioning']
     .map(n => ({ '@type': 'LocationFeatureSpecification', name: n, value: true })),
-  tourBookingPage: 'https://www.airbnb.com/rooms/DEMOID0002',
-  sameAs: ['https://www.airbnb.com/rooms/DEMOID0002'],
-  url: 'https://portal.example.test/',
+  tourBookingPage: 'https://www.airbnb.com/rooms/1097686557541958107',
+  sameAs: ['https://www.airbnb.com/rooms/1097686557541958107'],
+  url: 'https://isladelsol405d.com/',
 });
 
 function landingView() {
-  return page('Example Island Bay-View Condo, St. Petersburg FL — Unit 405D Guest Portal',
-    `<h1>Example Island — your bay-view home at Unit 405D</h1>
+  return page('Isla del Sol Bay-View Condo, St. Petersburg FL — Unit 405D Guest Portal',
+    `<h1>Isla del Sol — your bay-view home at Unit 405D</h1>
      <p>A fully furnished one-bedroom condo above Boca Ciega Bay in St. Petersburg, Florida, for monthly stays. Booked through Airbnb — and this is your private portal for the condominium association's rental approval, step by step.</p>
-     <span class="chip">Example Island · St. Petersburg, Florida</span>`,
+     <span class="chip">Isla del Sol · St. Petersburg, Florida</span>`,
     `<div class="card"><h2>A clear path from booking to arrival</h2>
       <p class="muted">Four simple stages. Your private status page always shows what is complete and what comes next.</p>
       <ol class="process-list">
@@ -493,14 +494,14 @@ function landingView() {
       <p class="muted">Your page is created within about an hour of booking. Can't find it? Just message Owner on Airbnb.</p>
      </div>
      <div class="card"><h2>Your home above the bay</h2>
-      <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
+      <p>A quiet one-bedroom condo on the fourth floor of Palma del Mar No. 2 at <b>Isla del Sol</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Isla del Sol Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
       <ul class="feature-list">
-        <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished for stays above 30 nights. An exact 30-night booking requires written HOA clarification because the governing texts conflict.</span></div></li>
+        <li><div><b>Made for monthly stays</b><br><span class="muted">More than 30 actual rental nights follows the normal path. Shorter paid stays remain visible as owner-review cases; exactly 30 nights requires written HOA clarification. Maintenance blocks never count toward the rental term.</span></div></li>
         <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast 700-Mbit internet, smart-lock self-check-in, community pool.</span></div></li>
         <li><div><b>The location</b><br><span class="muted">10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals; about 30 minutes to Tampa International Airport.</span></div></li>
         <li><div><b>Good to know</b><br><span class="muted">The current association rule bars renter pets; assistance-animal accommodation requests go to Board review rather than an automated decision. No smoking. Every rental needs written association approval.</span></div></li>
       </ul>
-      <p><a class="btn" href="https://www.airbnb.com/rooms/DEMOID0002" rel="noopener">Book on Airbnb — Example Island, Unit 405D</a><br>
+      <p><a class="btn" href="https://www.airbnb.com/rooms/1097686557541958107" rel="noopener">Book on Airbnb — Isla del Sol, Unit 405D</a><br>
       <span class="muted" style="font-size:13.5px">Booking runs exclusively through Airbnb. This site is the official companion portal for the home's approval paperwork.</span></p>
      </div>
      <div class="card"><h2>Frequently asked questions</h2>
@@ -509,10 +510,10 @@ function landingView() {
         <details${index === 0 ? ' open' : ''}><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}
       </div>
      </div>`,
-    { index: true, bodyClass: 'public-home', extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://portal.example.test/">
-<meta property="og:type" content="website"><meta property="og:site_name" content="Example Island · Unit 405D">
-<meta property="og:title" content="Example Island Bay-View Condo, St. Petersburg FL — monthly stays">
-<meta property="og:description" content="${esc(HOME_DESC)}"><meta property="og:url" content="https://portal.example.test/">
+    { index: true, bodyClass: 'public-home', extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://isladelsol405d.com/">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Isla del Sol · Unit 405D">
+<meta property="og:title" content="Isla del Sol Bay-View Condo, St. Petersburg FL — monthly stays">
+<meta property="og:description" content="${esc(HOME_DESC)}"><meta property="og:url" content="https://isladelsol405d.com/">
 <meta name="twitter:card" content="summary">
 <script type="application/ld+json">${HOME_JSONLD}</script>
 <script type="application/ld+json">${FAQ_JSONLD}</script>` });
@@ -540,9 +541,9 @@ function statusView(c) {
       <p>No additional application-fee payment is required for this renewal.</p>
     </div>` : feeState === 'required' ? `
     <div class="card"><h2>The $100 association fee</h2>
-      <p>This <b>non-refundable $100 application fee</b> consists of a $50 community fee and a $50 document-processing fee. Pay by <b>check or money order only</b> (no cards), made out to <b>"Example Condominium"</b>. Mail it with a short note (unit 405D, your name, rental dates${c.reservationCode ? ', reservation ' + esc(c.reservationCode) : ''}) to:</p>
-      <div class="addr">Example Condominium Association, Inc.
-c/o Example Property Management, Inc.
+      <p>This <b>non-refundable $100 application fee</b> consists of a $50 community fee and a $50 document-processing fee. Pay by <b>check or money order only</b> (no cards), made out to <b>"Palma del Mar No. 2"</b>. Mail it with a short note (unit 405D, your name, rental dates${c.reservationCode ? ', reservation ' + esc(c.reservationCode) : ''}) to:</p>
+      <div class="addr">Palma del Mar No. 2 Condominium Association, Inc.
+c/o Condominium Associates, Inc.
 570 Carillon Parkway, Suite 210
 St. Petersburg, FL 33716</div>
       ${c.feeMailed
@@ -583,7 +584,7 @@ St. Petersburg, FL 33716</div>
      </div>` : ''}
      ${approved ? `
      <div class="card status-highlight"><h2>You're all set 🎉</h2>
-       <p>The board has approved your stay. Your check-in details (door codes, arrival guide) will reach you well before arrival — usually via Airbnb chat. Safe travels, and see you at Example Island!</p>
+       <p>The board has approved your stay. Your check-in details (door codes, arrival guide) will reach you well before arrival — usually via Airbnb chat. Safe travels, and see you at Isla del Sol!</p>
      </div>` : ''}
      <div class="card"><h2>Good to know</h2>
        <ul class="steps" style="font-size:15px">
@@ -604,7 +605,7 @@ function guestBrief(c) {
 - Names only of any minor occupants.
 - Do not paste identity documents, dates of birth, screening reports, employment data,
   financial data, references or emergency-contact data into this portal or an AI assistant.`;
-  return `# HOA approval briefing — Example Island, Unit 405D (Example Condominium)
+  return `# HOA approval briefing — Isla del Sol, Unit 405D (Palma del Mar No. 2)
 
 This is a summary of a guest's rental-approval paperwork, intended for the guest's
 own AI assistant. You may help the guest prepare and understand their form data.
@@ -624,7 +625,7 @@ ${c.submission ? `- The paperwork package was submitted to the association on ${
 ${c.wizard ? `- The online form was last saved on ${(c.wizard.savedAt || '').slice(0, 10)} and can be edited anytime.` : '- The online form has NOT been filled in yet — that is the next step.'}
 
 ## The online form — what the guest should have ready
-Private form link (do not publish): https://portal.example.test/w/${c.token}
+Private form link (do not publish): https://isladelsol405d.com/w/${c.token}
 ${fields}
 - E-sign consent + drawn signature: guest personally, on the form page.
 - An unfinished draft can be saved and continued later.
@@ -636,15 +637,15 @@ ${isFull ? `
 ## The non-refundable $100 association fee (paid by the guest)
 - $50 community fee plus $50 document-processing fee.
 - Check or money order ONLY (no cards).
-- Payable to: "Example Condominium"
+- Payable to: "Palma del Mar No. 2"
 - Enclose a note: Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / ' + c.reservationCode : ''}
-- Mail to: Example Condominium Association, Inc.,
-  c/o Example Property Management, Inc., 200 Management Road, Example City, FL 00000
+- Mail to: Palma del Mar No. 2 Condominium Association, Inc.,
+  c/o Condominium Associates, Inc., 570 Carillon Parkway, Suite 210, St. Petersburg, FL 33716
 - ${c.feeMailed ? `The guest reported the check as mailed on ${c.feeMailed.slice(0, 10)}; receipt is being tracked.` : 'Once the envelope is in the mail, the guest should tap "I\'ve mailed the check" on the status page.'}
 ` : ''}
 ## Timeline & contact
 - The association controls its review timeline. Written Board approval is always the release gate.
-- Live status page (private): https://portal.example.test/v/${c.token}
+- Live status page (private): https://isladelsol405d.com/v/${c.token}
 - Questions: message Owner (the host) via Airbnb chat — replies usually within hours.
 `;
 }
@@ -670,7 +671,7 @@ function aiHelperCard(token) {
 
 function occupancyView(c, error) {
   const sourceCount = Number(c.airbnbAdults || c.adults || 1);
-  return page('Confirm who is staying — Demo Unit',
+  return page('Confirm who is staying — Isla 405D',
     `<h1>One quick age check before the HOA forms</h1>
      <p>Airbnb lists ${sourceCount} ${sourceCount === 1 ? '“adult” guest' : '“adult” guests'}, but its age categories are different from the association's.</p>`,
     `<div class="card"><h2>Who completes an adult application?</h2>
@@ -798,7 +799,7 @@ function wizardView(c, saved) {
       });
     });
     </script>`;
-  return page('Your paperwork — Demo Unit',
+  return page(`Your paperwork — ${PROPERTY_CONFIG.unit}`,
     `<h1>Your paperwork, filled &amp; signed online</h1>
      <p>Stay ${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.adults} adult${c.adults === 1 ? '' : 's'} age 18+${Number(c.expectedMinors || 0) ? ` · ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''} · ${isFull ? 'full HOA application package' : 'guest registration'}</p>
      ${saved === 'ready' ? '<span class="pill ok">Complete — ready for Owner to review</span>' : saved === 'draft' ? '<span class="pill warn">Draft saved — some required details or signatures are still missing below</span>' : ''}`,
@@ -820,19 +821,11 @@ function wizardView(c, saved) {
 }
 
 function settingsView(hasSig, liveMode, msg) {
-  return adminPage('Einstellungen — Demo Unit Admin', '/admin/settings',
+  return adminPage('Einstellungen — Isla 405D Admin', '/admin/settings',
     `<h1>Einstellungen</h1><p>Automatik, Unterschrift und Zugänge — alles, was das System am Laufen hält.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card"><h2>Versandmodus nach deiner Freigabe</h2>
-      <p style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-        ${liveMode
-          ? '<span class="pill ok">LIVE — nach deiner Prüfung gehen Pakete an die Verwaltung</span>'
-          : '<span class="pill warn">TESTMODUS — nach deiner Prüfung gehen Pakete nur an dich (contact008@example.test)</span>'}
-        <form method="post" action="/admin/submit-live" style="display:inline" onsubmit="return confirm('${liveMode ? 'Wirklich auf TESTMODUS zurückschalten?' : 'LIVE-Versand wirklich aktivieren? Empfänger: Example Property Management und Keila; CC Owner.'}')">
-          <input type="hidden" name="mode" value="${liveMode ? 'off' : 'yes'}">
-          ${liveMode ? '' : '<label style="display:inline-flex;gap:7px;align-items:center;margin:0 8px"><span>Zum Aktivieren LIVE eingeben:</span><input name="confirm" pattern="LIVE" required style="width:90px"></label>'}
-          <button class="small ${liveMode ? 'ghost' : ''}">${liveMode ? 'Auf Testmodus zurückschalten' : 'LIVE-Versand aktivieren'}</button>
-        </form>
-      </p>
+      <p><span class="pill warn">LIVE-VERSAND TECHNISCH DEAKTIVIERT</span></p>
+      <p>Testpakete gehen ausschließlich an die konfigurierte Owner-Adresse. Es gibt in dieser Version keinen Schalter, keine Umgebungsvariable und keinen KV-Wert, der den Versand an die Verwaltung aktivieren kann.</p>
       <p class="muted">Der Gast kann nur minimale Koordinationsdaten und Signaturen vorbereiten. Die automatisierte Qualitätsprüfung kontrolliert das vollständige sichere Paket; danach bestätigst du den grünen Bericht und löst einen Testversand mit einem eigenen Bestätigungsklick aus. Ohne diese Owner-Freigabe wird niemals versandt. Der LIVE-Versand an die Verwaltung bleibt gesperrt, bis ein atomarer Exactly-once-Koordinator eingerichtet und geprüft ist. Identitäts- und Screeningmaterial wird ausschließlich direkt mit dem externen Vendor ausgetauscht und darf nie in dieses Portal gelangen. Du bekommst je Testversand eine Telegram-Nachricht und einen Alarm, wenn etwas hakt.</p>
     </div>
     <div class="card"><h2>Deine Unterschrift</h2>
@@ -915,7 +908,7 @@ function libraryView(keys, msg) {
         </li>`).join('')}
       </ul></details>`;
   }).join('');
-  return adminPage('Bibliothek — Demo Unit Admin', '/admin/library',
+  return adminPage('Bibliothek — Isla 405D Admin', '/admin/library',
     `<h1>Bibliothek</h1><p>Alle Unterlagen zur Wohnung — HOA, vergangene Fälle, Versicherung, Grundbuch, Steuer. Kategorien aufklappen oder einfach suchen.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card">
       <input id="libsearch" placeholder="Suchen … (z. B. rules, minutes, approval, quote)" style="font-size:16px">
@@ -941,7 +934,7 @@ function libraryView(keys, msg) {
 const RCPT_CATS = [
   ['hoa-gebuehren', 'HOA-Gebühren & Beiträge'],
   ['airbnb', 'Airbnb (Auszahlungen & Gebühren)'],
-  ['turno', 'Turno / Reinigung (DemoGivenNameD)'],
+  ['turno', 'Turno / Reinigung'],
   ['strom', 'Strom (Duke Energy)'],
   ['versicherung', 'Versicherung'],
   ['steuern', 'Steuern'],
@@ -950,46 +943,11 @@ const RCPT_CATS = [
 ];
 
 // ---------- receipts export (per year, by email) ----------
-const EXPORT_RECIPIENTS = {
-  usa:     { to: 'contact009@example.test', name: 'DemoGivenNameE DemoNameO — Hamilton & Associates (US-Steuerberaterin)', lang: 'en' },
-  de:      { to: 'contact004@example.test', name: 'Dr. DemoSurnameH — DemoSurnameH & Balfanz (Steuerberater DE)', lang: 'de' },
-  demoContactA: { to: 'contact003@example.test', name: 'DemoGivenNameA DemoNameB', lang: 'de' },
-};
+// Fail closed in the deploy candidate. Tax-export recipients must be configured
+// and independently reviewed before this unrelated outbound feature is enabled.
 function rcptYear(key) {
   const m = libDisplayName(key).match(/20\d{2}/) || key.match(/20\d{2}/);
   return m ? m[0] : 'ohne-jahr';
-}
-async function exportReceipts(env, year, who) {
-  const keys = (await rcptList(env)).filter(k => rcptYear(k) === year)
-    .sort((a, b) => a.localeCompare(b));
-  if (!keys.length) throw new Error(`keine Belege für ${year}`);
-  const MAX = 15 * 1024 * 1024; // raw bytes per mail; base64 bleibt unter Gmails 25-MB-Grenze
-  const batches = [[]];
-  let size = 0;
-  for (const k of keys) {
-    const data = await env.CASES.get(k, 'arrayBuffer');
-    if (!data) continue;
-    if (size + data.byteLength > MAX && batches[batches.length - 1].length) { batches.push([]); size = 0; }
-    batches[batches.length - 1].push({ key: k, filename: libDisplayName(k), bytes: new Uint8Array(data) });
-    size += data.byteLength;
-  }
-  const catLabel = (k) => (RCPT_CATS.find(([c]) => c === k.slice(5).split('/')[0]) || [null, k.slice(5).split('/')[0]])[1];
-  for (let i = 0; i < batches.length; i++) {
-    const part = batches.length > 1 ? (who.lang === 'en' ? ` (part ${i + 1} of ${batches.length})` : ` (Teil ${i + 1} von ${batches.length})`) : '';
-    const list = batches[i].map(a => `  • [${catLabel(a.key)}] ${a.filename}`).join('\n');
-    const subject = (who.lang === 'en'
-      ? `Receipts ${year} — Condo Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg FL`
-      : `Belege ${year} — Wohnung 405D, 6219 Palma Del Mar Blvd S, St. Petersburg FL`) + part;
-    const text = who.lang === 'en'
-      ? `Hello DemoGivenNameE,\n\nattached are the receipts and statements for tax year ${year} for my rental condo (Unit 405D, 100 Example Avenue, Example City, FL 00000 — Parcel account DEMO-PARCEL)${part}:\n\n${list}\n\nPlease let me know if anything is missing for the 1040-NR.\n\nBest regards,\nProperty Owner`
-      : `Hallo,\n\nanbei die Belege des Jahres ${year} zur Wohnung 405D, 6219 Palma Del Mar Blvd S, St. Petersburg, Florida${part}:\n\n${list}\n\nAutomatisch versandt aus dem Verwaltungsportal portal.example.test.\n\nViele Grüße\nOwner`;
-    await sendViaGmail(env, {
-      to: [who.to], cc: ['contact008@example.test'],
-      subject, text,
-      attachments: batches[i].map(({ filename, bytes }) => ({ filename, bytes })),
-    });
-  }
-  return { files: batches.flat().length, mails: batches.length };
 }
 
 // ---------- board (Hinweise & Merkzettel) ----------
@@ -1005,7 +963,7 @@ function boardView(notes, msg) {
       <form method="post" action="/admin/board/toggle"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ${n.done ? 'ghost' : ''}">${n.done ? 'reaktivieren' : 'erledigt ✓'}</button></form>
       <form method="post" action="/admin/board/del" onsubmit="return confirm('Hinweis löschen?')"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ghost">×</button></form>
     </div></li>`;
-  return adminPage('Board — Demo Unit Admin', '/admin/board',
+  return adminPage('Board — Isla 405D Admin', '/admin/board',
     `<h1>Board</h1><p>Merkzettel rund um Wohnung, Konten und Behörden — Dinge, die nicht vergessen werden dürfen.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card"><h2>Offen ${open.length ? `<span class="muted" style="font-size:14px">(${open.length})</span>` : ''}</h2>
       ${open.length ? `<ul class="steps">${open.map(note).join('')}</ul>` : '<p class="muted">Nichts offen. 🌴</p>'}</div>
@@ -1042,27 +1000,14 @@ function receiptsView(keys, msg) {
   }).join('');
   const years = [...new Set(keys.map(rcptYear))].sort().reverse();
   const yearCount = (y) => keys.filter(k => rcptYear(k) === y).length;
-  return adminPage('Quittungen — Demo Unit Admin', '/admin/receipts',
+  return adminPage('Quittungen — Isla 405D Admin', '/admin/receipts',
     `<h1>Quittungsordner</h1><p>Alle Belege zur Wohnung an einem Ort — für Steuer, Nebenkostenabrechnung und den Überblick.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card">
       <input id="libsearch" placeholder="Beleg suchen …" style="font-size:16px">
       <p class="muted" style="margin-bottom:0">Laufende Quellen: Turno-Belege in der Turno-App unter „Receipts" · Duke-Energy-Rechnungen im Duke-Konto · Airbnb-Auszahlungen unter Verlauf → Auszahlungen (CSV). Einfach als PDF sichern und hier hochladen.</p>
      </div>
-     <div class="card"><h2>Jahres-Export per E-Mail</h2>
-      <p class="muted">Verschickt alle Belege eines Jahres als PDF-Anhänge (bei großen Mengen automatisch aufgeteilt). Du bekommst jede Mail als CC und eine Telegram-Bestätigung.</p>
-      <form method="post" action="/admin/receipts/export">
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
-          <div><label>Jahr</label>
-            <select name="year">${years.map(y => `<option value="${esc(y)}">${esc(y)} (${yearCount(y)} Belege)</option>`).join('')}</select></div>
-          <div><label>Empfänger</label>
-            <select name="to">
-              <option value="usa">Steuerberaterin USA — DemoGivenNameE DemoNameO (Hamilton &amp; Associates)</option>
-              <option value="de">Steuerberater Deutschland — Dr. DemoSurnameH (DemoSurnameH &amp; Balfanz)</option>
-              <option value="demoContactA">DemoGivenNameA (contact003@example.test)</option>
-            </select></div>
-        </div>
-        <p><button>Jetzt exportieren &amp; senden</button></p>
-      </form>
+     <div class="card"><h2>Jahres-Export per E-Mail gesperrt</h2>
+      <p class="muted">Dieser unabhängige Versandweg bleibt deaktiviert, bis konkrete Empfänger sicher konfiguriert und separat geprüft wurden.</p>
      </div>
      ${groups}
      <div class="card"><h2>Beleg-Upload gesperrt</h2>
@@ -1112,7 +1057,7 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
       ${isDone(c, 'board_approved') ? '<span class="pill ok">approved</span>' : ''}</div>
       <a class="btn small ghost" href="/admin/cases">Öffnen</a></li>`;
   }).join('');
-  return adminPage('Übersicht — Demo Unit Admin', '/admin',
+  return adminPage('Übersicht — Isla 405D Admin', '/admin',
     `<h1>Übersicht</h1><p>Dein Vermietungs-Cockpit für Unit 405D — was läuft und was Aufmerksamkeit braucht.${msg ? ' — ' + esc(msg) : ''}</p>
      <p style="margin:14px 0 0">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
      ${ownerSigOnFile ? '<span class="pill ok">Unterschrift ✓</span>' : '<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Unterschrift fehlt</span>'}</p>`,
@@ -1122,7 +1067,7 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
        : '<p class="muted">Keine offenen Vorgänge. Neue Buchungen werden automatisch aus Gmail angelegt — du bekommst dann eine Telegram-Nachricht mit dem Magic-Link.</p>'}</div>
      <div class="card"><h2>Neues von der Verwaltung</h2>${(news && news.length)
        ? `<ul class="steps">${news.slice(0, 5).map(n => newsItemHtml(n, Date.now())).join('')}</ul><p style="margin:10px 0 0"><a href="/admin/news">Alle Neuigkeiten →</a></p>`
-       : '<p class="muted">Noch keine Verwaltungs-Mails erfasst — neue E-Mails von Example Property Management erscheinen hier automatisch.</p>'}</div>
+       : '<p class="muted">Noch keine Verwaltungs-Mails erfasst — neue E-Mails von Condominium Associates erscheinen hier automatisch.</p>'}</div>
      <div class="kpis">
       <a class="kpi" href="/admin/cases"><b>${cases.length}</b><span>Vorgänge gesamt</span></a>
       <a class="kpi" href="/admin/contacts"><b>${counts.contacts}</b><span>Kontakte</span></a>
@@ -1147,8 +1092,8 @@ function newsItemHtml(n, now) {
 }
 function newsView(news, msg) {
   const now = Date.now();
-  return adminPage('Neuigkeiten — Demo Unit Admin', '/admin/news',
-    `<h1>Neuigkeiten der Verwaltung</h1><p>Jede E-Mail von Example Property Management landet automatisch hier — der Wächter prüft das Postfach alle 30 Minuten. Mögliche Genehmigungen werden nur als Prüfkandidaten markiert; sie ändern keinen Vorgangsstatus und lösen keine Gastnachricht aus.${msg ? ' — ' + esc(msg) : ''}</p>`,
+  return adminPage('Neuigkeiten — Isla 405D Admin', '/admin/news',
+    `<h1>Neuigkeiten der Verwaltung</h1><p>Jede E-Mail von Condominium Associates landet automatisch hier — der Wächter prüft das Postfach alle 30 Minuten. Mögliche Genehmigungen werden nur als Prüfkandidaten markiert; sie ändern keinen Vorgangsstatus und lösen keine Gastnachricht aus.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `${news.length
       ? `<div class="card"><ul class="steps">${news.map(n => newsItemHtml(n, now)).join('')}</ul></div>`
       : '<div class="card"><p class="muted">Noch keine Verwaltungs-Mails erfasst. Sobald eine E-Mail von condominiumassociates.com eingeht, erscheint sie hier automatisch.</p></div>'}`);
@@ -1183,7 +1128,7 @@ function contactsView(contacts, msg) {
           <input type="hidden" name="i" value="${i}"><button class="small ghost">×</button></form>
       </li>`).join('')}
      </ul></div>`).join('');
-  return adminPage('Kontakte — Demo Unit Admin', '/admin/contacts',
+  return adminPage('Kontakte — Isla 405D Admin', '/admin/contacts',
     `<h1>Kontakte</h1><p>Alle Ansprechpartner und Accounts rund um Unit 405D — Verwaltung, Versicherung, Dienstleister, Infrastruktur.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card"><input id="csearch" placeholder="Kontakt suchen … (z. B. Versicherung, Duke, Jeanine)" style="font-size:16px"></div>
      ${cards || '<div class="card"><p class="muted">noch keine Kontakte</p></div>'}
@@ -1212,8 +1157,8 @@ function contactsView(contacts, msg) {
 }
 
 function casesView(cases, msg, ownerSigOnFile, liveMode) {
-  const HOA_TO = 'contact005@example.test';
-  const HOA_CC = 'contact006@example.test';
+  const HOA_TO = PROPERTY_CONFIG.hoaTo[0];
+  const HOA_CC = PROPERTY_CONFIG.hoaTo[1];
   const gmail = (to, cc, subject, body) =>
     `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}${cc ? '&cc=' + encodeURIComponent(cc) : ''}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   const rows = cases.map(c => {
@@ -1245,13 +1190,13 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
           : feeMode === 'required' ? `<span class="pill warn">fee not mailed yet</span>` : '';
     const mailBtns = feeMode === 'waiver_pending' ? `
       <a class="btn small ghost" href="${gmail(HOA_TO, HOA_CC, `Unit 405D — Renewal / returning tenants — ${c.checkIn} to ${c.checkOut}`,
-        `Dear Keila,\n\nUtku Günen (approved under the name Tacettin DemoSurnameA) and Kardelen DemoSurnameB have booked Unit 405D again for ${c.checkIn} through ${c.checkOut}. Your May 18, 2026 approval letter approved both tenants.\n\nCould you please confirm whether this should be processed as a RENEWAL and whether the $100 application fee will be waived under the returning-tenant provision in the HOA Rules and Expectations? Please also let me know which updated documents or signatures you require for the new stay.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
+        `Dear Condominium Associates,\n\n${c.guestName} has a new stay for Unit 405D from ${c.checkIn} through ${c.checkOut}. A returning-lessee fee waiver has been claimed, but this portal does not treat that claim as verified.\n\nCould you please confirm in writing whether this is the same-lessee renewal covered by the governing provision, identify the prior approved lease reference, and confirm whether the $100 application fee is waived? Please also specify any updated documents or signatures required for the new stay.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
         target="_blank" rel="noopener">✉ HOA: Renewal und Gebührenbefreiung bestätigen</a>` : feeMode !== 'required' ? '' : `
       ${guestEmail ? `<a class="btn small ghost" href="${gmail(guestEmail, '', `Reminder: $100 HOA fee for your stay ${c.checkIn}`,
-        `Hi ${c.guestName.split(' ')[0]},\n\nA friendly reminder about the $100 association fee (check or money order payable to "Example Condominium").\n\nMailing address:\nExample Condominium Association, Inc.\nc/o Example Property Management, Inc.\n570 Carillon Parkway, Suite 210\nSt. Petersburg, FL 33716\n\nPlease include a note: ${stayRef}\nOnce mailed, please tap "I've mailed the check" on your status page.\n\nThank you!\nOwner`)}"
+        `Hi ${c.guestName.split(' ')[0]},\n\nA friendly reminder about the $100 association fee (check or money order payable to "Palma del Mar No. 2").\n\nMailing address:\nPalma del Mar No. 2 Condominium Association, Inc.\nc/o Condominium Associates, Inc.\n570 Carillon Parkway, Suite 210\nSt. Petersburg, FL 33716\n\nPlease include a note: ${stayRef}\nOnce mailed, please tap "I've mailed the check" on your status page.\n\nThank you!\nOwner`)}"
         target="_blank" rel="noopener">✉ Gast: Gebühr erinnern</a>` : ''}
       <a class="btn small ghost" href="${gmail(HOA_TO, HOA_CC, `Fee receipt confirmation — ${stayRef}`,
-        `Dear Example Property Management / Example Condominium,\n\nCould you please confirm receipt of the $100 association fee (check/money order) for the following paid rental coordination case?\n\n${stayRef}${c.feeMailed ? `\n\nThe guest reports having mailed the check on ${c.feeMailed.slice(0,10)}.` : ''}\n\nThank you very much!\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
+        `Dear Condominium Associates / Palma del Mar No. 2,\n\nCould you please confirm receipt of the $100 association fee (check/money order) for the following paid rental coordination case?\n\n${stayRef}${c.feeMailed ? `\n\nThe guest reports having mailed the check on ${c.feeMailed.slice(0,10)}.` : ''}\n\nThank you very much!\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
         target="_blank" rel="noopener">✉ HOA: Empfang bestätigen</a>`;
     const ds = docStates(c, ownerSigOnFile);
     const docLine = ds.docs.map(d => {
@@ -1291,7 +1236,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
             <input type="hidden" name="id" value="${c.id}"><button class="small ghost">delete</button>
           </form></td></tr>`;
   }).join('');
-  return adminPage('Vorgänge — Demo Unit Admin', '/admin/cases',
+  return adminPage('Vorgänge — Isla 405D Admin', '/admin/cases',
     `<h1>Vorgänge</h1><p>${cases.length} Vorgang/Vorgänge${msg ? ' — ' + esc(msg) : ''}</p>
      <p style="margin:14px 0 0">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
      ${ownerSigOnFile ? '' : '<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Owner-Signatur fehlt — finaler Versand gesperrt</span>'}
@@ -1315,6 +1260,7 @@ export async function onRequest(context) {
   const { request, env } = context;
   const waitUntil = context.waitUntil ? context.waitUntil.bind(context) : (p) => p;
   const url = new URL(request.url);
+  const portalOrigin = configuredPortalOrigin(env);
   const p = url.pathname;
   if (request.method === 'POST' && !isAllowedMutationOrigin(request.headers.get('Origin'), url.origin)) {
     return new Response('Forbidden: invalid request origin', { status: 403, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
@@ -1331,14 +1277,14 @@ export async function onRequest(context) {
     }
   }
 
-  // canonical host: old domain and www redirect permanently — keeps every old magic link alive
-  if (url.hostname === 'legacy-portal.example.test' || url.hostname === 'www.portal.example.test') {
-    return new Response(null, { status: 301, headers: { Location: `https://portal.example.test${url.pathname}${url.search}`, ...SEC_HEADERS } });
+  // Keep public legacy links canonical without retaining any review-only host.
+  if (url.hostname === 'www.isladelsol405d.com' || url.hostname === 'isla.bauerpanama.de') {
+    return new Response(null, { status: 301, headers: { Location: `${portalOrigin}${url.pathname}${url.search}`, ...SEC_HEADERS } });
   }
 
 
   if (p === '/' && (request.method === 'GET' || request.method === 'HEAD')) return html(landingView(), 200, true);
-  if (p === '/privacy' && request.method === 'GET') return html(page('Privacy — Demo Unit', '<h1>Privacy notice</h1><p>This private portal is operated by Property Owner for the limited purpose of preparing and tracking Example Condominium guest-registration and lease-approval coordination for Unit 405D.</p>', `<div class="card"><h2>What is collected</h2><p>Booking reference, stay dates, applicant names and contact details, address, electronic consent, signatures, non-sensitive vendor handoff/status metadata, and workflow status. Dates of birth, Social Security numbers, government-ID numbers or images, employer data, references, bank data, and background or screening report contents are deliberately not collected through this portal. If the association requires such material, submit it only through its designated secure vendor channel.</p><h2>Why and with whom</h2><p>The information is used only to prepare and quality-check the coordination package and, after an explicit owner release, submit it to Example Property Management / Example Condominium. Cloudflare provides the portal and encrypted application storage. OpenAI processes only the purpose-bound, minimized coordination data and generated document text in the United States for automated completeness and consistency review. Google Gmail is used only for an owner-approved submission email. Infrastructure credentials and sensitive vendor material are not included in the AI review.</p><h2>Retention and security</h2><p>Active case data is not publicly indexed and private pages are marked no-store. New access links use high-entropy bearer tokens. Active guest case data is deleted from the portal 90 days after checkout unless a concrete legal dispute or mandatory recordkeeping requirement requires a documented exception. Temporary AI-review files are deleted after processing. Minimal non-sensitive audit metadata may be retained.</p><h2>Your choices</h2><p>Do not enter information for another adult or sign on their behalf. To request access, correction, deletion, or an alternative to the portal and automated review, contact Owner through the existing Airbnb conversation before submitting data.</p><p class="muted">Last updated: 21 August 2026</p></div>`, ''));
+  if (p === '/privacy' && request.method === 'GET') return html(page('Privacy — Isla 405D', '<h1>Privacy notice</h1><p>This private portal is operated by Property Owner for the limited purpose of preparing and tracking Palma del Mar No. 2 guest-registration and lease-approval coordination for Unit 405D.</p>', `<div class="card"><h2>What is collected</h2><p>Booking reference, stay dates, applicant names and contact details, address, electronic consent, signatures, non-sensitive vendor handoff/status metadata, and workflow status. Dates of birth, Social Security numbers, government-ID numbers or images, employer data, references, bank data, and background or screening report contents are deliberately not collected through this portal. If the association requires such material, submit it only through its designated secure vendor channel.</p><h2>Why and with whom</h2><p>The information is used only to prepare and quality-check the coordination package and, after an explicit owner release, submit it to Condominium Associates / Palma del Mar No. 2. Cloudflare provides the portal and encrypted application storage. OpenAI processes only the purpose-bound, minimized coordination data and generated document text in the United States for automated completeness and consistency review. Google Gmail is used only for an owner-approved submission email. Infrastructure credentials and sensitive vendor material are not included in the AI review.</p><h2>Retention and security</h2><p>Active case data is not publicly indexed and private pages are marked no-store. New access links use high-entropy bearer tokens. Active guest case data is deleted from the portal 90 days after checkout unless a concrete legal dispute or mandatory recordkeeping requirement requires a documented exception. Temporary AI-review files are deleted after processing. Minimal non-sensitive audit metadata may be retained.</p><h2>Your choices</h2><p>Do not enter information for another adult or sign on their behalf. To request access, correction, deletion, or an alternative to the portal and automated review, contact Owner through the existing Airbnb conversation before submitting data.</p><p class="muted">Last updated: 21 August 2026</p></div>`, ''));
   if (p === '/healthz') return new Response('ok', { headers: { 'Content-Type': 'text/plain', ...SEC_HEADERS, 'Cache-Control': 'no-store' } });
   if (p.startsWith('/forms/') || p === '/robots.txt' || p === '/llms.txt' || p === '/sitemap.xml' || p === '/manifest.webmanifest' || p === '/favicon.svg') return env.ASSETS.fetch(request);
 
@@ -1387,7 +1333,7 @@ export async function onRequest(context) {
 
   if (p === '/find' && request.method === 'POST') {
     if (!(await findRateAllowed(request, env))) {
-      return html(page('Please wait — Demo Unit', '<h1>Too many attempts</h1><p>Please wait 15 minutes or message Owner through Airbnb.</p>', ''), 429);
+      return html(page('Please wait — Isla 405D', '<h1>Too many attempts</h1><p>Please wait 15 minutes or message Owner through Airbnb.</p>', ''), 429);
     }
     const form = await request.formData();
     const code = String(form.get('code') || '').trim().toUpperCase();
@@ -1399,7 +1345,7 @@ export async function onRequest(context) {
         normalizedLastName(c.guestName) === name);
       if (c) return redirect(`/v/${c.token}`);
     }
-    return html(page('Not found yet — Demo Unit',
+    return html(page('Not found yet — Isla 405D',
       `<h1>We couldn't find your page yet</h1>
        <p>Please double-check the confirmation code and last name — or your page may simply not be ready yet.</p>`,
       `<div class="card"><p>Your personal paperwork page is created automatically within about an hour of your booking confirmation. Please try again a little later, or just message Owner via the Airbnb chat — he'll send you the direct link.</p>
@@ -1533,7 +1479,7 @@ export async function onRequest(context) {
     if (denied) return denied;
     if (p === '/admin' && request.method === 'GET') {
       const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
-      const liveMode = (await env.CASES.get('submit-live')) === 'yes';
+      const liveMode = liveSubmissionEnabled();
       const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
       const board = JSON.parse((await env.CASES.get('admin-board')) || '[]');
       const counts = { contacts: contacts.length, library: (await libList(env)).length, receipts: (await rcptList(env)).length, boardOpen: board.filter(n => !n.done).length };
@@ -1546,7 +1492,7 @@ export async function onRequest(context) {
     }
     if (p === '/admin/cases' && request.method === 'GET') {
       const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
-      const liveMode = (await env.CASES.get('submit-live')) === 'yes';
+      const liveMode = liveSubmissionEnabled();
       return html(casesView(await loadCases(env), url.searchParams.get('msg'), ownerSigOnFile, liveMode));
     }
     if (p === '/admin/contacts' && request.method === 'GET') {
@@ -1555,7 +1501,7 @@ export async function onRequest(context) {
     }
     if (p === '/admin/settings' && request.method === 'GET') {
       const sig = await env.CASES.get('owner-signature-png');
-      const liveMode = (await env.CASES.get('submit-live')) === 'yes';
+      const liveMode = liveSubmissionEnabled();
       return html(settingsView(validateSignaturePng(sig), liveMode, url.searchParams.get('msg')));
     }
     if (p === '/admin/receipts' && request.method === 'GET') {
@@ -1575,19 +1521,7 @@ export async function onRequest(context) {
       return new Response('file upload disabled until content-level sensitive-data scanning is configured', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/admin/receipts/export' && request.method === 'POST') {
-      const form = await request.formData();
-      const year = String(form.get('year') || '');
-      const who = EXPORT_RECIPIENTS[String(form.get('to') || '')];
-      if (!who || !/^(20\d{2}|ohne-jahr)$/.test(year)) return new Response('invalid', { status: 400 });
-      waitUntil((async () => {
-        try {
-          const r = await exportReceipts(env, year, who);
-          await sendTelegram(env, `📤 Beleg-Export ${year} an ${who.name} (${who.to}): ${r.files} Datei(en) in ${r.mails} Mail(s) versandt. CC liegt in deinem Postfach.`);
-        } catch (e) {
-          await sendTelegram(env, `🚨 Beleg-Export ${year} an ${who.name} FEHLGESCHLAGEN: ${String(e && e.message || e).slice(0, 200)}`);
-        }
-      })());
-      return redirect('/admin/receipts?msg=' + encodeURIComponent(`Export ${year} an ${who.name} läuft im Hintergrund — Telegram-Bestätigung folgt.`));
+      return new Response('receipt email export disabled until recipients are explicitly configured and reviewed', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/admin/board' && request.method === 'GET') {
       const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
@@ -1666,6 +1600,10 @@ export async function onRequest(context) {
       if (!isReadyForOwnerReview(c, ownerSigOnFile)) {
         return new Response('paperwork is not complete or was already submitted', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
+      const prerequisites = validateLiveSubmissionPrerequisites(c);
+      if (!prerequisites.ok) {
+        return new Response(`submission prerequisites incomplete: ${prerequisites.missing.join(', ')}`, { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
       const ai = c.aiReview;
       if (!ai || ai.reviewHash !== c.reviewHash || ai.status !== 'green' || !/^[0-9a-f]{64}$/.test(String(ai.bundleDigest || ''))) {
         return new Response('OpenAI review is missing, stale, not green, or not bound to an exact PDF bundle', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
@@ -1676,7 +1614,8 @@ export async function onRequest(context) {
       if (!submittedReviewHash || submittedReviewHash !== c.reviewHash || expectedReviewHash !== c.reviewHash) {
         return new Response('review version changed; reopen and review the complete safe coordination package', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
-      const live = (await env.CASES.get('submit-live')) === 'yes';
+      await env.CASES.delete('submit-live');
+      const live = liveSubmissionEnabled();
       if (live) {
         return new Response('live submission is disabled until an atomic exactly-once coordinator is configured', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
@@ -1696,9 +1635,10 @@ export async function onRequest(context) {
     }
     if (p === '/admin/submit-live' && request.method === 'POST') {
       const form = await request.formData();
+      await env.CASES.delete('submit-live');
       if (form.get('mode') === 'yes') {
         return new Response('live submission cannot be enabled without an atomic exactly-once coordinator', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
-      } else await env.CASES.delete('submit-live');
+      }
       return redirect('/admin/settings');
     }
     if (p === '/admin/signature' && request.method === 'GET') return redirect('/admin/settings');

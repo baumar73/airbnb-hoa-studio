@@ -2,13 +2,23 @@ name = "isla-405d"
 compatibility_date = "2026-06-01"
 pages_build_output_dir = "public"
 
+[vars]
+PORTAL_ORIGIN = "https://isladelsol405d.com"
+GMAIL_USER = "markusoliverbauer@gmail.com"
+OWNER_EMAIL = "markusoliverbauer@gmail.com"
+
 [[kv_namespaces]]
 binding = "CASES"
-id = "00000000000000000000000000000001"
-# Preview/staging must never touch production data (handover report 2026-07-27,
-# risk A). Preview deployments bind CASES to the isolated cases-preview namespace.
+id = "d14475cc0abe4834b1ac60daca8567b0"
+
+# Preview/staging is isolated and must never touch production data.
 [env.preview]
+
+[env.preview.vars]
+PORTAL_ORIGIN = "https://isladelsol405d.com"
+GMAIL_USER = "markusoliverbauer@gmail.com"
+OWNER_EMAIL = "markusoliverbauer@gmail.com"
 
 [[env.preview.kv_namespaces]]
 binding = "CASES"
-id = "00000000000000000000000000000002"
+id = "fdd598833b26455bab745d6d135d547a"

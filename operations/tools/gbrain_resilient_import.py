@@ -86,7 +86,7 @@ def prepare_chunk(chunk_dir: Path, source_dir: Path, rel_files: list[str]) -> No
 
 def run_import(chunk_dir: Path, output_log: Path, timeout_seconds: int) -> int:
     env = os.environ.copy()
-    env["PATH"] = f"/home/demo-user/.bun/bin:{env.get('PATH', '')}"
+    env["PATH"] = f"{Path.home() / '.bun' / 'bin'}:{env.get('PATH', '')}"
     env["GBRAIN_SKIP_STARTUP_HOOKS"] = "1"
     cmd = [
         "timeout",
@@ -114,7 +114,7 @@ def main() -> int:
     parser.add_argument("--source-dir", required=True)
     parser.add_argument("--work-dir", required=True)
     parser.add_argument("--log", required=True)
-    parser.add_argument("--checkpoint", default="/home/demo-user/.gbrain/import-checkpoint.json")
+    parser.add_argument("--checkpoint", default=str(Path.home() / ".gbrain" / "import-checkpoint.json"))
     parser.add_argument("--chunk-size", type=int, default=200)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--max-failures", type=int, default=200)

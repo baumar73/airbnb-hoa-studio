@@ -1,0 +1,368 @@
+{
+  "version": 1,
+  "updatedAt": "2026-08-21T23:19:00.228Z",
+  "property": {
+    "listingId": "DEMOID0002",
+    "listingName": "Example Island, Meerblick",
+    "unit": "Example Condominium, Unit 405D",
+    "address": "100 Example Avenue, Example City, FL 00000",
+    "hoaName": "Example Condominium Association",
+    "management": "Example Property Management",
+    "hoaEmail": "contact005@example.test",
+    "hoaAddress": "200 Management Road, Example City, FL 00000",
+    "tenantEvaluationCode": "DEMOID0001",
+    "fee": "USD 100 check or money order payable to Example Condominium"
+  },
+  "listingKnowledge": {
+    "sourceUrl": "https://www.airbnb.com/rooms/DEMOID0002",
+    "reviewedAt": "2026-06-27",
+    "title": "Sun Island, Sea View",
+    "summary": "Airbnb listing describes the unit as a bay-view condo on Example Island with self check-in, 700 Mbps Wi-Fi, workspace, pool/spa access, elevator access, parking, shared laundry, kitchen, dishwasher, AC, screened balcony and four pool passes.",
+    "capacity": {
+      "guests": 4,
+      "bedrooms": 1,
+      "beds": 1,
+      "baths": 1,
+      "minimumStay": "1 month minimum / HOA approval required"
+    },
+    "advertisedAmenities": [
+      "Smartlock / self check-in",
+      "700 Mbps Wi-Fi",
+      "Workspace / dining table with outlet",
+      "Air conditioning",
+      "Dishwasher",
+      "Kitchen",
+      "Screened balcony",
+      "Pool and spa access",
+      "Four pool passes",
+      "Private parking spot",
+      "Elevator / fourth floor access",
+      "Shared laundry",
+      "Garbage chute"
+    ],
+    "cleaningChecklist": [
+      "Confirm four pool passes are present.",
+      "Check dishwasher works and is empty.",
+      "Check smartlock/building access path is usable.",
+      "Check Wi-Fi and visible router/access instructions.",
+      "Check AC is working.",
+      "Check screened balcony and balcony furniture.",
+      "Check king bed and sofa bed readiness.",
+      "Check kitchen basics and garbage chute area.",
+      "Check shared laundry instructions are present."
+    ],
+    "defectPriorityRules": [
+      "Dishwasher, AC, smartlock/access, Wi-Fi, pool passes and elevator/access issues are high priority because the listing creates guest expectations.",
+      "Cleaning should verify advertised amenities before the next guest, not only general cleanliness."
+    ]
+  },
+  "automation": {
+    "gmailMode": "Hermes Gmail MCP, read/review first, send only after Owner approval",
+    "hermesSkillPath": "hermes-skills/airbnb-hoa-operations",
+    "lastGmailReviewAt": "2026-06-26",
+    "status": "skill_prepared"
+  },
+  "cases": [
+    {
+      "id": "DEMOID0010",
+      "source": "gmail-and-ical",
+      "calendarUid": "contact001@example.test",
+      "guestName": "DemoNameS DemoSurnameA / DemoNameJ DemoSurnameB",
+      "start": "2026-06-25",
+      "end": "2026-07-31",
+      "adults": 2,
+      "reservationCode": "",
+      "email": "contact010@example.test",
+      "status": "waiting_for_board_approval",
+      "checkInLocked": true,
+      "documentPacketSentAt": "2026-05-11",
+      "deadlineDocuments": "2026-05-14",
+      "cancellationReviewAt": "",
+      "airbnbSupportAt": "",
+      "decisionBy": "",
+      "gmail": {
+        "searchTerms": [
+          "contact010@example.test",
+          "DemoNameS DemoSurnameA",
+          "DemoNameJ DemoSurnameB",
+          "Palma Del Mar"
+        ],
+        "lastCheckedAt": "2026-05-18",
+        "replyStatus": "approved_thread_found",
+        "hoaStatus": "approved",
+        "outboundDraftId": ""
+      },
+      "checklist": {
+        "airbnbInitialMessage": true,
+        "guestAcknowledged": true,
+        "packetSent": true,
+        "leaseApplication": true,
+        "vendorHandoff": true,
+        "vendorStatus": true,
+        "shortTermLeaseTenantSigned": true,
+        "shortTermLeaseOwnerSigned": true,
+        "rulesSent": true,
+        "feeTracked": true,
+        "submittedToHoa": true,
+        "boardApproval": false
+      },
+      "timeline": [
+        {
+          "date": "2026-05-11",
+          "text": "Lease Application, secure vendor handoff instructions and Rules sent to tenant."
+        },
+        {
+          "date": "2026-05-18",
+          "text": "HOA Board approval received for DemoSurnameA/DemoSurnameB."
+        }
+      ],
+      "communicationEvidence": []
+    },
+    {
+      "id": "DEMOID0008",
+      "source": "gmail-and-ical",
+      "calendarUid": "contact002@example.test",
+      "guestName": "DemoSurnameC DemoSurnameD / DemoSurnameC DemoSurnameF",
+      "start": "2026-08-03",
+      "end": "2026-08-31",
+      "adults": 2,
+      "reservationCode": "HMDEMO0001",
+      "email": "contact011@example.test",
+      "status": "reminder_due",
+      "checkInLocked": true,
+      "documentPacketSentAt": "2026-06-21",
+      "deadlineDocuments": "2026-06-29",
+      "cancellationReviewAt": "2026-06-30",
+      "airbnbSupportAt": "2026-07-02",
+      "decisionBy": "2026-07-03",
+      "reminderDraftId": "DEMOID0009",
+      "gmail": {
+        "searchTerms": [
+          "contact011@example.test",
+          "HMDEMO0001",
+          "DemoSurnameC DemoSurnameD",
+          "DemoSurnameC DemoSurnameF",
+          "Palma Del Mar"
+        ],
+        "lastCheckedAt": "2026-06-26",
+        "replyStatus": "documents_missing_after_reply",
+        "hoaStatus": "not_submitted",
+        "outboundDraftId": "DEMOID0009"
+      },
+      "checklist": {
+        "airbnbInitialMessage": true,
+        "guestAcknowledged": true,
+        "packetSent": true,
+        "leaseApplication": false,
+        "vendorHandoff": false,
+        "vendorStatus": false,
+        "shortTermLeaseTenantSigned": false,
+        "shortTermLeaseOwnerSigned": false,
+        "rulesSent": true,
+        "feeTracked": false,
+        "submittedToHoa": false,
+        "boardApproval": false
+      },
+      "timeline": [
+        {
+          "date": "2026-06-18",
+          "text": "Airbnb booking confirmed and guest email received."
+        },
+        {
+          "date": "2026-06-21",
+          "text": "HOA document package sent by email."
+        },
+        {
+          "date": "2026-06-24",
+          "text": "Submission instructions clarified: documents by email, fee by check or money order."
+        },
+        {
+          "date": "2026-06-26",
+          "text": "No completed documents found. Gmail reminder draft created."
+        },
+        {
+          "date": "2026-06-26",
+          "text": "Read-only Gmail review confirmed DemoSurnameC replied on 2026-06-23, but no completed documents or attachments were found after the 2026-06-24 submission clarification."
+        }
+      ],
+      "hermesRecommendation": "Reminder faellig. DemoSurnameC hat am 2026-06-23 geantwortet, aber nach der Klarstellung vom 2026-06-24 wurden keine completed documents oder Anhaenge gefunden. Keine Check-in-Daten freigeben, bis Board Approval vorliegt.",
+      "communicationEvidence": []
+    }
+  ],
+  "aiSuggestions": [
+    {
+      "id": "gmail-live-readonly-DEMOID0008-2026-06-26-documents-missing-after-reply",
+      "caseId": "DEMOID0008",
+      "source": "gmail-live-readonly",
+      "generatedAt": "2026-06-26",
+      "status": "accepted",
+      "title": "Antwort gefunden, Unterlagen fehlen",
+      "detail": "DemoSurnameC replied on 2026-06-23, but no completed documents or attachments were found after the 2026-06-24 submission clarification.",
+      "confidence": "high",
+      "evidence": [
+        "Gmail live review 2026-06-26",
+        "Gmail draft DEMOID0009"
+      ],
+      "patch": {
+        "gmail": {
+          "lastCheckedAt": "2026-06-26",
+          "replyStatus": "documents_missing_after_reply",
+          "hoaStatus": "not_submitted",
+          "outboundDraftId": "DEMOID0009"
+        },
+        "recommendation": "Reminder faellig. DemoSurnameC hat am 2026-06-23 geantwortet, aber nach der Klarstellung vom 2026-06-24 wurden keine completed documents oder Anhaenge gefunden. Keine Check-in-Daten freigeben, bis Board Approval vorliegt.",
+        "timeline": [
+          {
+            "date": "2026-06-26",
+            "text": "Live Gmail review: DemoSurnameC replied on 2026-06-23, but no completed documents or attachments were found after the 2026-06-24 submission clarification. Draft DEMOID0009 exists."
+          }
+        ]
+      },
+      "resolvedAt": "2026-06-26"
+    }
+  ],
+  "inboxItems": [],
+  "maintenanceItems": [],
+  "cleaning": {
+    "provider": "Turno",
+    "property": "100 Example Avenue, Unit 405, Example City",
+    "primaryCleaner": {
+      "name": "DemoGivenNameD DemoSurnameG DemoNameE",
+      "displayName": "DemoGivenNameD",
+      "source": "Turno email",
+      "lastSeenAt": "2026-06-25"
+    },
+    "defaultRate": "$110.00/project",
+    "defaultCharge": "$118.80",
+    "lastEmailReviewAt": "2026-06-26",
+    "projects": [
+      {
+        "id": "turno-DEMOID0007",
+        "projectId": "DEMOID0007",
+        "date": "2026-06-24",
+        "status": "completed",
+        "cleaner": "DemoGivenNameD DemoSurnameG DemoNameE",
+        "scheduledStart": "2026-06-24 10:00",
+        "scheduledEnd": "2026-06-24 15:00",
+        "startedAt": "2026-06-24 15:47",
+        "endedAt": "2026-06-25 19:10",
+        "rate": "$110.00/project",
+        "amount": "$118.80",
+        "problems": 0,
+        "images": 0,
+        "sourceMessageIds": [
+          "19c63d36bc9e164f",
+          "19ef9f36d5163ac7",
+          "19f010c609c4e172",
+          "19f010c5fb9cc037"
+        ],
+        "projectUrl": "https://app.turno.com/view/schedule?project_id=DEMOID0007",
+        "note": "Accepted by DemoGivenNameD, late-start alert occurred, completed with 0 problems."
+      },
+      {
+        "id": "turno-DEMOID0006",
+        "projectId": "DEMOID0006",
+        "date": "2026-03-15",
+        "status": "completed",
+        "cleaner": "DemoGivenNameD DemoSurnameG DemoNameE",
+        "scheduledStart": "2026-03-15 10:00",
+        "scheduledEnd": "2026-03-15 15:00",
+        "rate": "$110.00/project",
+        "amount": "$118.80",
+        "sourceMessageIds": [
+          "19b50c7e06c51928",
+          "19cf1d1481a8785c",
+          "19d1d3ab6056c041",
+          "19d1d3aeee0ee7f1"
+        ],
+        "projectUrl": "https://app.turno.com/view/schedule?project_id=DEMOID0006",
+        "note": "Receipt found; late-start/start emails found."
+      },
+      {
+        "id": "turno-DEMOID0005",
+        "projectId": "DEMOID0005",
+        "date": "2026-01-30",
+        "status": "completed",
+        "cleaner": "DemoGivenNameD DemoSurnameG DemoNameE",
+        "scheduledStart": "2026-01-30 10:00",
+        "scheduledEnd": "2026-01-30 15:00",
+        "rate": "$110.00/project",
+        "amount": "$118.80",
+        "sourceMessageIds": [
+          "19abd5ecdf51ea09",
+          "19c0f3d20bcc8037",
+          "19c0fab630cb5640",
+          "19c0fab604612eda"
+        ],
+        "projectUrl": "https://app.turno.com/view/schedule?project_id=DEMOID0005",
+        "note": "Accepted, started, completed and receipt emails found."
+      }
+    ]
+  },
+  "payments": {
+    "source": "Airbnb account",
+    "lastAirbnbReviewAt": "",
+    "lastGmailSearchAt": "2026-06-26",
+    "notes": "Payments are stored per tenant/case. Amounts must come from Airbnb payout/reservation financials or a deliberate manual entry; Gmail snippets did not provide reliable payout amounts.",
+    "items": [
+      {
+        "id": "payment-DEMOID0010",
+        "caseId": "DEMOID0010",
+        "source": "airbnb",
+        "reservationCode": "",
+        "guestName": "DemoNameS DemoSurnameA / DemoNameJ DemoSurnameB",
+        "stayStart": "2026-06-25",
+        "stayEnd": "2026-07-31",
+        "status": "needs_airbnb_review",
+        "currency": "USD",
+        "expectedPayout": "",
+        "expectedPayoutDate": "",
+        "receivedPayout": "",
+        "receivedAt": "",
+        "airbnbTransactionId": "",
+        "cleaningCostAmount": "",
+        "cleaningProjectId": "",
+        "hoaFee": "Tenant-paid USD 100 application/background-check fee; not a host payout.",
+        "evidence": [
+          "HOA-approved case in local state",
+          "Airbnb/iCal stay 2026-06-25 to 2026-07-31"
+        ],
+        "notes": "Airbnb payout details have not been imported yet.",
+        "lastCheckedAt": ""
+      },
+      {
+        "id": "payment-DEMOID0008",
+        "caseId": "DEMOID0008",
+        "source": "airbnb",
+        "reservationCode": "HMDEMO0001",
+        "guestName": "DemoSurnameC DemoSurnameD / DemoSurnameC DemoSurnameF",
+        "stayStart": "2026-08-03",
+        "stayEnd": "2026-08-31",
+        "status": "needs_airbnb_review",
+        "currency": "USD",
+        "expectedPayout": "",
+        "expectedPayoutDate": "",
+        "receivedPayout": "",
+        "receivedAt": "",
+        "airbnbTransactionId": "",
+        "cleaningCostAmount": "",
+        "cleaningProjectId": "",
+        "hoaFee": "Tenant-paid USD 100 application/background-check fee; not a host payout.",
+        "evidence": [
+          "Airbnb booking confirmation email found: reservation HMDEMO0001"
+        ],
+        "notes": "Airbnb booking confirmation was found in Gmail; payout amount has not been imported yet.",
+        "lastCheckedAt": ""
+      }
+    ]
+  },
+  "templates": {
+    "listingDisclosure": "Important HOA requirement: This condominium is located in Example Condominium and occupancy is subject to condominium association / HOA approval before check-in. After booking, guests must promptly complete the required HOA lease/application paperwork, follow the association's secure Tenant Evaluation vendor process, review the Rules and Regulations, and follow the HOA fee instructions. Sensitive identity or screening material must go only to the association's designated vendor, never to this application. Check-in/access information cannot be released until the HOA / Board approval has been received. Delayed or incomplete paperwork may make the stay impossible under the condominium rules.",
+    "airbnbInitialMessage": "Hi {{firstName}},\n\nthank you for your booking request/reservation for {{unit}} from {{start}} to {{end}}.\n\nImportant HOA step: Example Condominium requires a lease/application package and HOA/Board approval before occupancy. I will send you the HOA paperwork and the association's secure Tenant Evaluation vendor instructions by email. Please complete the Lease Application and signed Short-Term Lease Agreement promptly. Send any sensitive identity or screening material only through the association's designated secure vendor channel, never by reply email or through this application.\n\nThe HOA application fee must be handled as instructed by the association: {{fee}}.\n\nI cannot release check-in or access information until the HOA / Board approval is received. Please confirm that you understand this HOA requirement and tell me the best email address for the non-sensitive coordination paperwork.\n\nBest,\nOwner",
+    "airbnbReminder": "Hi {{firstName}},\n\nquick reminder: I have not yet received the completed HOA paperwork for your {{start}} stay.\n\nPlease send the completed and signed documents by {{deadlineDocuments}}, so I can submit everything to the condominium association in time.\n\nImportant: I cannot release check-in/access information until Example Condominium / the HOA Board has approved the application.\n\nPlease confirm today or tomorrow when you will send the documents.\n\nBest,\nOwner",
+    "firmDeadline": "Hi {{firstName}},\n\nI need to set a firm deadline for the HOA paperwork.\n\nExample Condominium requires HOA/Board approval before occupancy, and I cannot provide check-in or access information without that approval.\n\nPlease complete the following by {{deadlineDocuments}}:\n\n- Lease Application\n- signed Short-Term Lease Agreement\n- secure Tenant Evaluation vendor handoff and vendor confirmation\n\nSensitive identity or screening material must go only to the association's designated secure vendor channel, never by reply email or through this application. The USD 100 HOA application fee must also be mailed by check or money order as previously explained.\n\nIf the required coordination documents and vendor confirmation are not complete by this deadline, I will need to contact Airbnb because the reservation may not be possible under the HOA requirements.\n\nBest,\nOwner",
+    "submittedToHoa": "Hi {{firstName}},\n\nI have submitted your HOA application package to the condominium association / management office. We are now waiting for HOA/Board approval.\n\nI will update you as soon as approval is received. Check-in details will be released only after approval.\n\nBest,\nOwner",
+    "airbnbSupportReview": "Hello Airbnb Support,\n\nI need assistance with reservation {{reservationCode}} for {{guestName}}, staying at {{unit}} from {{start}} to {{end}}.\n\nThis condominium is subject to Example Condominium HOA / Board approval before occupancy. I informed the guest of the HOA paperwork requirement and sent the required documents. As of today, the completed HOA paperwork is still missing, and I cannot legally/compliantly release check-in or access information without HOA / Board approval.\n\nDocument deadline communicated to guest: {{deadlineDocuments}}\nCancellation review date: {{cancellationReviewAt}}\nDecision target: {{decisionBy}}\n\nI am trying to keep the reservation on track, but if the guest does not provide the required documents in time for HOA review and approval, the stay may not be possible under the condominium rules. Please review the attached/supporting timeline and advise on the appropriate host-safe process.\n\nBest,\nProperty Owner",
+    "cancellationDecisionNote": "Internal decision note for {{guestName}} / {{reservationCode}}:\n\nStay: {{start}} to {{end}}\nDocument deadline: {{deadlineDocuments}}\nCancellation review: {{cancellationReviewAt}}\nDecision by: {{decisionBy}}\n\nDo not release check-in information unless Board Approval is documented. If completed HOA documents remain missing by the deadline, prepare Airbnb Support escalation with the generated dossier before any cancellation decision. If Airbnb Support confirms host-safe handling or the guest still fails to comply after firm notice, move the case to cancellation_review."
+  }
+}

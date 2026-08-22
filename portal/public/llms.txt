@@ -1,7 +1,7 @@
-# Example Island Unit 405D — HOA Guest Approval Portal
+# Isla del Sol Unit 405D — HOA Guest Approval Portal
 
-> Private guest-approval portal for a rental condominium at Example Island
-> (Example Condominium, Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg,
+> Private guest-approval portal for a rental condominium at Isla del Sol
+> (Palma del Mar No. 2, Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg,
 > FL 33715). It guides Airbnb guests through the condominium association's
 > rental-approval coordination: minimal online data, e-signatures, owner review,
 > fee tracking and live approval status. Nothing is submitted without an explicit
@@ -10,11 +10,13 @@
 
 ## The home
 
-- Quiet one-bedroom condo, fourth floor of Example Condominium at Example Island —
+- Quiet one-bedroom condo, fourth floor of Palma del Mar No. 2 at Isla del Sol —
   a small island neighborhood at the southern tip of St. Petersburg, Florida,
   with sweeping water views over Boca Ciega Bay.
-- Fully furnished for paid stays above 30 nights. The source rules conflict at
-  exactly 30 nights, so that duration requires written HOA clarification: full kitchen with
+- Fully furnished with a monthly-stay focus. Paid stays below 30 actual rental
+  nights remain visible as owner-review cases; exactly 30 nights requires written
+  HOA clarification because the source rules conflict. Maintenance blocks are
+  separate and never count as rental nights. Amenities include a full kitchen with
   dishwasher, in-unit washer & dryer, air conditioning, fast 700-Mbit internet
   (Spectrum), community pool and smart-lock self-check-in. The current association
   rule bars renter pets; assistance-animal accommodation requests go to Board
@@ -22,16 +24,17 @@
 - Location: 10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown
   St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals
   (popular with travel nurses); about 30 minutes to Tampa International Airport.
-  The Example Island Yacht & Country Club golf course is on the island.
+  The Isla del Sol Yacht & Country Club golf course is on the island.
 - Booking runs EXCLUSIVELY through Airbnb:
-  https://airbnb.de/h/isladelsol405d (listing "Example Island, Meerblick",
+  https://airbnb.de/h/isladelsol405d (listing "Isla del Sol, Meerblick",
   https://www.airbnb.com/rooms/1097686557541958107).
   This website does not take bookings — it is the official companion portal
   that handles the association's approval paperwork after booking.
 
 ## How the approval process works
 
-- Paid stays above 30 nights use the full coordination path. Exactly 30 nights
+- Paid stays above 30 nights use the normal coordination status. Paid stays below
+  30 actual rental nights remain transparent owner-review cases. Exactly 30 nights
   remains blocked until the association clarifies the conflicting source texts.
 - The portal generates only a Rules & Regulations acknowledgment and a
   Short-Term Residential Lease Agreement. Any identity verification or screening
@@ -39,9 +42,9 @@
   enters this portal.
 - The current association fee is $100 when required. A same-lessee renewal may
   waive it only when that fact is explicitly evidenced; generic renewal labels do not.
-- The fee is check or money order ONLY (no cards), payable to "Example Condominium",
-  mailed to: Example Condominium Association, Inc., c/o Condominium
-  Associates, Inc., 200 Management Road, Example City, FL 00000.
+- The fee is check or money order ONLY (no cards), payable to "Palma del Mar No. 2",
+  mailed to: Palma del Mar No. 2 Condominium Association, Inc., c/o Condominium
+  Associates, Inc., 570 Carillon Parkway, Suite 210, St. Petersburg, FL 33716.
 - Simplified Guest Registration is reserved for separately confirmed,
   uncompensated guests; paid rentals never use that path merely because they are shorter.
 - The association controls review timing. Check-in stays locked until written
@@ -50,7 +53,7 @@
 
 ## Pages
 
-- [Landing page](https://portal.example.test/): public overview and "find your page"
+- [Landing page](https://isladelsol405d.com/): public overview and "find your page"
   lookup (Airbnb confirmation code + guest last name).
 - Guest status and form pages are PRIVATE magic links (paths /v/<token> and
   /w/<token>) sent to each guest via Airbnb chat. They are intentionally not
@@ -67,5 +70,5 @@
   birth, screening reports, employment or financial data, references, emergency
   contacts, or photo-ID uploads. Required vendor material must go directly to the
   association's designated vendor.
-- Host contact: message Owner via Airbnb chat (listing "Example Island, Meerblick",
+- Host contact: message Owner via Airbnb chat (listing "Isla del Sol, Meerblick",
   https://airbnb.de/h/isladelsol405d). Replies usually within a few hours.

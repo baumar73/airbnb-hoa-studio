@@ -203,8 +203,8 @@ test('guest save never triggers submission to the HOA', () => {
 
 test('HOA package recipients never include the guest automatically', () => {
   const recipients = submissionRecipients('guest@example.com');
-  assert.deepEqual(recipients.to, ['contact005@example.test', 'contact006@example.test']);
-  assert.deepEqual(recipients.cc, ['contact008@example.test']);
+  assert.deepEqual(recipients.to, ['info@condominiumassociates.com', 'kruiz@condominiumassociates.com']);
+  assert.deepEqual(recipients.cc, []);
   assert.equal([...recipients.to, ...recipients.cc].includes('guest@example.com'), false);
 });
 

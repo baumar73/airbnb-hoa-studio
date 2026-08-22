@@ -2,6 +2,7 @@
 // plus a small MIME builder with attachment support.
 import { connect } from 'cloudflare:sockets';
 import { validateEmailAddress } from './workflow.js';
+import { configuredPortalOrigin } from './property-config.js';
 
 function b64(str) { return btoa(unescape(encodeURIComponent(str))); }
 function bytesToB64(bytes) {
@@ -33,7 +34,7 @@ export function buildMime({ fromName, from, to, cc, subject, text, attachments }
 }
 
 export async function sendViaGmail(env, { to, cc, subject, text, attachments, fromName }) {
-  const user = env.GMAIL_USER || 'contact008@example.test';
+  const user = String(env.GMAIL_USER || '').trim();
   const pass = env.GMAIL_APP_PASSWORD;
   const recipients = [...(to || []), ...(cc || [])];
   if (!validateEmailAddress(user) || !recipients.length || recipients.some(r => !validateEmailAddress(r))) {
@@ -72,7 +73,7 @@ export async function sendViaGmail(env, { to, cc, subject, text, attachments, fr
   }
   try {
     await cmd(null, 220);
-    await cmd('EHLO portal.example.test', 250);
+    await cmd(`EHLO ${new URL(configuredPortalOrigin(env)).hostname}`, 250);
     await cmd('AUTH LOGIN', 334);
     await cmd(btoa(user), 334);
     await cmd(btoa(pass), 235);

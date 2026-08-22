@@ -27,8 +27,8 @@
     "gbrain:sync": "python3 tools/gbrain_sync.py",
     "hermes:context": "python3 tools/hermes_context.py --default-output",
     "hermes:context:refresh": "python3 tools/hermes_context.py --refresh-calendar --default-output",
-    "imessage:macmini:health": "ssh macmini 'python3 ~/hermes-bridges/apple-messages/macmini_imessage_bridge.py --redact health'",
-    "imessage:macmini:airbnb": "ssh macmini 'python3 ~/hermes-bridges/apple-messages/macmini_imessage_bridge.py --redact search Airbnb --limit 20 --since-days 365'",
+    "imessage:macmini:health": "python3 tools/imessage_readonly.py health",
+    "imessage:macmini:airbnb": "python3 tools/imessage_readonly.py search Airbnb --limit 20 --since-days 365",
     "calendar:export": "python3 tools/sync_apple_calendar.py",
     "calendar:sync": "python3 tools/sync_apple_calendar.py --calendar-name Florida --sync-apple-calendar",
     "panama:phone:status": "python3 tools/check_panama_ip_phone.py"

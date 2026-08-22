@@ -25,8 +25,6 @@ PANAMA_TZ = ZoneInfo("America/Panama")
 SECRET_CANDIDATES = [
     Path.home() / ".codex/secrets/canon/network/services.toml",
     Path.home() / ".codex/secrets/network/services.toml",
-    Path.home() / ".codex/secrets/canon/DemoNameBpanama/services.toml",
-    Path.home() / ".codex/secrets/DemoNameBpanama/services.toml",
 ]
 
 

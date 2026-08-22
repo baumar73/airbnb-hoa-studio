@@ -1,5 +1,5 @@
 on run
-  set launcherPath to "/Users/demo-user/Documents/Projekt Management Owner/tools/open_airbnb_hoa.sh"
+  set launcherPath to (POSIX path of (path to home folder)) & "Documents/Projekt Management Owner/tools/open_airbnb_hoa.sh"
   try
     do shell script quoted form of launcherPath
   on error errMsg number errNum
