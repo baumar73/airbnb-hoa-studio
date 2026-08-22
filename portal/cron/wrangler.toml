@@ -5,6 +5,9 @@ compatibility_date = "2026-06-01"
 [triggers]
 crons = ["0 13 * * *", "*/30 * * * *"]
 
+[vars]
+GMAIL_USER = "markusoliverbauer@gmail.com"
+
 [[kv_namespaces]]
 binding = "CASES"
 id = "d14475cc0abe4834b1ac60daca8567b0"

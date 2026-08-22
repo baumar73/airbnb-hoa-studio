@@ -27,3 +27,9 @@ test('cron worker binds the production KV namespace intentionally', async () => 
   assert.ok(cronIds.length > 0);
   assert.deepEqual(cronIds, portalProdIds, 'cron must operate on the production reservation cases');
 });
+
+test('cron worker declares the Gmail mailbox identity required by pollMail', async () => {
+  const cron = await readFile(new URL('../cron/wrangler.toml', import.meta.url), 'utf8');
+  assert.match(cron, /\[vars\][\s\S]*GMAIL_USER\s*=\s*"markusoliverbauer@gmail\.com"/,
+    'cron must bind GMAIL_USER or every scheduled mailbox poll exits before opening Gmail');
+});
