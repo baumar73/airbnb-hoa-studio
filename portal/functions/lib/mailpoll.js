@@ -14,7 +14,7 @@ function newCaseFrom(b) {
   const nights = validation.nights;
   const pathType = validation.pathType;
   const STEPS = pathType === 'full'
-    ? [['forms_sent','Guest portal opened and paperwork started'],['application','1. Lease Application — completed & signed'],['background','2. Background Check Authorization — completed & signed by each adult'],['rules_ack','3. Rules & Regulations — reviewed & signed acknowledgment'],['lease_signed','4. Lease Agreement — signed by guest(s) and owner'],['ids_provided','Photo ID provided securely for each adult'],['fee_sent','$100 fee confirmed received by association'],['owner_reviewed','Owner confirmed the green quality report and released the package'],['submitted_hoa','Complete file submitted to Example Property Management'],['board_approved','HOA Board approval received'],['checkin_released','Check-in instructions released']]
+    ? [['route_selected','Official application route selected'],['forms_sent','Guest portal opened and paperwork started'],['application','1. Lease Application — completed & signed'],['background','2. Background Check Authorization — completed & signed by each adult'],['rules_ack','3. Rules & Regulations — reviewed & signed acknowledgment'],['lease_signed','4. Lease Agreement — signed by guest(s) and owner'],['screening_complete','Official HOA screening/application confirmed complete'],['ids_provided','Photo ID provided securely for each adult'],['fee_sent','$100 fee confirmed received by association'],['owner_reviewed','Owner confirmed the green quality report and released the package'],['submitted_hoa','Complete file submitted to Example Property Management'],['board_approved','HOA Board approval received'],['checkin_released','Check-in instructions released']]
     : [['forms_sent','Guest Registration Form sent to guest'],['registration','Guest Registration Form — completed & signed'],['ids_provided','Photo ID copy provided for each adult'],['submitted_hoa','Registration submitted to Example Property Management'],['board_approved','HOA confirmation received'],['checkin_released','Check-in instructions released']];
   const tokenBytes = new Uint8Array(16);
   crypto.getRandomValues(tokenBytes);
@@ -23,7 +23,7 @@ function newCaseFrom(b) {
     token: btoa(String.fromCharCode(...tokenBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
     guestName: b.guestName, reservationCode: b.code,
     checkIn: b.checkIn, checkOut: b.checkOut, nights, adults: b.adults,
-    pathType,
+    pathType, screeningRoute: pathType === 'full' ? 'undecided' : undefined,
     steps: STEPS.map(([id, label]) => ({ id, label, done: false, date: null })),
     createdAt: new Date().toISOString(),
     notes: 'auto-created from Airbnb confirmation email',

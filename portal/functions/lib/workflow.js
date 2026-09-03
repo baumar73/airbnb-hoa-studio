@@ -85,12 +85,22 @@ export function applicationFeeState(c) {
     if (c.feeStatus === 'waived') return 'waived';
     if (c.feeStatus === 'waiver_pending') return 'waiver_pending';
   }
+  if (c.screeningRoute === 'online') return 'handled_online';
+  if (c.screeningRoute === 'undecided') return 'route_required';
   return 'required';
 }
 
 export function validateLiveSubmissionPrerequisites(c) {
-  const required = ['ids_provided'];
-  if (c && c.pathType === 'full') {
+  const required = [];
+  if (c && c.pathType === 'full' && c.screeningRoute === 'undecided') {
+    required.push('screening_route');
+  } else if (c && c.pathType === 'full' && c.screeningRoute === 'online') {
+    required.push('screening_complete');
+  } else {
+    required.push('ids_provided');
+  }
+  if (c && c.pathType === 'full' && c.screeningRoute !== 'online' && c.screeningRoute !== 'undecided') {
+    if (c.screeningRoute === 'paper') required.unshift('screening_complete');
     const feeState = applicationFeeState(c);
     if (feeState === 'required') required.push('fee_sent');
     if (feeState === 'waiver_pending') required.push('fee_waiver_confirmation');

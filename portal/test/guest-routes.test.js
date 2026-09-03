@@ -10,7 +10,12 @@ register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
 
 const { socketAttempts, resetSocketAttempts } = await import('cloudflare:sockets');
 const { onRequest } = await import('../functions/[[path]].js');
-const { shouldAutoSubmitAfterGuestSave, isGuestAccessibleCase } = await import('../functions/lib/workflow.js');
+const {
+  shouldAutoSubmitAfterGuestSave,
+  isGuestAccessibleCase,
+  applicationFeeState,
+  validateLiveSubmissionPrerequisites,
+} = await import('../functions/lib/workflow.js');
 
 const ORIGIN = 'https://portal.example.test';
 const TOKEN = 'testtoken123';
@@ -44,7 +49,7 @@ function seedCase(store) {
   const c = {
     id: 'case-1', token: TOKEN, guestName: 'DemoGuest DemoNameL',
     reservationCode: 'HMDEMO0002', checkIn: '2026-10-17', checkOut: '2026-12-20',
-    nights: 64, adults: 2, pathType: 'full', createdAt: new Date().toISOString(),
+    nights: 64, adults: 2, pathType: 'full', screeningRoute: 'paper', createdAt: new Date().toISOString(),
     notes: '', status: null, hoaOccupancyConfirmedAt: '2026-07-27T12:00:00Z',
     steps: [
       { id: 'forms_sent', label: 'First paperwork draft saved', done: false, date: null },
@@ -186,6 +191,114 @@ test('the returning guest status page says the forms are complete after a succes
   assert.equal(res.status, 200);
   assert.match(body, /Your forms are complete/i);
   assert.doesNotMatch(body, /<h2>Complete your forms online<\/h2>/i);
+});
+
+test('a full rental chooses the official application route before showing local paper forms', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  delete c.screeningRoute;
+  store.set('cases', JSON.stringify([c]));
+
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { method: 'GET', origin: null }),
+    env,
+    waitUntil: () => {},
+  });
+  const body = await res.text();
+
+  assert.equal(res.status, 200);
+  assert.match(body, /Choose how to complete the HOA application/i);
+  assert.match(body, /Tenant Evaluation/i);
+  assert.doesNotMatch(body, /name="a0_firstName"/i);
+});
+
+test('choosing the online route persists the choice without collecting screening data locally', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  delete c.screeningRoute;
+  store.set('cases', JSON.stringify([c]));
+
+  const choose = await onRequest({
+    request: guestRequest(`/w/${TOKEN}/route`, { form: { route: 'online' } }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(choose.status, 303);
+  assert.equal(choose.headers.get('location'), `/v/${TOKEN}`);
+  const [saved] = JSON.parse(store.get('cases'));
+  assert.equal(saved.screeningRoute, 'online');
+  assert.equal(saved.wizard, undefined);
+
+  const status = await onRequest({
+    request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }),
+    env,
+    waitUntil: () => {},
+  });
+  const body = await status.text();
+  assert.match(body, /Complete the official online application/i);
+  assert.match(body, /tenantev\.com/i);
+  assert.match(body, /Social Security number.*only.*Tenant Evaluation/i);
+  assert.doesNotMatch(body, /I've mailed the check/i);
+  assert.doesNotMatch(body, /name="a0_firstName"/i);
+});
+
+test('online completion can be reported but only the owner can confirm the official screening step', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.screeningRoute = 'online';
+  store.set('cases', JSON.stringify([c]));
+
+  const report = await onRequest({
+    request: guestRequest(`/v/${TOKEN}/screening-reported`, { form: { confirmed: 'yes' } }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(report.status, 303);
+  const [saved] = JSON.parse(store.get('cases'));
+  assert.ok(saved.screeningReportedAt);
+  assert.equal(saved.steps.find(step => step.id === 'screening_complete').done, false);
+});
+
+test('submission prerequisites follow the selected official route', () => {
+  const online = {
+    pathType: 'full', screeningRoute: 'online',
+    steps: [{ id: 'screening_complete', done: false }],
+  };
+  assert.equal(applicationFeeState(online), 'handled_online');
+  assert.deepEqual(validateLiveSubmissionPrerequisites(online).missing, ['screening_complete']);
+  online.steps[0].done = true;
+  assert.equal(validateLiveSubmissionPrerequisites(online).ok, true);
+
+  const paper = {
+    pathType: 'full', screeningRoute: 'paper',
+    steps: [
+      { id: 'screening_complete', done: false },
+      { id: 'ids_provided', done: true },
+      { id: 'fee_sent', done: true },
+    ],
+  };
+  assert.deepEqual(validateLiveSubmissionPrerequisites(paper).missing, ['screening_complete']);
+});
+
+test('paper-route PDF files are clearly read-only previews shown after the editable form', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.adults = 1;
+  c.screeningRoute = 'paper';
+  c.wizard = {
+    adults: [{}], references: [{}, {}], emergency: [{}, {}], children: [],
+    auto: {}, savedAt: '2026-09-02T12:00:00Z',
+  };
+  store.set('cases', JSON.stringify([c]));
+
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { method: 'GET', origin: null }),
+    env,
+    waitUntil: () => {},
+  });
+  const body = await res.text();
+  assert.match(body, /Read-only PDF previews/i);
+  assert.ok(body.indexOf(`<form method="post" action="/w/${TOKEN}">`) < body.indexOf('Read-only PDF previews'));
 });
 
 test('removing a stored signature invalidates the stale owner-review-ready state', async () => {

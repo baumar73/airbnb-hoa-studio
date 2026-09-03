@@ -11,11 +11,13 @@ import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
 // ---------- domain ----------
 const STEP_TEMPLATES = {
   full: [
+    ['route_selected',   'Official application route selected'],
     ['forms_sent',      'First paperwork draft saved'],
     ['application',     '1. Lease Application — completed & signed'],
     ['background',      '2. Background Check Authorization — completed & signed by each adult'],
     ['rules_ack',       '3. Rules & Regulations — reviewed & signed acknowledgment'],
     ['lease_signed',    '4. Lease Agreement — signed by guest(s) and owner'],
+    ['screening_complete','Official HOA screening/application confirmed complete'],
     ['ids_provided',    'Photo ID provided securely for each adult'],
     ['fee_sent',        '$100 fee confirmed received by association'],
     ['owner_reviewed',  'Owner confirmed the green quality report and released the package'],
@@ -47,7 +49,7 @@ function newCase(input) {
     reservationCode: input.reservationCode || '',
     checkIn: input.checkIn, checkOut: input.checkOut,
     nights: input.nights, adults: input.adults,
-    pathType,
+    pathType, screeningRoute: pathType === 'full' ? 'undecided' : undefined,
     steps: STEP_TEMPLATES[pathType].map(([id, label]) => ({ id, label, done: false, date: null })),
     createdAt: new Date().toISOString(),
     notes: '',
@@ -67,7 +69,11 @@ async function loadCases(env) {
       return { ...old, id, label, done: !!old.done, date: old.date || null };
     });
     normalized.push(...(c.steps || []).filter(step => !known.has(step.id)));
-    return { ...c, steps: normalized };
+    return {
+      ...c,
+      screeningRoute: c.pathType === 'full' ? (c.screeningRoute || 'undecided') : c.screeningRoute,
+      steps: normalized,
+    };
   });
 }
 async function saveCases(env, cases) {
@@ -298,11 +304,11 @@ const HOME_FAQ = [
   ['What is the minimum stay?',
    'The condominium association requires a lease term of at least 30 nights, so bookings are monthly. That makes the home ideal for snowbirds, travel professionals and remote workers.'],
   ['Why does my rental need approval?',
-   'Example Condominium is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. This portal makes the paperwork as painless as possible: forms are filled and signed online, checked automatically with AI and released by Owner only after the quality report is green.'],
+   'Example Condominium is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. After booking, your private page guides you through either the association’s Tenant Evaluation route or its paper route.'],
   ['How long does the approval take?',
-   'The association asks applicants to allow up to 15 days after the complete file and fee arrive. Complete the portal early; your personal status page shows live progress.'],
+   'The association asks applicants to allow up to 15 days after every required application, screening, document and payment item arrives. Complete your chosen route early; your personal status page shows live progress.'],
   ['What is the $100 fee?',
-   'The association charges a non-refundable $100 application fee ($50 community fee plus $50 document-processing fee), paid by the guest via check or money order payable to "Example Condominium". Your status page has the exact mailing instructions.'],
+   'The association charges a non-refundable $100 application fee. Online-route applicants pay inside Tenant Evaluation; paper-route applicants use check or money order. Your private status page shows only the instructions for your chosen route.'],
   ['Are pets allowed?',
    'No — the association does not permit pets for renters. The home is also non-smoking.'],
   ['Can my AI assistant help me with the paperwork?',
@@ -340,11 +346,11 @@ function landingView() {
     `<div class="card"><h2>How it works</h2>
       <ol>
         <li><b>Book on Airbnb.</b> After your booking is confirmed, you receive a personal link to this portal via Airbnb chat.</li>
-        <li><b>Complete the paperwork.</b> Your personal page lists exactly which forms the association needs (usually 20–30 minutes; you can save a draft).</li>
-        <li><b>HOA board approval.</b> We submit your complete file to the association. Allow up to 15 days after the file, ID copies and fee arrive.</li>
+        <li><b>Choose one application route.</b> Use the association's Tenant Evaluation service, or prepare its paper-route documents in this portal.</li>
+        <li><b>HOA board approval.</b> Allow up to 15 days after every required application, screening, document and payment item arrives.</li>
         <li><b>Check-in released.</b> Once approved, you receive the door codes and arrival guide.</li>
       </ol>
-      <p class="muted">Paid rentals must be at least 30 nights and require the association's lease application, a background-check authorization ($100 fee, paid by the guest), the house rules acknowledgment and a lease agreement. Simplified guest registration is reserved for confirmed, non-paying guests.</p>
+      <p class="muted">Paid rentals must be at least 30 nights and require association approval. Sensitive background-screening information is entered only in the association's approved process, never on this public site. Simplified guest registration is reserved for confirmed, non-paying guests.</p>
      </div>
      <div class="card"><h2>Already booked? Find your page</h2>
       <p>Enter your Airbnb confirmation code (looks like <span class="pill teal">HMDEMO0003</span>, in your booking confirmation) and your last name:</p>
@@ -382,12 +388,21 @@ function landingView() {
 <script type="application/ld+json">${FAQ_JSONLD}</script>` });
 }
 
+function guestProgressSteps(c) {
+  if (c.pathType !== 'full' || c.screeningRoute === 'paper') return c.steps;
+  const visible = c.screeningRoute === 'online'
+    ? new Set(['route_selected', 'screening_complete', 'board_approved', 'checkin_released'])
+    : new Set(['route_selected', 'screening_complete', 'board_approved', 'checkin_released']);
+  return c.steps.filter(step => visible.has(step.id));
+}
+
 function statusView(c) {
-  const total = c.steps.length, done = c.steps.filter(s => s.done).length;
+  const progressSteps = guestProgressSteps(c);
+  const total = progressSteps.length, done = progressSteps.filter(s => s.done).length;
   const pct = Math.round(done / total * 100);
   const days = daysUntil(c.checkIn);
   const approved = c.steps.find(s => s.id === 'board_approved')?.done;
-  const nextIdx = c.steps.findIndex(s => !s.done);
+  const nextIdx = progressSteps.findIndex(s => !s.done);
   const banner = (approved
     ? `<span class="pill ok">Approved — you're all set</span>`
     : (days <= 10 ? `<span class="pill warn">${days} days to check-in — let's finish the paperwork</span>`
@@ -417,16 +432,36 @@ St. Petersburg, FL 33716</div>
              <span class="muted" style="margin-left:10px">Tap this once your envelope is in the mail — it helps us confirm receipt.</span>
            </form>`}
     </div>` : '';
-  const wizardCard = approved ? '' : c.ownerReviewReadyAt ? `
-    <div class="card"><h2>Your forms are complete</h2>
+  const route = c.pathType === 'full' ? (c.screeningRoute || 'undecided') : 'paper';
+  const screeningConfirmed = c.steps.find(s => s.id === 'screening_complete')?.done;
+  const wizardCard = approved ? '' : route === 'undecided' ? `
+    <div class="card"><h2>Choose the official application route</h2>
+      <p>The association offers two different processes. Choose first so this page gives you the correct forms and payment instructions.</p>
+      <p><a class="btn" href="/w/${c.token}">Choose online or paper</a></p>
+    </div>` : route === 'online' ? `
+    <div class="card"><h2>Complete the official online application</h2>
+      <p><span class="pill teal">Online route · Tenant Evaluation</span></p>
+      <p>Create or open your application on <a href="https://tenantev.com/" target="_blank" rel="noopener">Tenant Evaluation</a>. The association's application code or invitation must come from Owner or the HOA. Complete the application, upload requested documents and pay the application fee there.</p>
+      <div class="attn"><b>Privacy boundary:</b> enter any Social Security number or other sensitive screening answers only in Tenant Evaluation. This portal never asks for or receives that information.</div>
+      ${screeningConfirmed
+        ? '<p><span class="pill ok">Official application confirmed complete</span></p>'
+        : c.screeningReportedAt
+          ? `<p><span class="pill warn">Completion reported ${esc(c.screeningReportedAt.slice(0, 10))}</span> <span class="muted">Owner is confirming it with the association.</span></p>`
+          : `<form method="post" action="/v/${c.token}/screening-reported" onsubmit="return confirm('Confirm that you completed and submitted the official Tenant Evaluation application?')">
+               <input type="hidden" name="confirmed" value="yes"><button>I've completed Tenant Evaluation ✓</button>
+               <p class="muted">This reports completion to Owner; it does not copy screening data into this portal.</p>
+             </form>`}
+      <p class="muted">If you have not received the association code or invitation, message Owner through Airbnb. Do not fill out the separate local paper forms as well.</p>
+    </div>` : c.ownerReviewReadyAt ? `
+    <div class="card"><h2>Your forms are complete for the paper route</h2>
       <p><span class="pill ok">Ready for Owner review</span></p>
-      <p>Your information and signatures are saved. Owner reviews the current documents next; the secure photo-ID handoff and association fee are tracked separately. You do not need to fill out the forms again.</p>
+      <p>Your local paper documents and signatures are saved. The association's separate screening, secure photo-ID handoff and fee are tracked separately. You do not need to fill out these forms again.</p>
       <p><a class="btn ghost" href="/w/${c.token}">Review / edit your details</a>
       <span class="pill ok" style="margin-left:10px">completed ${esc((c.ownerReviewReadyAt || '').slice(0, 10))}</span></p>
       <p class="muted">If you change personal details, the affected signatures must be provided again before the forms return to Owner review.</p>
     </div>` : `
-    <div class="card"><h2>Complete your forms online</h2>
-      <p>Enter your details once and sign online. You can save an unfinished draft and return later. We prepare the association's official PDFs and an AI quality check reviews the complete package for missing data and inconsistencies. Owner confirms the green quality report and explicitly releases the package. Usually takes 20–30 minutes.</p>
+    <div class="card"><h2>Complete the local paper-route forms online</h2>
+      <p>Enter your details once and sign online. You can save an unfinished draft and return later. We prepare four local PDFs for Owner to review. The association's separate official screening is not performed on this site.</p>
       <p><a class="btn" href="/w/${c.token}">${c.wizard ? 'Review / edit your details' : 'Start the paperwork'}</a>
       ${c.wizard ? `<span class="pill ok" style="margin-left:10px">details saved ${esc((c.wizard.savedAt || '').slice(0, 10))}</span>` : ''}</p>
     </div>`;
@@ -438,7 +473,7 @@ St. Petersburg, FL 33716</div>
        <h2>Progress</h2>
        <div class="bar"><div style="width:${pct}%"></div></div>
        <p class="muted">${done} of ${total} steps complete</p>
-       <ul class="steps">${c.steps.map((s, i) => `
+       <ul class="steps">${progressSteps.map((s, i) => `
          <li class="${s.done ? 'done' : ''} ${i === nextIdx ? 'next' : ''}">
            <div class="dot">${s.done ? '✓' : ''}</div>
            <div><span class="lbl">${esc(s.label)}</span>
@@ -450,7 +485,7 @@ St. Petersburg, FL 33716</div>
      ${feeBlock}
      ${c.submission && !approved ? `
      <div class="card"><h2>What happens now</h2>
-       <p>Your paperwork is with the association — nothing to do on your end${feeState === 'required' && !c.feeMailed ? ' except mailing the $100 fee' : ''}. The association asks applicants to allow up to 15 days after the complete file and fee arrive. The moment it's approved, you'll get an email from us and your check-in details will follow. This page always shows the live status.</p>
+       <p>Your paperwork is with the association — nothing to do on your end${feeState === 'required' && !c.feeMailed ? ' except mailing the $100 fee' : ''}. The association asks applicants to allow up to 15 days after every required part reaches it. The moment it's approved, you'll get an email from us and your check-in details will follow. This page always shows the live status.</p>
      </div>` : ''}
      ${approved ? `
      <div class="card"><h2>You're all set 🎉</h2>
@@ -460,7 +495,8 @@ St. Petersburg, FL 33716</div>
        <ul class="steps" style="font-size:15px">
          <li><div><b>Why all this paperwork?</b><br><span class="muted">The condominium association (HOA) requires board approval for every rental — it applies to all owners in the building, not just this one. We've made it as painless as we can.</span></div></li>
          <li><div><b>Is my data safe?</b><br><span class="muted">Your details are used solely for the association's approval file and its automated quality check, transmitted encrypted, and never sold. Processing is limited to the association and the service providers identified in the privacy notice. We never ask for your Social Security number or ID uploads on this site.</span></div></li>
-         <li><div><b>How long does approval take?</b><br><span class="muted">Allow up to 15 days after the complete file, required ID copies and fee reach the association. Please complete everything early. This page and our emails keep you posted.</span></div></li>
+         <li><div><b>How long does approval take?</b><br><span class="muted">Allow up to 15 days after the association has every required application, screening, document and payment item. Please complete everything early. This page and our emails keep you posted.</span></div></li>
+         <li><div><b>Need to add or change an occupant?</b><br><span class="muted">Message Owner through Airbnb before arrival. Occupancy changes can require an updated association approval; do not simply add a person to a completed application.</span></div></li>
          <li><div><b>Questions or stuck?</b><br><span class="muted">Message Owner anytime via Airbnb chat — replies usually within a few hours.</span></div></li>
        </ul>
      </div>`);
@@ -469,14 +505,22 @@ St. Petersburg, FL 33716</div>
 // ---------- AI-assistant briefing (guests may share this with their own assistant) ----------
 function guestBrief(c) {
   const isFull = c.pathType === 'full';
-  const done = c.steps.filter(s => s.done).length;
-  const fields = isFull
+  const route = isFull ? (c.screeningRoute || 'undecided') : 'paper';
+  const progress = guestProgressSteps(c);
+  const done = progress.filter(s => s.done).length;
+  const fields = isFull && route === 'paper'
     ? `- For EACH adult (${c.adults} total): first name, full middle name (or “None”), last name, birth date, gender,
   current street address (street, city, state, ZIP), phone, email,
   ID type (driver's license or US photo ID), ID number + issuing state, employer name, employer phone.
 - Once per application: automobile make & year & license plate,
   two personal references (non-relatives: name, phone, address),
   one or two emergency contacts (name, phone).`
+    : isFull && route === 'online'
+      ? `- Use the association's external Tenant Evaluation application.
+- Obtain the association code or invitation from Owner or the HOA.
+- Complete requested uploads and payment only in Tenant Evaluation.`
+    : isFull
+      ? '- Choose Online or Paper before preparing any form data.'
     : `- For EACH adult (${c.adults} total): first name, full middle name (or “None”), last name, birth date, gender, phone, email.
 - Names and birth dates of any children staying.`;
   return `# HOA approval briefing — Example Island, Unit 405D (Example Condominium)
@@ -490,27 +534,30 @@ the guest personally — never sign or consent on their behalf.
 - Guest: ${c.guestName} (${c.adults} adult(s))
 - Stay: ${c.checkIn} to ${c.checkOut} (${c.nights} nights)
 - Airbnb reservation: ${c.reservationCode || 'n/a'}
-- Process: ${isFull ? 'full lease application package (required for stays of 30+ nights)' : 'simplified guest registration (stays under 30 nights)'}
+- Process: ${isFull ? (route === 'online' ? 'official online application through Tenant Evaluation' : route === 'paper' ? 'local paper-route lease package plus separate official screening' : 'application route not chosen yet') : 'simplified guest registration (stays under 30 nights)'}
 - Days until check-in: ${daysUntil(c.checkIn)}
 
-## Current status: ${done} of ${c.steps.length} steps complete
-${c.steps.map(s => `- [${s.done ? 'x' : ' '}] ${s.label}${s.done && s.date ? ` (done ${s.date.slice(0, 10)})` : ''}`).join('\n')}
+## Current status: ${done} of ${progress.length} steps complete
+${progress.map(s => `- [${s.done ? 'x' : ' '}] ${s.label}${s.done && s.date ? ` (done ${s.date.slice(0, 10)})` : ''}`).join('\n')}
 ${c.submission ? `- The paperwork package was submitted to the association on ${c.submission.sentAt.slice(0, 10)}.` : ''}
-${c.wizard ? `- The online form was last saved on ${(c.wizard.savedAt || '').slice(0, 10)} and can be edited anytime.` : '- The online form has NOT been filled in yet — that is the next step.'}
+${route === 'online'
+  ? (c.screeningReportedAt ? `- Tenant Evaluation completion was reported on ${c.screeningReportedAt.slice(0, 10)} and awaits Owner/HOA confirmation.` : '- The official Tenant Evaluation application has not yet been reported complete.')
+  : route === 'undecided'
+    ? '- The official application route has not been chosen yet.'
+    : c.wizard
+      ? `- The local paper-route form was last saved on ${(c.wizard.savedAt || '').slice(0, 10)} and can be edited anytime.`
+      : '- The local paper-route form has NOT been filled in yet — that is the next step.'}
 
-## The online form — what the guest should have ready
-Private form link (do not publish): https://portal.example.test/w/${c.token}
+## What the guest should have ready
+Private status link (do not publish): https://portal.example.test/v/${c.token}
+${route === 'paper' ? `Private local-form link (do not publish): https://portal.example.test/w/${c.token}` : ''}
 ${fields}
-- E-sign consent + drawn signature: guest personally, on the form page.
-- An unfinished draft can be saved and continued later.
-- After saving with all signatures, the system prepares the association's official
-  PDFs for automated quality review. Nothing is sent until Owner explicitly authorizes it.
-- The site never asks for Social Security numbers or photo-ID uploads. Owner confirms
-  the secure ID-copy handoff through the existing Airbnb chat before any HOA submission.
-${isFull ? `
+- ${route === 'paper' ? 'E-sign consent and drawn signature must be completed personally on the local form page. Drafts can be saved and continued later.' : route === 'online' ? 'Report completion on the private status page after submitting Tenant Evaluation.' : 'Choose Online or Paper on the private route page before starting.'}
+- This site never asks for Social Security numbers or photo-ID uploads. Any sensitive official-screening data belongs only in the association's approved external process.
+${isFull && route === 'paper' ? `
 ## The non-refundable $100 association fee (paid by the guest)
 - $50 community fee plus $50 document-processing fee.
-- Check or money order ONLY (no cards).
+- For the paper route: check or money order (online-route applicants pay in Tenant Evaluation instead).
 - Payable to: "Example Condominium"
 - Enclose a note: Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / ' + c.reservationCode : ''}
 - Mail to: Example Condominium Association, Inc.,
@@ -518,7 +565,7 @@ ${isFull ? `
 - ${c.feeMailed ? `The guest reported the check as mailed on ${c.feeMailed.slice(0, 10)}; receipt is being tracked.` : 'Once the envelope is in the mail, the guest should tap "I\'ve mailed the check" on the status page.'}
 ` : ''}
 ## Timeline & contact
-- Allow up to 15 days after the complete file${isFull ? ', required ID copies and fee' : ''} arrive. Complete everything early.
+- Allow up to 15 days after every required application, screening, document and payment item arrives. Complete everything early.
 - Live status page (private): https://portal.example.test/v/${c.token}
 - Questions: message Owner (the host) via Airbnb chat — replies usually within hours.
 `;
@@ -569,6 +616,27 @@ function occupancyView(c, error) {
         <p><button type="submit">Confirm occupancy and continue</button></p>
       </form>
     </div>`);
+}
+
+function applicationRouteView(c, error) {
+  return page('Choose the HOA application route — Demo Unit',
+    `<h1>Choose how to complete the HOA application</h1>
+     <p>Both routes go to the same condominium association, but the forms and payment method are different.</p>`,
+    `${error ? `<div class="attn crit">${esc(error)}</div>` : ''}
+     <div class="card"><h2>Online — Tenant Evaluation</h2>
+       <p>Use the association's external Tenant Evaluation service for the application, requested uploads, screening and online payment. It can take up to about 45 minutes.</p>
+       <div class="attn"><b>Sensitive information stays there.</b> Any Social Security number, screening answers and identity uploads belong only in Tenant Evaluation, never in this portal.</div>
+       <form method="post" action="/w/${c.token}/route">
+         <button name="route" value="online">Choose Tenant Evaluation online</button>
+       </form>
+     </div>
+     <div class="card"><h2>Paper package — prepared in this portal</h2>
+       <p>Fill and sign the four local documents here. Owner reviews them before any release. The separate official tenant-screening form and sensitive data are handled directly with the association, outside this portal. The $100 fee for this route is paid by check or money order.</p>
+       <form method="post" action="/w/${c.token}/route">
+         <button class="ghost" name="route" value="paper">Choose the paper route</button>
+       </form>
+     </div>
+     <div class="card"><p class="muted">Choose only one route. If the HOA already sent you a Tenant Evaluation invitation, choose Online. If you are unsure, message Owner through Airbnb before choosing.</p></div>`);
 }
 
 function wizardView(c, saved) {
@@ -671,8 +739,8 @@ function wizardView(c, saved) {
     </div>` : '';
   const signedCount = adults.filter(x => x && x.sigPng).length;
   const downloads = w.savedAt ? `
-    <div class="card"><h2>Your draft documents</h2>
-      <p>${signedCount ? 'Signed online by ' + signedCount + ' guest(s) and prepared for automated quality review. ' : ''}Review carefully${isFull ? ' — the SS# field stays blank on purpose and ID copies are handled separately through a secure route confirmed by Owner in Airbnb chat' : ''}.</p>
+    <div class="card"><h2>Read-only PDF previews — not editable</h2>
+      <p>${signedCount ? 'Signed online by ' + signedCount + ' guest(s) and prepared for automated quality review. ' : ''}These downloads are snapshots of the fields above. To correct anything, edit the web form above and save again${isFull ? '. The SS# field stays blank on purpose; official screening and ID handling remain outside this portal' : ''}.</p>
       <p>
       ${isFull
         ? `<a class="btn" href="/w/${c.token}/pdf/lease-application">1. Lease Application</a>
@@ -720,8 +788,7 @@ function wizardView(c, saved) {
     `<h1>Your paperwork, filled &amp; signed online</h1>
      <p>Stay ${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.adults} adult${c.adults === 1 ? '' : 's'} age 18+${Number(c.expectedMinors || 0) ? ` · ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''} · ${isFull ? 'full HOA application package' : 'guest registration'}</p>
      ${saved === 'ready' ? '<span class="pill ok">Complete — ready for Owner to review</span>' : saved === 'draft' ? '<span class="pill warn">Draft saved — some required details or signatures are still missing below</span>' : ''}`,
-    `${downloads}
-     <form method="post" action="/w/${c.token}">
+    `<form method="post" action="/w/${c.token}">
        ${Array.from({ length: c.adults }, (_, i) => adultBlock(i)).join('')}
        ${extras}
        ${rulesSection}
@@ -734,6 +801,7 @@ function wizardView(c, saved) {
          </p>
        </div>
      </form>
+     ${downloads}
      ${sigScript}`);
 }
 
@@ -1017,8 +1085,10 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
     const who = `<b>${esc(c.guestName)}</b> (Check-in ${esc(c.checkIn)})`;
     if (c.submissionError) attn.push(['crit', `${who}: Versand-Störung — „${esc(c.submissionError.message.slice(0, 80))}". Es gibt keinen automatischen Wiederholungsversuch.`, '/admin/cases', 'Zum Vorgang']);
     if (days >= 0 && days <= 10 && !isDone(c, 'board_approved')) attn.push(['crit', `${who}: nur noch ${days} Tage bis Check-in, Board-Approval fehlt.`, '/admin/cases', 'Zum Vorgang']);
-    if (!c.wizard) attn.push(['warn', `${who}: Gast hat die Formulare noch nicht ausgefüllt. Eine Erinnerung darf nur nach deiner Freigabe versandt werden.`, `/v/${c.token}`, 'Gast-Seite']);
-    else if (!c.submission && !c.submissionError) attn.push(['warn', `${who}: Daten liegen vor — Vollständigkeit und Signaturen prüfen, danach den Versand ausdrücklich freigeben.`, '/admin/cases', 'Zum Vorgang']);
+    if (c.pathType === 'full' && c.screeningRoute === 'undecided') attn.push(['warn', `${who}: Gast hat den offiziellen Antragsweg noch nicht gewählt.`, `/v/${c.token}`, 'Gast-Seite']);
+    else if (c.screeningRoute === 'online' && !isDone(c, 'screening_complete')) attn.push(['warn', `${who}: Tenant Evaluation ${c.screeningReportedAt ? 'vom Gast als erledigt gemeldet; bitte mit HOA bestätigen' : 'noch nicht als erledigt gemeldet'}.`, '/admin/cases', 'Zum Vorgang']);
+    else if (c.screeningRoute !== 'online' && !c.wizard) attn.push(['warn', `${who}: Gast hat die Papierformulare noch nicht ausgefüllt. Eine Erinnerung darf nur nach deiner Freigabe versandt werden.`, `/v/${c.token}`, 'Gast-Seite']);
+    else if (c.screeningRoute !== 'online' && !c.submission && !c.submissionError) attn.push(['warn', `${who}: Daten liegen vor — Vollständigkeit und Signaturen prüfen, danach den Versand ausdrücklich freigeben.`, '/admin/cases', 'Zum Vorgang']);
     const caseFeeState = applicationFeeState(c);
     if (caseFeeState === 'required' && c.wizard && !c.feeMailed && !isDone(c, 'fee_sent')) attn.push(['warn', `${who}: $100-Scheck noch nicht als versandt gemeldet.`, '/admin/cases', 'Zum Vorgang']);
     if (caseFeeState === 'waiver_pending') attn.push(['warn', `${who}: Renewal bestätigt; Gebührenbefreiung muss noch durch die HOA bestätigt werden.`, '/admin/cases', 'Zum Vorgang']);
@@ -1142,8 +1212,9 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
   const gmail = (to, cc, subject, body) =>
     `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}${cc ? '&cc=' + encodeURIComponent(cc) : ''}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   const rows = cases.map(c => {
-    const done = c.steps.filter(s => s.done).length;
-    const stepBtns = c.steps.map(s =>
+    const visibleSteps = guestProgressSteps(c);
+    const done = visibleSteps.filter(s => s.done).length;
+    const stepBtns = visibleSteps.map(s =>
       `<form method="post" action="/admin/toggle" style="display:inline">
          <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="${s.id}">
          <button class="small ${s.done ? '' : 'ghost'}" title="${esc(s.label)}">${s.done ? '✓' : '·'}</button>
@@ -1151,10 +1222,20 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
     const guestEmail = c.wizard && c.wizard.adults && c.wizard.adults[0] && c.wizard.adults[0].email;
     const stayRef = `Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
     const feeMode = applicationFeeState(c);
+    const screeningStep = c.steps.find(s => s.id === 'screening_complete');
+    const screeningControl = c.screeningRoute === 'online' && screeningStep ? `
+      <form method="post" action="/admin/toggle" style="display:inline-block;margin:8px 0">
+        <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="screening_complete">
+        <button class="small ${screeningStep.done ? '' : 'ghost'}">${screeningStep.done ? '✓ Tenant Evaluation bestätigt' : 'Tenant Evaluation nach HOA-Prüfung bestätigen'}</button>
+      </form>` : '';
     const feeState = feeMode === 'waiver_pending'
       ? `<span class="pill warn">renewal: fee waiver pending HOA confirmation</span>`
       : feeMode === 'waived'
         ? `<span class="pill ok">renewal fee waived</span>`
+        : feeMode === 'handled_online'
+          ? `<span class="pill teal">fee handled in Tenant Evaluation</span>`
+          : feeMode === 'route_required'
+            ? `<span class="pill warn">application route not selected</span>`
         : feeMode === 'required' && c.feeMailed
           ? `<span class="pill ok">check mailed ${esc(c.feeMailed.slice(0,10))}</span>`
           : feeMode === 'required' ? `<span class="pill warn">fee not mailed yet</span>` : '';
@@ -1169,7 +1250,9 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
         `Dear Example Property Management / Example Condominium,\n\nCould you please confirm receipt of the $100 application fee (check/money order) for the following lease application?\n\n${stayRef}${c.feeMailed ? `\n\nThe applicant reports having mailed the check on ${c.feeMailed.slice(0,10)}.` : ''}\n\nThank you very much!\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
         target="_blank" rel="noopener">✉ HOA: Empfang bestätigen</a>`;
     const ds = docStates(c, ownerSigOnFile);
-    const docLine = ds.docs.map(d => {
+    const docLine = c.screeningRoute === 'online'
+      ? 'Official application remains in Tenant Evaluation; no local PDF package is generated.'
+      : ds.docs.map(d => {
       const state = c.submission ? '📤' : d.signed ? '✍️' : d.filled ? '📝' : '⬜';
       const title = c.submission ? 'an Verwaltung gesendet' : d.signed ? 'ausgefüllt + signiert' : d.filled ? 'ausgefüllt, Signatur fehlt' : 'noch nicht ausgefüllt';
       return `<span title="${esc(d.label)}: ${title}">${state} ${esc(d.label.split(' ')[0])}</span>`;
@@ -1178,8 +1261,10 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
       ? `<span class="pill ok">📬 gesendet ${esc(c.submission.sentAt.slice(0,10))}${c.submission.live ? '' : ' (TEST)'}</span>`
       : c.submissionError
         ? `<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Versand-Störung: ${esc(c.submissionError.message.slice(0,60))}</span>`
-        : (c.wizard ? '<span class="pill warn">wartet auf Owner-Prüfung / vollständige Signaturen</span>' : '');
-    const ready = isReadyForOwnerReview(c, ownerSigOnFile);
+        : c.screeningRoute === 'online'
+          ? `<span class="pill ${c.screeningReportedAt ? 'warn' : 'teal'}">Tenant Evaluation ${c.screeningReportedAt ? 'vom Gast als erledigt gemeldet — Bestätigung ausstehend' : 'ausstehend'}</span>`
+          : (c.wizard ? '<span class="pill warn">wartet auf Owner-Prüfung / vollständige Signaturen</span>' : '');
+    const ready = (c.pathType !== 'full' || c.screeningRoute === 'paper') && isReadyForOwnerReview(c, ownerSigOnFile);
     const ai = c.aiReview && c.aiReview.reviewHash === c.reviewHash ? c.aiReview : null;
     const aiLine = !ready ? '' : !ai
       ? '<span class="pill warn">Lokale KI-Prüfung ausstehend</span>'
@@ -1196,10 +1281,10 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
       </div>` : '';
     return `<tr>
       <td><b>${esc(c.guestName)}</b><br><span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights}n · ${esc(c.pathType)}</span><br>
-          ${c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
-          ${feeState}<br>
+          ${c.screeningRoute === 'online' ? '<span class="pill teal">external application — no local wizard required</span>' : c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
+          ${feeState}<br>${screeningControl}
           <span class="muted">${docLine}</span><br>${subLine}${reviewButton}</td>
-      <td>${done}/${c.steps.length}<br>${stepBtns}<br>${mailBtns}</td>
+      <td>${done}/${visibleSteps.length}<br>${stepBtns}<br>${mailBtns}</td>
       <td><a href="/v/${c.token}" target="_blank">/v/${c.token}</a><br>
           <form method="post" action="/admin/delete" onsubmit="return confirm('Delete case?')" style="display:inline">
             <input type="hidden" name="id" value="${c.id}"><button class="small ghost">delete</button>
@@ -1263,11 +1348,11 @@ export async function onRequest(context) {
       return jsonResp(cases.map(c => ({
         id: c.id, guestName: c.guestName, reservationCode: c.reservationCode || null,
         checkIn: c.checkIn, checkOut: c.checkOut, nights: c.nights, adults: c.adults,
-        pathType: c.pathType, createdAt: c.createdAt,
+        pathType: c.pathType, screeningRoute: c.screeningRoute || null, createdAt: c.createdAt,
         steps: (c.steps || []).map(s => ({ id: s.id, label: s.label, done: !!s.done, date: s.date || null })),
         paperworkSaved: !!c.wizard, ownerReviewReadyAt: c.ownerReviewReadyAt || null,
         submittedAt: c.submission && c.submission.sentAt || null,
-        feeMailed: c.feeMailed || null, approvalCandidate: c.approvalCandidate || null,
+        feeMailed: c.feeMailed || null, screeningReportedAt: c.screeningReportedAt || null, approvalCandidate: c.approvalCandidate || null,
       })));
     }
     if (p === '/api/ro/contacts') return jsonResp(JSON.parse((await env.CASES.get('library-contacts')) || '[]'));
@@ -1279,7 +1364,7 @@ export async function onRequest(context) {
       return jsonResp({
         generatedAt: new Date().toISOString(),
         activeCases: cases.map(c => ({ guest: c.guestName, checkIn: c.checkIn, checkOut: c.checkOut,
-          pathType: c.pathType, stepsDone: c.steps.filter(s => s.done).length, stepsTotal: c.steps.length,
+          pathType: c.pathType, screeningRoute: c.screeningRoute || null, stepsDone: c.steps.filter(s => s.done).length, stepsTotal: c.steps.length,
           submitted: !!c.submission, approved: !!c.steps.find(s => s.id === 'board_approved' && s.done),
           feeMailed: c.feeMailed || null })),
         libraryFiles: (await libList(env)).length,
@@ -1312,24 +1397,51 @@ export async function onRequest(context) {
        <p><a href="/">← back</a></p></div>`), 404);
   }
 
-  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/brief\.txt)?$/);
+  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/brief\.txt)?$/);
   if (mV) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mV[1]);
     if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
     if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
     if (mV[2] === '/fee-mailed' && request.method === 'POST') {
+      if (c.screeningRoute !== 'paper') return new Response('paper-route fee action is not available for this case', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       if (!c.feeMailed) { c.feeMailed = new Date().toISOString(); await saveCases(env, cases); }
       return redirect(`/v/${c.token}`);
     }
     if (mV[2] === '/fee-unmailed' && request.method === 'POST') {
+      if (c.screeningRoute !== 'paper') return new Response('paper-route fee action is not available for this case', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       if (c.feeMailed) { delete c.feeMailed; await saveCases(env, cases); }
+      return redirect(`/v/${c.token}`);
+    }
+    if (mV[2] === '/screening-reported' && request.method === 'POST') {
+      if (c.screeningRoute !== 'online') return new Response('online screening report is not available for this case', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      const form = await request.formData();
+      if (form.get('confirmed') !== 'yes') return new Response('confirmation required', { status: 400, headers: SEC_HEADERS });
+      if (!c.screeningReportedAt) { c.screeningReportedAt = new Date().toISOString(); await saveCases(env, cases); }
       return redirect(`/v/${c.token}`);
     }
     if (mV[2] === '/brief.txt' && request.method === 'GET') {
       return new Response(guestBrief(c), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store, max-age=0', 'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
     }
     if (!mV[2] && request.method === 'GET') return html(statusView(c));
+  }
+
+  const mRoute = p.match(/^\/w\/([A-Za-z0-9_-]{6,})\/route$/);
+  if (mRoute && request.method === 'POST') {
+    const cases = await loadCases(env);
+    const c = cases.find(c => c.token === mRoute[1]);
+    if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
+    if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
+    if (c.pathType !== 'full') return new Response('application route is not required for this case', { status: 409, headers: SEC_HEADERS });
+    if (c.submission || c.reviewLockedAt || c.screeningRoute !== 'undecided') return new Response('application route is already locked; message Owner through Airbnb', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+    const form = await request.formData();
+    const route = String(form.get('route') || '');
+    if (!['online', 'paper'].includes(route)) return html(applicationRouteView(c, 'Choose one of the two application routes.'), 400);
+    c.screeningRoute = route;
+    const step = c.steps.find(s => s.id === 'route_selected');
+    if (step) { step.done = true; step.date = new Date().toISOString(); }
+    await saveCases(env, cases);
+    return redirect(route === 'online' ? `/v/${c.token}` : `/w/${c.token}`);
   }
 
   const mOccupancy = p.match(/^\/w\/([A-Za-z0-9_-]{6,})\/occupancy$/);
@@ -1356,12 +1468,15 @@ export async function onRequest(context) {
     if (!mW[2] && request.method === 'GET') {
       if (c.submission || c.reviewLockedAt) return redirect(`/v/${c.token}`);
       if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return html(occupancyView(c));
+      if (c.pathType === 'full' && c.screeningRoute === 'undecided') return html(applicationRouteView(c));
+      if (c.pathType === 'full' && c.screeningRoute === 'online') return redirect(`/v/${c.token}`);
       return html(wizardView(c, url.searchParams.get('saved')));
     }
 
     if (!mW[2] && request.method === 'POST') {
       if (c.submission || c.reviewLockedAt) return new Response('paperwork is locked after owner release', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return redirect(`/w/${c.token}`);
+      if (c.pathType === 'full' && c.screeningRoute !== 'paper') return new Response('choose the paper route before editing local forms', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       const form = await request.formData();
       const g = (n, max = 254) => String(form.get(n) || '').trim().slice(0, max);
       const saveMode = g('saveMode', 16);
@@ -1598,6 +1713,12 @@ export async function onRequest(context) {
       const c = cases.find(x => x.id === form.get('id'));
       const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
       if (!c) return new Response('case not found', { status: 404, headers: SEC_HEADERS });
+      if (c.pathType === 'full' && c.screeningRoute !== 'paper') {
+        return new Response(c.screeningRoute === 'online'
+          ? 'Tenant Evaluation cases are completed in the official external portal and must not be emailed as a local paper package'
+          : 'choose the official application route before preparing a local package',
+        { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
       if (!isReadyForOwnerReview(c, ownerSigOnFile)) {
         return new Response('paperwork is not complete or was already submitted', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }

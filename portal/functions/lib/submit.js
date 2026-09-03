@@ -64,12 +64,17 @@ export async function submitApprovedPackage(c, cases, env) {
     ? 'The association has confirmed that the $100 application fee is waived for these returning tenants.'
     : 'The $100 application-fee receipt has been confirmed in the owner workflow.';
   try {
+    if (c.pathType === 'full' && c.screeningRoute !== 'paper') {
+      throw new Error(c.screeningRoute === 'online'
+        ? 'online Tenant Evaluation applications must not be emailed as a local paper package'
+        : 'the official application route must be selected before a local package is generated');
+    }
     const attachments = await generatePackage(c, env);
     const subject = (live ? '' : '[TEST] ') + (c.pathType === 'full'
       ? `${renewal ? 'Lease renewal package' : 'Lease application package'} — ${stayRef}`
       : `Guest registration — ${stayRef}`);
     const text = c.pathType === 'full'
-      ? `Dear Example Property Management / Example Condominium,\n\nPlease find attached the complete ${renewal ? 'lease renewal' : 'lease application'} package for the upcoming rental:\n\n${stayRef}\n\nAttached as four separately reviewable PDF components:\n1. Application for Lease of Condominium\n2. Background Check Authorization (signed by each adult applicant)\n3. Rules & Regulations with signed acknowledgment\n4. Short-Term Residential Lease Agreement (signed by tenant(s) and owner)\n\nThe applicants have reviewed the Rules and Regulations and signed the attached acknowledgment. Photo IDs have been provided through the association's secure channel. ${feeText}\n\nPlease confirm receipt and let us know once the file proceeds to Board approval.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D / 6219 Palma Del Mar Blvd S${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`
+      ? `Dear Example Property Management / Example Condominium,\n\nPlease find attached the local paper-route documents for the upcoming ${renewal ? 'lease renewal' : 'lease application'}:\n\n${stayRef}\n\nAttached as four separately reviewable PDF components:\n1. Application for Lease of Condominium\n2. Background Check Authorization (signed by each adult applicant)\n3. Rules & Regulations with signed acknowledgment\n4. Short-Term Residential Lease Agreement (signed by tenant(s) and owner)\n\nThe applicants have reviewed the Rules and Regulations and signed the attached acknowledgment. Completion of the association's separate official screening has been confirmed in the owner workflow; sensitive screening data is not included in these attachments. Photo IDs have been provided through the association's secure channel. ${feeText}\n\nPlease confirm receipt and let us know once the file proceeds to Board approval.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D / 6219 Palma Del Mar Blvd S${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`
       : `Dear Example Property Management / Example Condominium,\n\nPlease find attached the completed Guest Registration for:\n\n${stayRef}\n\nSigned by the guest and by me as unit owner. Please confirm receipt.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`;
     const recipients = submissionRecipients();
     await sendViaGmail(env, {
