@@ -307,7 +307,7 @@ function adminPage(title, active, headerHtml, bodyHtml) {
 }
 
 // ---------- views ----------
-const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Example Island, St. Petersburg, Florida. Fully furnished for monthly stays (30+ nights): in-unit washer & dryer, dishwasher, full kitchen, fast 700-Mbit internet, community pool, smart-lock self-check-in. Minutes from St. Pete Beach, Fort De Soto Park and downtown St. Petersburg. Booking exclusively via Airbnb.';
+const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Example Island, St. Petersburg, Florida. Fully furnished for monthly stays (30+ nights): in-unit washer & dryer, dishwasher, full kitchen, fast internet up to 700 Mbps, community pool, smart-lock self-check-in. Minutes from St. Pete Beach, Fort De Soto Park and downtown St. Petersburg. Booking exclusively via Airbnb.';
 const HOME_FAQ = [
   ['Can I book the condo on this website?',
    'No — booking runs exclusively through Airbnb (airbnb.com/rooms/DEMOID0002). This site is the official companion portal that handles the condominium association\'s approval paperwork after you book.'],
@@ -376,8 +376,8 @@ function landingView() {
      <div class="card"><h2>The home</h2>
       <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
       <ul class="steps" style="font-size:15px">
-        <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished, minimum 30 nights — ideal for snowbirds, travel professionals and remote workers. Flexible early check-out is fine.</span></div></li>
-        <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast 700-Mbit internet, smart-lock self-check-in, community pool.</span></div></li>
+        <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished for genuine stays of at least 30 nights — ideal for snowbirds, travel professionals and remote workers. The condo remains available to the guest for the full reserved term.</span></div></li>
+        <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast internet up to 700 Mbps, smart-lock self-check-in, community pool.</span></div></li>
         <li><div><b>The location</b><br><span class="muted">10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals; about 30 minutes to Tampa International Airport.</span></div></li>
         <li><div><b>Good to know</b><br><span class="muted">No pets (association rule) and no smoking. Every rental needs the association's approval — that's exactly what this portal takes care of.</span></div></li>
       </ul>
