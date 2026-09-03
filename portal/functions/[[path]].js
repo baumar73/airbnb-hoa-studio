@@ -3,8 +3,11 @@
 // Admin: HTTP Basic Auth (env ADMIN_USER / ADMIN_PASSWORD).
 import { fillLeaseApplication, fillGuestRegistration, splitLeaseApplicationPackage, buildRulesAcknowledgment } from './lib/fill.js';
 import { generateLeaseAgreement } from './lib/lease.js';
+import { generateFloodDisclosure } from './lib/flood.js';
 import { submitApprovedPackage, isReadyForOwnerReview, docStates } from './lib/submit.js';
 import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isGuestPaperworkComplete } from './lib/workflow.js';
+import { COMPLIANCE_POLICY_VERSION, HOA_SOURCE_PACKET, adverseActionNotice, isAnnualRental, isSameLesseeRenewal, liveComplianceState } from './lib/compliance.js';
+import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases } from './lib/storage.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
 
@@ -58,8 +61,7 @@ function newCase(input) {
 
 // ---------- storage ----------
 async function loadCases(env) {
-  const raw = await env.CASES.get('cases');
-  const cases = raw ? JSON.parse(raw) : [];
+  const cases = await loadStoredCases(env);
   return cases.map(c => {
     const template = STEP_TEMPLATES[c.pathType] || STEP_TEMPLATES.full;
     const previous = new Map((c.steps || []).map(step => [step.id, step]));
@@ -77,7 +79,11 @@ async function loadCases(env) {
   });
 }
 async function saveCases(env, cases) {
-  await env.CASES.put('cases', JSON.stringify(cases));
+  await saveStoredCases(env, cases);
+}
+
+async function loadComplianceConfig(env) {
+  return JSON.parse((await env.CASES.get('compliance-config')) || '{}');
 }
 
 // ---------- helpers ----------
@@ -114,11 +120,15 @@ async function sha256hex(s) {
 function reviewPayload(c, wizard, includeSignatures) {
   const cleanAdults = ((wizard && wizard.adults) || []).map(a => {
     const copy = { ...a };
-    if (!includeSignatures) delete copy.sigPng;
+    if (!includeSignatures) {
+      delete copy.sigPng;
+      delete copy.signatureAudit;
+    }
     return copy;
   });
   return {
-    case: { id: c.id, reservationCode: c.reservationCode, checkIn: c.checkIn, checkOut: c.checkOut, adults: c.adults, pathType: c.pathType },
+    case: { id: c.id, reservationCode: c.reservationCode, checkIn: c.checkIn, checkOut: c.checkOut, adults: c.adults, pathType: c.pathType,
+      applicationType: c.applicationType || 'lease', sameLesseesConfirmed: c.sameLesseesConfirmed === true },
     wizard: {
       adults: cleanAdults,
       esignConsent: !!(wizard && wizard.esignConsent),
@@ -275,7 +285,7 @@ function page(title, headerHtml, bodyHtml, opts) {
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
 <title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body>
 <header><div class="wrap"><p class="brand">Example Island <b>· Unit 405D</b> — Guest Approval</p>${headerHtml}</div></header><main>${bodyHtml}</main>
-<footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a></footer>
+<footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a> · <a href="/fair-housing">Fair housing &amp; accommodations</a></footer>
 </body></html>`;
 }
 
@@ -308,9 +318,9 @@ const HOME_FAQ = [
   ['How long does the approval take?',
    'The association asks applicants to allow up to 15 days after every required application, screening, document and payment item arrives. Complete your chosen route early; your personal status page shows live progress.'],
   ['What is the $100 fee?',
-   'The association charges a non-refundable $100 application fee. Online-route applicants pay inside Tenant Evaluation; paper-route applicants use check or money order. Your private status page shows only the instructions for your chosen route.'],
+   'The current association application packet lists a non-refundable $100 paper-application fee. It is shown only when the governing documents authorize it; Florida law prohibits an application or transfer fee for a renewal with the same lessee. Online-route applicants follow Tenant Evaluation.'],
   ['Are pets allowed?',
-   'No — the association does not permit pets for renters. The home is also non-smoking.'],
+   'The association does not permit pets for renters, and the home is non-smoking. Service animals and other approved assistance animals are not pets and are handled under applicable fair-housing law and Airbnb policy.'],
   ['Can my AI assistant help me with the paperwork?',
    'Yes. Your personal page has a "Copy briefing for your AI assistant" button that hands ChatGPT, Claude or any other assistant everything it needs — only the signature must remain yours.'],
 ];
@@ -396,7 +406,14 @@ function guestProgressSteps(c) {
   return c.steps.filter(step => visible.has(step.id));
 }
 
-function statusView(c) {
+function feeRequestReleased(c, compliance) {
+  return applicationFeeState(c) !== 'required' || Boolean(
+    String(compliance && compliance.feeAuthorityCitation || '').trim() &&
+    String(compliance && compliance.airbnbFeeDisclosureVerifiedAt || '').trim()
+  );
+}
+
+function statusView(c, compliance) {
   const progressSteps = guestProgressSteps(c);
   const total = progressSteps.length, done = progressSteps.filter(s => s.done).length;
   const pct = Math.round(done / total * 100);
@@ -409,15 +426,12 @@ function statusView(c) {
                   : `<span class="pill teal">${days} days until check-in</span>`))
     + (c.submission ? ` <span class="pill ok">paperwork submitted to the association ${esc(c.submission.sentAt.slice(0,10))}</span>` : '');
   const feeState = applicationFeeState(c);
-  const feeBlock = feeState === 'waiver_pending' ? `
-    <div class="card"><h2>Renewal fee review</h2>
-      <p><span class="pill teal">Returning tenants confirmed</span></p>
-      <p>Your prior Board approval is on file. We are asking the association to confirm whether it will waive the $100 application fee under its returning-tenant rule. <b>Please do not mail another payment unless we tell you the waiver was declined.</b></p>
-    </div>` : feeState === 'waived' ? `
+  const feeBlock = feeState === 'prohibited_same_lessee_renewal' ? `
     <div class="card"><h2>Renewal fee</h2>
-      <p><span class="pill ok">$100 fee waived by the association</span></p>
-      <p>No additional application-fee payment is required for this renewal.</p>
-    </div>` : feeState === 'required' ? `
+      <p><span class="pill ok">No application fee for this same-lessee renewal</span></p>
+      <p>Florida Statutes section 718.112(2)(k) prohibits an association transfer/application fee for a renewal with the same lessee. This is not a discretionary waiver. No $100 payment is requested for this renewal.</p>
+    </div>` : feeState === 'required' && !feeRequestReleased(c, compliance) ? `
+    <div class="card"><h2>Association application fee</h2><p><span class="pill warn">Payment instructions are not released</span></p><p>Owner is verifying both the association's recorded authority and Airbnb's mandatory-fee disclosure requirements. Do not mail a check or make an off-platform payment unless the instructions later appear here and match the Airbnb price breakdown.</p></div>` : feeState === 'required' ? `
     <div class="card"><h2>The $100 association fee</h2>
       <p>This <b>non-refundable $100 application fee</b> consists of a $50 community fee and a $50 document-processing fee. Pay by <b>check or money order only</b> (no cards), made out to <b>"Example Condominium"</b>. Mail it with a short note (unit 405D, your name, rental dates${c.reservationCode ? ', reservation ' + esc(c.reservationCode) : ''}) to:</p>
       <div class="addr">Example Condominium Association, Inc.
@@ -491,6 +505,7 @@ St. Petersburg, FL 33716</div>
      <div class="card"><h2>You're all set 🎉</h2>
        <p>The board has approved your stay. Your check-in details (door codes, arrival guide) will reach you well before arrival — usually via Airbnb chat. Safe travels, and see you at Example Island!</p>
      </div>` : ''}
+     ${c.submission ? `<div class="card"><h2>Your executed documents</h2><p><a class="btn ghost" href="/v/${c.token}/executed-lease.pdf">Download the final signed lease</a>${isAnnualRental(c) ? ` <a class="btn ghost" href="/v/${c.token}/executed-flood-disclosure.pdf">Download the flood disclosure</a>` : ''}</p><p class="muted">Keep copies for your records. The lease includes the required radon notice and the electronic-signature audit reference.</p></div>` : ''}
      <div class="card"><h2>Good to know</h2>
        <ul class="steps" style="font-size:15px">
          <li><div><b>Why all this paperwork?</b><br><span class="muted">The condominium association (HOA) requires board approval for every rental — it applies to all owners in the building, not just this one. We've made it as painless as we can.</span></div></li>
@@ -503,7 +518,7 @@ St. Petersburg, FL 33716</div>
 }
 
 // ---------- AI-assistant briefing (guests may share this with their own assistant) ----------
-function guestBrief(c) {
+function guestBrief(c, compliance = {}) {
   const isFull = c.pathType === 'full';
   const route = isFull ? (c.screeningRoute || 'undecided') : 'paper';
   const progress = guestProgressSteps(c);
@@ -554,7 +569,7 @@ ${route === 'paper' ? `Private local-form link (do not publish): https://portal.
 ${fields}
 - ${route === 'paper' ? 'E-sign consent and drawn signature must be completed personally on the local form page. Drafts can be saved and continued later.' : route === 'online' ? 'Report completion on the private status page after submitting Tenant Evaluation.' : 'Choose Online or Paper on the private route page before starting.'}
 - This site never asks for Social Security numbers or photo-ID uploads. Any sensitive official-screening data belongs only in the association's approved external process.
-${isFull && route === 'paper' ? `
+${isFull && route === 'paper' && !isSameLesseeRenewal(c) && feeRequestReleased(c, compliance) ? `
 ## The non-refundable $100 association fee (paid by the guest)
 - $50 community fee plus $50 document-processing fee.
 - For the paper route: check or money order (online-route applicants pay in Tenant Evaluation instead).
@@ -563,7 +578,7 @@ ${isFull && route === 'paper' ? `
 - Mail to: Example Condominium Association, Inc.,
   c/o Example Property Management, Inc., 200 Management Road, Example City, FL 00000
 - ${c.feeMailed ? `The guest reported the check as mailed on ${c.feeMailed.slice(0, 10)}; receipt is being tracked.` : 'Once the envelope is in the mail, the guest should tap "I\'ve mailed the check" on the status page.'}
-` : ''}
+` : isSameLesseeRenewal(c) ? '\n## Application fee\n- This is recorded as a renewal with exactly the same lessee(s); no transfer/application fee may be charged under Florida Statutes section 718.112(2)(k).\n' : isFull && route === 'paper' ? '\n## Application fee\n- Payment instructions are not released while Owner verifies the association authority and Airbnb price-breakdown requirements. Do not make an off-platform payment.\n' : ''}
 ## Timeline & contact
 - Allow up to 15 days after every required application, screening, document and payment item arrives. Complete everything early.
 - Live status page (private): https://portal.example.test/v/${c.token}
@@ -731,12 +746,19 @@ function wizardView(c, saved) {
     </div>`;
   const rulesSection = isFull ? `
     <div class="card"><h2>Rules &amp; Regulations</h2>
-      <p>Please open and review the association's <a href="/forms/rules-and-regulations.pdf" target="_blank" rel="noopener">Rules &amp; Regulations (PDF)</a> before signing.</p>
+      <p>Please open and review the association's <a href="/forms/rules-and-regulations.pdf" target="_blank" rel="noopener">current Rules &amp; Regulations (PDF)</a> before signing. The owner workflow records the exact rules version used for this application.</p>
       <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
         <input type="checkbox" name="rules_acknowledged" value="yes" style="width:auto;margin-top:4px" ${w.rulesAcknowledged ? 'checked' : ''} required>
         <span>I have reviewed the Rules &amp; Regulations and agree to comply with them during the stay.</span>
       </label>
-    </div>` : '';
+    </div>
+    ${isAnnualRental(c) ? `<div class="card"><h2>Florida flood disclosure</h2>
+      <p>This stay is at least one year, so Florida law requires a separate flood disclosure. Open the read-only preview after saving and keep the executed copy provided after Owner release.</p>
+      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
+        <input type="checkbox" name="flood_disclosure_acknowledged" value="yes" style="width:auto;margin-top:4px" ${w.floodDisclosureAcknowledged ? 'checked' : ''} required>
+        <span>I understand that a separate Florida flood disclosure will be part of the agreement package.</span>
+      </label>
+    </div>` : ''}` : '';
   const signedCount = adults.filter(x => x && x.sigPng).length;
   const downloads = w.savedAt ? `
     <div class="card"><h2>Read-only PDF previews — not editable</h2>
@@ -746,7 +768,8 @@ function wizardView(c, saved) {
         ? `<a class="btn" href="/w/${c.token}/pdf/lease-application">1. Lease Application</a>
            <a class="btn ghost" href="/w/${c.token}/pdf/background-authorization">2. Background Authorization</a>
            <a class="btn ghost" href="/w/${c.token}/pdf/rules-and-regulations">3. Rules &amp; acknowledgment</a>
-           <a class="btn ghost" href="/w/${c.token}/pdf/lease-agreement">4. Lease Agreement</a>`
+           <a class="btn ghost" href="/w/${c.token}/pdf/lease-agreement">4. Lease Agreement</a>
+           ${isAnnualRental(c) ? `<a class="btn ghost" href="/w/${c.token}/pdf/flood-disclosure">5. Flood Disclosure</a>` : ''}`
         : `<a class="btn" href="/w/${c.token}/pdf/guest-registration">Guest Registration (PDF)</a>`}
       </p>
     </div>` : '';
@@ -762,7 +785,7 @@ function wizardView(c, saved) {
       <input type="hidden" name="a${i}_sig" value="">
       <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
         <input type="checkbox" name="a${i}_esign_consent" value="yes" ${adults[i] && adults[i].esignConsent ? 'checked' : ''} required>
-        <span>Adult ${i + 1} confirms this is their own legal electronic signature and agrees it may be applied to the four listed HOA documents.</span>
+        <span>Adult ${i + 1} confirms this is their own signature, consents to transact electronically, intends the signature to have the same legal effect as a handwritten signature, and authorizes it for the listed HOA and lease documents. Copies can be downloaded and printed. A paper alternative may be requested through Airbnb before signing.</span>
       </label>`).join('')}
     </div>`;
   const sigScript = `
@@ -805,7 +828,8 @@ function wizardView(c, saved) {
      ${sigScript}`);
 }
 
-function settingsView(hasSig, liveMode, msg) {
+function settingsView(hasSig, liveMode, msg, compliance, complianceState) {
+  const cfg = compliance || {};
   return adminPage('Einstellungen — Demo Unit Admin', '/admin/settings',
     `<h1>Einstellungen</h1><p>Automatik, Unterschrift und Zugänge — alles, was das System am Laufen hält.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card"><h2>Versandmodus nach deiner Freigabe</h2>
@@ -819,7 +843,42 @@ function settingsView(hasSig, liveMode, msg) {
           <button class="small ${liveMode ? 'ghost' : ''}">${liveMode ? 'Auf Testmodus zurückschalten' : 'LIVE-Versand aktivieren'}</button>
         </form>
       </p>
-      <p class="muted">Der Gast kann Daten und Signaturen nur vorbereiten. Die automatisierte Qualitätsprüfung kontrolliert das aktuelle Vier-Dokumente-Paket; danach bestätigst du den grünen Bericht und löst den Versand mit einem eigenen Bestätigungsklick aus. Ohne diese Owner-Freigabe wird niemals an die Verwaltung gesendet. LIVE darf erst aktiviert werden, wenn der sichere Übermittlungsweg für die Ausweiskopien verbindlich bestätigt und im jeweiligen Vorgang belegt ist. Du bekommst je Versand eine Telegram-Nachricht — und einen 🚨-Alarm, wenn etwas hakt.</p>
+      <p class="muted">Der Gast kann Daten und Signaturen nur vorbereiten. Die automatisierte Qualitätsprüfung kontrolliert das aktuelle Paket (bei Jahresmieten einschließlich separater Hochwasser-Offenlegung); danach bestätigst du den grünen Bericht und löst den Versand mit einem eigenen Bestätigungsklick aus. Ohne diese Owner-Freigabe wird niemals an die Verwaltung gesendet. LIVE darf erst aktiviert werden, wenn der sichere Übermittlungsweg für die Ausweiskopien verbindlich bestätigt und im jeweiligen Vorgang belegt ist. Du bekommst je Versand eine Telegram-Nachricht — und einen 🚨-Alarm, wenn etwas hakt.</p>
+    </div>
+    <div class="card"><h2>Florida-/HOA-Compliance-Sperre</h2>
+      ${complianceState.ok ? '<p><span class="pill ok">Pflichtangaben vollständig</span></p>' : `<div class="attn crit"><b>LIVE gesperrt.</b> Es fehlen: ${esc(complianceState.missing.join(', '))}.</div>`}
+      <p class="muted">Referenzpaket: ${esc(HOA_SOURCE_PACKET.title)}, Portal-Dokument ${HOA_SOURCE_PACKET.portalDocumentId}, Download ${HOA_SOURCE_PACKET.downloadedAt}, SHA-256 ${HOA_SOURCE_PACKET.sha256}. Bestätigt daraus: 1 Monat Mindestdauer, Antrag ab 18, keine Mieter-Haustiere, $100 Papiergebühr und Board-Freigabe vor Besitzübernahme. Das Antragsformular ersetzt nicht den Nachweis in Declaration/Articles/Bylaws.</p>
+      <form method="post" action="/admin/compliance">
+        <label>Vermieter-/Zustellanschrift für Mitteilungen nach Fla. Stat. §83.50 *</label><textarea name="landlordNoticeAddress" rows="2" required>${esc(cfg.landlordNoticeAddress || '')}</textarea>
+        <label>Verifizierungsdatum der aktuellen Declaration, Articles, Bylaws und Amendments *</label><input type="date" name="governingDocumentsVerifiedAt" value="${esc(cfg.governingDocumentsVerifiedAt || '')}" required>
+        <label>Fundstelle der eingetragenen Genehmigungsbefugnis *</label><input name="approvalAuthorityCitation" value="${esc(cfg.approvalAuthorityCitation || '')}" placeholder="z. B. Declaration Art. …, OR Book/Page …" required>
+        <label>Fundstelle der eingetragenen Gebührenbefugnis *</label><input name="feeAuthorityCitation" value="${esc(cfg.feeAuthorityCitation || '')}" placeholder="Declaration/Articles/Bylaws + OR Book/Page">
+        <label>Airbnb-Preisaufschlüsselung/Gebührenfeld für die verpflichtende HOA-Gebühr geprüft am *</label><input type="date" name="airbnbFeeDisclosureVerifiedAt" value="${esc(cfg.airbnbFeeDisclosureVerifiedAt || '')}" required>
+        <p class="muted">Ein Hinweis nur in Beschreibung oder Hausregeln genügt nach Airbnbs aktueller Fee-Transparency-Policy nicht. Die Pflichtgebühr muss im passenden Gebührenfeld bzw. im Übernachtungspreis enthalten sein; eine externe Einziehung ist nur zulässig, wenn Airbnb den Host dafür ausdrücklich autorisiert.</p>
+        <label>Aktuelle Rules-Version / Beschlussdatum *</label><input name="rulesVersion" value="${esc(cfg.rulesVersion || '')}" required>
+        <h3>Consumer-Report-Auskunft (nur falls eine Entscheidung auf einem Screeningbericht beruht)</h3>
+        <label>Name der Consumer Reporting Agency</label><input name="craName" value="${esc(cfg.craName || '')}" placeholder="z. B. Tenant Evaluation / ausführende CRA">
+        <label>Anschrift der Consumer Reporting Agency</label><textarea name="craAddress" rows="2">${esc(cfg.craAddress || '')}</textarea>
+        <label>Telefon der Consumer Reporting Agency</label><input name="craPhone" value="${esc(cfg.craPhone || '')}">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div><label>HOA bestätigt Portal-E-Signaturen am *</label><input type="date" name="hoaESignAcceptedAt" value="${esc(cfg.hoaESignAcceptedAt || '')}" required></div>
+          <div><label>Datenschutz-/Breach-Plan geprüft am *</label><input type="date" name="privacySecurityReviewedAt" value="${esc(cfg.privacySecurityReviewedAt || '')}" required></div>
+          <div><label>Fair-Housing-Prozess geprüft am *</label><input type="date" name="fairHousingReviewedAt" value="${esc(cfg.fairHousingReviewedAt || '')}" required></div>
+        </div>
+        <h3>Nur für Mietverträge ab einem Jahr: Angaben für Fla. Stat. §83.512</h3>
+        ${[['floodDamageKnown','Kenntnis von schädigendem Hochwasser während Eigentumszeit'],['floodClaimFiled','Versicherungsclaim wegen Hochwasserschaden gestellt'],['floodAssistanceReceived','Hochwasserhilfe einschließlich FEMA erhalten']].map(([name,label]) => `<label>${label}</label><select name="${name}"><option value="">Nicht festgelegt</option><option value="yes" ${cfg[name] === 'yes' ? 'selected' : ''}>Ja</option><option value="no" ${cfg[name] === 'no' ? 'selected' : ''}>Nein</option></select>`).join('')}
+        <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400"><input type="checkbox" name="attest" value="yes" required><span>Ich bestätige, dass die Fundstellen anhand der aktuellen Originalunterlagen geprüft wurden. Das $100-Antragsformular allein ist kein Nachweis der satzungsmäßigen Gebührenbefugnis.</span></label>
+        <p><button>Compliance-Angaben speichern</button></p>
+      </form>
+    </div>
+    <div class="card"><h2>Einheitliche Antworten auf Fair-Housing-Anfragen</h2>
+      <p class="muted">Immer wortgleich und nur über Airbnb antworten; keine Vermutung über Motive, keine Angaben zur ethnischen Zusammensetzung von Gästen oder Nachbarschaft und keine medizinischen Unterlagen im Portal speichern.</p>
+      <label>Frage nach Hautfarbe, Herkunft oder „vermietest du an …?“</label>
+      <textarea id="race-response" rows="5" readonly>I welcome qualified guests without regard to race, color, national origin, religion, sex, familial status, disability, or any other characteristic protected by law. Availability and applications are handled under the same neutral booking, occupancy, and condominium-association requirements for every guest. I do not provide information about the race or other protected characteristics of past, current, or prospective guests or neighbors.</textarea>
+      <button type="button" class="small ghost copy-template" data-copy="race-response">Antwort kopieren</button>
+      <label>Service Animal / Assistance Animal / Emotional Support Animal</label>
+      <textarea id="animal-response" rows="8" readonly>Service animals and other assistance animals are not treated as pets. I handle reasonable-accommodation requests under applicable fair-housing law and Airbnb policy even though the condominium otherwise has a no-pets rule. Please state that you are requesting a reasonable accommodation and describe the accommodation requested; do not send a diagnosis or medical records in this chat or portal. No particular certificate or registration is required, and breed, size, or weight alone is not a reason for denial. If the disability and disability-related need are not apparent, I may request only reliable information permitted by law. No pet fee or animal deposit will be charged for an approved assistance animal. Any direct-threat or property-damage issue is evaluated individually, based on the specific animal and whether another accommodation can reduce the risk.</textarea>
+      <button type="button" class="small ghost copy-template" data-copy="animal-response">Antwort kopieren</button>
     </div>
     <div class="card"><h2>Deine Unterschrift</h2>
       ${hasSig
@@ -854,7 +913,32 @@ function settingsView(hasSig, liveMode, msg) {
       const resp = await fetch('/admin/signature', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: cv.toDataURL('image/png') });
       document.getElementById('msg').textContent = resp.ok ? 'Gespeichert ✓ — wird ab sofort eingesetzt.' : 'Fehler beim Speichern.';
     };
+    document.querySelectorAll('.copy-template').forEach(button => button.addEventListener('click', async () => {
+      const field = document.getElementById(button.dataset.copy);
+      await navigator.clipboard.writeText(field.value);
+      button.textContent = 'Kopiert ✓';
+    }));
     </script>`);
+}
+
+function adverseActionView(c, compliance, msg) {
+  const prepared = c.adverseAction;
+  return adminPage('Adverse Action — Demo Unit Admin', '/admin/cases',
+    `<h1>Adverse-Action-Hinweis</h1><p>${esc(c.guestName)} · ${esc(c.checkIn)} bis ${esc(c.checkOut)}${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<div class="attn crit"><b>Nicht automatisch versenden.</b> Dieses Werkzeug erstellt nur einen Entwurf, wenn eine nachteilige Entscheidung ganz oder teilweise auf einem Consumer Report beruht. Die konkrete Entscheidung muss sachlich, einzelfallbezogen und fair-housing-konform geprüft werden.</div>
+     <div class="card"><h2>Entwurf erstellen</h2>
+       <form method="post" action="/admin/adverse-action">
+         <input type="hidden" name="id" value="${esc(c.id)}">
+         <label>Maßnahme</label><select name="action"><option value="rental application denied">Antrag abgelehnt</option><option value="additional condition imposed">Zusätzliche Bedingung verlangt</option></select>
+         <label>CRA-Name</label><input name="craName" value="${esc(compliance.craName || '')}" required>
+         <label>CRA-Anschrift</label><textarea name="craAddress" rows="2" required>${esc(compliance.craAddress || '')}</textarea>
+         <label>CRA-Telefon</label><input name="craPhone" value="${esc(compliance.craPhone || '')}" required>
+         <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400"><input type="checkbox" name="reportBased" value="yes" required><span>Die Maßnahme beruht ganz oder teilweise auf diesem Consumer Report.</span></label>
+         <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400"><input type="checkbox" name="fairHousingReviewed" value="yes" required><span>Ich habe die Entscheidung auf konsistente Kriterien, Fair Housing und mögliche Reasonable Accommodations geprüft.</span></label>
+         <p><button>Entwurf erstellen</button></p>
+       </form>
+     </div>
+     ${prepared ? `<div class="card"><h2>Vorbereiteter Hinweis</h2><p class="muted">Erstellt ${esc(prepared.preparedAt)} von ${esc(prepared.preparedBy)}. Manuelle rechtliche/inhaltliche Prüfung und Zustellung erforderlich.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(prepared.notice)}</pre></div>` : ''}`);
 }
 
 // ---------- library ----------
@@ -1091,7 +1175,7 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
     else if (c.screeningRoute !== 'online' && !c.submission && !c.submissionError) attn.push(['warn', `${who}: Daten liegen vor — Vollständigkeit und Signaturen prüfen, danach den Versand ausdrücklich freigeben.`, '/admin/cases', 'Zum Vorgang']);
     const caseFeeState = applicationFeeState(c);
     if (caseFeeState === 'required' && c.wizard && !c.feeMailed && !isDone(c, 'fee_sent')) attn.push(['warn', `${who}: $100-Scheck noch nicht als versandt gemeldet.`, '/admin/cases', 'Zum Vorgang']);
-    if (caseFeeState === 'waiver_pending') attn.push(['warn', `${who}: Renewal bestätigt; Gebührenbefreiung muss noch durch die HOA bestätigt werden.`, '/admin/cases', 'Zum Vorgang']);
+    if (caseFeeState === 'prohibited_same_lessee_renewal') attn.push(['ok', `${who}: gleiche Mieter bei Verlängerung bestätigt — keine Transfer-/Antragsgebühr zulässig.`, '/admin/cases', 'Zum Vorgang']);
     if (c.submission && !isDone(c, 'board_approved')) attn.push(['ok', `${who}: Paket eingereicht am ${esc(c.submission.sentAt.slice(0, 10))} — wartet auf das Board.`, '/admin/cases', 'Zum Vorgang']);
   }
   const attnHtml = attn.length
@@ -1206,7 +1290,7 @@ function contactsView(contacts, msg) {
      </script>`);
 }
 
-function casesView(cases, msg, ownerSigOnFile, liveMode) {
+function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
   const HOA_TO = 'contact005@example.test';
   const HOA_CC = 'contact006@example.test';
   const gmail = (to, cc, subject, body) =>
@@ -1228,10 +1312,8 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
         <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="screening_complete">
         <button class="small ${screeningStep.done ? '' : 'ghost'}">${screeningStep.done ? '✓ Tenant Evaluation bestätigt' : 'Tenant Evaluation nach HOA-Prüfung bestätigen'}</button>
       </form>` : '';
-    const feeState = feeMode === 'waiver_pending'
-      ? `<span class="pill warn">renewal: fee waiver pending HOA confirmation</span>`
-      : feeMode === 'waived'
-        ? `<span class="pill ok">renewal fee waived</span>`
+    const feeState = feeMode === 'prohibited_same_lessee_renewal'
+      ? `<span class="pill ok">same-lessee renewal: no application/transfer fee</span>`
         : feeMode === 'handled_online'
           ? `<span class="pill teal">fee handled in Tenant Evaluation</span>`
           : feeMode === 'route_required'
@@ -1239,10 +1321,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
         : feeMode === 'required' && c.feeMailed
           ? `<span class="pill ok">check mailed ${esc(c.feeMailed.slice(0,10))}</span>`
           : feeMode === 'required' ? `<span class="pill warn">fee not mailed yet</span>` : '';
-    const mailBtns = feeMode === 'waiver_pending' ? `
-      <a class="btn small ghost" href="${gmail(HOA_TO, HOA_CC, `Unit 405D — Renewal / returning tenants — ${c.checkIn} to ${c.checkOut}`,
-        `Dear Keila,\n\nUtku Günen (approved under the name Tacettin DemoSurnameA) and Kardelen DemoSurnameB have booked Unit 405D again for ${c.checkIn} through ${c.checkOut}. Your May 18, 2026 approval letter approved both tenants.\n\nCould you please confirm whether this should be processed as a RENEWAL and whether the $100 application fee will be waived under the returning-tenant provision in the HOA Rules and Expectations? Please also let me know which updated documents or signatures you require for the new stay.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D`)}"
-        target="_blank" rel="noopener">✉ HOA: Renewal und Gebührenbefreiung bestätigen</a>` : feeMode !== 'required' ? '' : `
+    const mailBtns = feeMode !== 'required' || !feeRequestReleased(c, compliance) ? '' : `
       ${guestEmail ? `<a class="btn small ghost" href="${gmail(guestEmail, '', `Reminder: $100 HOA fee for your stay ${c.checkIn}`,
         `Hi ${c.guestName.split(' ')[0]},\n\nA friendly reminder about the $100 association fee (check or money order payable to "Example Condominium").\n\nMailing address:\nExample Condominium Association, Inc.\nc/o Example Property Management, Inc.\n570 Carillon Parkway, Suite 210\nSt. Petersburg, FL 33716\n\nPlease include a note: ${stayRef}\nOnce mailed, please tap "I've mailed the check" on your status page.\n\nThank you!\nOwner`)}"
         target="_blank" rel="noopener">✉ Gast: Gebühr erinnern</a>` : ''}
@@ -1279,13 +1358,21 @@ function casesView(cases, msg, ownerSigOnFile, liveMode) {
           <button class="small">${liveMode ? 'Grünen KI-Bericht bestätigen und versenden' : 'Grünen KI-Bericht bestätigen und Testpaket erzeugen'}</button>
         </form>` : '<p class="muted">Kein manueller PDF-Abgleich nötig. Der Versand wird erst nach einem grünen OpenAI-KI-Bericht freigeschaltet.</p>'}
       </div>` : '';
+    const classification = c.pathType === 'full' ? `
+      <form method="post" action="/admin/case-classification" style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="hidden" name="id" value="${esc(c.id)}">
+        <select name="applicationType" style="width:auto"><option value="lease" ${(c.applicationType || 'lease') === 'lease' ? 'selected' : ''}>Neuer/anderer Mieter</option><option value="renewal" ${c.applicationType === 'renewal' ? 'selected' : ''}>Verlängerung</option></select>
+        <label style="margin:0;font-weight:400"><input type="checkbox" name="sameLesseesConfirmed" value="yes" ${c.sameLesseesConfirmed ? 'checked' : ''}> exakt dieselben Mieter</label>
+        <button class="small ghost">Einordnen</button>
+      </form>` : '';
     return `<tr>
       <td><b>${esc(c.guestName)}</b><br><span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights}n · ${esc(c.pathType)}</span><br>
           ${c.screeningRoute === 'online' ? '<span class="pill teal">external application — no local wizard required</span>' : c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
           ${feeState}<br>${screeningControl}
-          <span class="muted">${docLine}</span><br>${subLine}${reviewButton}</td>
+          <span class="muted">${docLine}</span><br>${subLine}${classification}${reviewButton}</td>
       <td>${done}/${visibleSteps.length}<br>${stepBtns}<br>${mailBtns}</td>
       <td><a href="/v/${c.token}" target="_blank">/v/${c.token}</a><br>
+          ${c.pathType === 'full' ? `<a href="/admin/adverse-action?id=${encodeURIComponent(c.id)}">Adverse-Action-Hinweis</a><br>` : ''}
           <form method="post" action="/admin/delete" onsubmit="return confirm('Delete case?')" style="display:inline">
             <input type="hidden" name="id" value="${c.id}"><button class="small ghost">delete</button>
           </form></td></tr>`;
@@ -1329,7 +1416,8 @@ export async function onRequest(context) {
 
 
   if (p === '/' && (request.method === 'GET' || request.method === 'HEAD')) return html(landingView(), 200, true);
-  if (p === '/privacy' && request.method === 'GET') return html(page('Privacy — Demo Unit', '<h1>Privacy notice</h1><p>This private portal is operated by Property Owner for the limited purpose of preparing and tracking Example Condominium guest-registration and lease-approval paperwork for Unit 405D.</p>', `<div class="card"><h2>What is collected</h2><p>Booking reference, stay dates, applicant names and contact details, address, birth date and identification details where the association form requires them, electronic consent, signatures, and workflow status. Social Security numbers and ID-image uploads are deliberately not collected through this portal.</p><h2>Why and with whom</h2><p>The information is used only to prepare and quality-check the association forms and, after an explicit owner release, submit the package to Example Property Management / Example Condominium. Cloudflare provides the portal and encrypted application storage. OpenAI processes the purpose-bound application data and generated document text in the United States for automated completeness and consistency review. Google Gmail is used only for an owner-approved submission email. Infrastructure credentials and unrelated personal data are not included in the AI review.</p><h2>Retention and security</h2><p>Active case data is not publicly indexed and private pages are marked no-store. New access links use high-entropy bearer tokens. Active guest case data is deleted from the portal 90 days after checkout unless a concrete legal dispute or mandatory recordkeeping requirement requires a documented exception. Temporary AI-review files are deleted after processing. Minimal non-sensitive audit metadata may be retained.</p><h2>Your choices</h2><p>Do not enter information for another adult or sign on their behalf. To request access, correction, deletion, or an alternative to the portal and automated review, contact Owner through the existing Airbnb conversation before submitting data.</p><p class="muted">Last updated: July 18, 2026.</p>`));
+  if (p === '/privacy' && request.method === 'GET') return html(page('Privacy — Demo Unit', '<h1>Privacy notice</h1><p>This private portal is operated by Property Owner for the limited purpose of preparing and tracking Example Condominium guest-registration and lease-approval paperwork for Unit 405D.</p>', `<div class="card"><h2>What is collected</h2><p>Booking reference, stay dates, applicant names and contact details, address, birth date and identification details where the association form requires them, electronic consent, signatures, signature-event hashes, and workflow status. Raw IP addresses, Social Security numbers, medical information, and ID-image uploads are deliberately not retained through this portal.</p><h2>Why and with whom</h2><p>The information is used only to prepare and quality-check the association forms and, after an explicit owner release, submit the package to Example Property Management / Example Condominium. Cloudflare provides the portal infrastructure. OpenAI processes the purpose-bound application data and generated document text in the United States for automated completeness and consistency review. Google Gmail is used only for an owner-approved submission email. Infrastructure credentials and unrelated personal data are not included in the AI review.</p><h2>Retention and security</h2><p>Sensitive wizard contents, including government-ID numbers and applicant signatures, and the reusable owner signature are encrypted by the application with AES-256-GCM before KV storage. Operational case metadata remains access-controlled but is not represented as application-layer encrypted. Private pages are marked no-store and noindex. Access links use high-entropy bearer tokens and must not be forwarded. Active guest case data is deleted 90 days after checkout unless a documented legal hold or mandatory recordkeeping duty applies. Temporary review files are deleted after processing. If a breach involving covered personal information is determined, the owner workflow requires the Florida Information Protection Act response plan, including notice deadlines and secure disposal.</p><h2>Your choices</h2><p>Do not enter information for another adult or sign on their behalf. To request access, correction, deletion, a paper alternative, or review without automated processing, contact Owner through the existing Airbnb conversation before submitting data.</p><p class="muted">Last updated: September 2, 2026 · policy ${COMPLIANCE_POLICY_VERSION}</p>`));
+  if (p === '/fair-housing' && request.method === 'GET') return html(page('Fair housing — Demo Unit', '<h1>Fair housing and reasonable accommodations</h1><p>Applications are handled consistently and without discrimination prohibited by federal or Florida law.</p>', `<div class="card"><h2>How decisions are made</h2><p>No protected characteristic is used to rank, screen, approve or deny a stay. This portal never automatically approves or denies an applicant. Tenant-screening reports remain in the association's approved external process; any adverse action based on a consumer report requires a separate notice and human review.</p><h2>Assistance animals</h2><p>Service animals and other assistance animals are not pets. A no-pets rule does not by itself bar a reasonable accommodation. No pet fee or animal deposit is charged for an approved assistance animal. A request may be made through the existing Airbnb conversation; please describe the accommodation requested, but do not send a diagnosis or medical records through this portal. No particular certificate or registration is required, and breed, size, or weight alone is not a reason for denial. If both the disability and disability-related need are not apparent, Owner may request only reliable supporting information permitted by law. Any direct-threat or property-damage assessment is individualized and considers whether another accommodation can reduce the risk.</p><h2>Privacy and equal treatment</h2><p>Owner does not disclose or discuss the race, color, national origin, religion, sex, familial status, disability, or other protected characteristics of past, current, or prospective guests or neighbors. Every applicant receives the same neutral booking, occupancy, and condominium-association process information.</p><h2>Corrections</h2><p>If application data is wrong or incomplete, use the private edit link before submission or message Owner. A screening-report dispute must be made with the reporting agency identified in any adverse-action notice.</p></div>`));
   if (p === '/healthz') return new Response('ok', { headers: { 'Content-Type': 'text/plain', ...SEC_HEADERS, 'Cache-Control': 'no-store' } });
   if (p.startsWith('/forms/') || p === '/robots.txt' || p === '/llms.txt' || p === '/sitemap.xml' || p === '/manifest.webmanifest' || p === '/favicon.svg') return env.ASSETS.fetch(request);
 
@@ -1397,7 +1485,7 @@ export async function onRequest(context) {
        <p><a href="/">← back</a></p></div>`), 404);
   }
 
-  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/brief\.txt)?$/);
+  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/brief\.txt|\/executed-lease\.pdf|\/executed-flood-disclosure\.pdf)?$/);
   if (mV) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mV[1]);
@@ -1405,6 +1493,7 @@ export async function onRequest(context) {
     if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
     if (mV[2] === '/fee-mailed' && request.method === 'POST') {
       if (c.screeningRoute !== 'paper') return new Response('paper-route fee action is not available for this case', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      if (!feeRequestReleased(c, await loadComplianceConfig(env))) return new Response('fee action is blocked until recorded authority and Airbnb fee disclosure are verified', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       if (!c.feeMailed) { c.feeMailed = new Date().toISOString(); await saveCases(env, cases); }
       return redirect(`/v/${c.token}`);
     }
@@ -1421,9 +1510,25 @@ export async function onRequest(context) {
       return redirect(`/v/${c.token}`);
     }
     if (mV[2] === '/brief.txt' && request.method === 'GET') {
-      return new Response(guestBrief(c), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store, max-age=0', 'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
+      return new Response(guestBrief(c, await loadComplianceConfig(env)), { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store, max-age=0', 'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
     }
-    if (!mV[2] && request.method === 'GET') return html(statusView(c));
+    if ((mV[2] === '/executed-lease.pdf' || mV[2] === '/executed-flood-disclosure.pdf') && request.method === 'GET') {
+      if (!c.submission || !c.wizard) return new Response('executed documents are available only after live owner release', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      if (mV[2] === '/executed-flood-disclosure.pdf' && !isAnnualRental(c)) return new Response('flood disclosure not required for this term', { status: 404, headers: SEC_HEADERS });
+      const compliance = await loadComplianceConfig(env);
+      const ownerSigPng = await getEncryptedSecret(env, 'owner-signature-png');
+      const data = { checkIn: c.checkIn, checkOut: c.checkOut, reservationCode: c.reservationCode,
+        applicationType: c.applicationType || 'lease', ownerSigPng, preview: false,
+        todayISO: c.ownerApprovedAt.slice(0, 10), reviewHash: c.ownerApprovedReviewHash,
+        landlordNoticeAddress: compliance.landlordNoticeAddress,
+        floodDamageKnown: compliance.floodDamageKnown, floodClaimFiled: compliance.floodClaimFiled,
+        floodAssistanceReceived: compliance.floodAssistanceReceived, ...c.wizard };
+      const bytes = mV[2] === '/executed-lease.pdf' ? await generateLeaseAgreement(data) : await generateFloodDisclosure(data);
+      return new Response(bytes, { headers: { 'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${mV[2].slice(1)}"`, 'Cache-Control': 'private, no-store, max-age=0',
+        'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
+    }
+    if (!mV[2] && request.method === 'GET') return html(statusView(c, await loadComplianceConfig(env)));
   }
 
   const mRoute = p.match(/^\/w\/([A-Za-z0-9_-]{6,})\/route$/);
@@ -1458,7 +1563,7 @@ export async function onRequest(context) {
     return redirect(`/w/${c.token}`);
   }
 
-  const mW = p.match(/^\/w\/([A-Za-z0-9_-]{6,})(\/pdf\/(lease-application|background-authorization|rules-and-regulations|guest-registration|lease-agreement))?$/);
+  const mW = p.match(/^\/w\/([A-Za-z0-9_-]{6,})(\/pdf\/(lease-application|background-authorization|rules-and-regulations|guest-registration|lease-agreement|flood-disclosure))?$/);
   if (mW) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mW[1]);
@@ -1487,7 +1592,9 @@ export async function onRequest(context) {
       const nextWizard = {
         adults,
         esignConsent: adults.length === c.adults && adults.every(a => a.esignConsent),
+        esignConsentVersion: 'fl-2026.09.02',
         rulesAcknowledged: c.pathType !== 'full' || g('rules_acknowledged') === 'yes',
+        floodDisclosureAcknowledged: !isAnnualRental(c) || g('flood_disclosure_acknowledged') === 'yes',
         auto: { make: g('auto_make'), year: g('auto_year'), plate: g('auto_plate') },
         references: [0,1].map(i => ({ name: g(`ref${i}_name`), phone: g(`ref${i}_phone`), address: g(`ref${i}_address`) })),
         emergency: [0,1].map(i => ({ name: g(`em${i}_name`), phone: g(`em${i}_phone`) })),
@@ -1498,10 +1605,19 @@ export async function onRequest(context) {
       const previousReviewHash = prevWizard ? (c.reviewHash || await reviewDigest(c, prevWizard, true)) : null;
       const nextContentHash = await reviewDigest(c, nextWizard, false);
       const materialChange = !!prevWizard && previousContentHash !== nextContentHash;
+      const auditSalt = String(env.AUDIT_HASH_SALT || env.DATA_ENCRYPTION_KEY || 'unconfigured-audit-salt');
+      const networkHash = await sha256hex(`${auditSalt}:network:${request.headers.get('CF-Connecting-IP') || 'unknown'}`);
+      const userAgentHash = await sha256hex(`${auditSalt}:browser:${request.headers.get('User-Agent') || 'unknown'}`);
       nextWizard.adults.forEach((a, i) => {
-        if (removeSigs[i]) a.sigPng = null;
-        else if (explicitSigs[i]) a.sigPng = explicitSigs[i];
-        else a.sigPng = materialChange ? null : ((prevAdults[i] && prevAdults[i].sigPng) || null);
+        if (removeSigs[i]) { a.sigPng = null; a.signatureAudit = null; }
+        else if (explicitSigs[i]) {
+          a.sigPng = explicitSigs[i];
+          a.signatureAudit = { signedAt: savedAt, contentHash: nextContentHash, networkHash, userAgentHash, consentVersion: 'fl-2026.09.02' };
+        } else if (materialChange) { a.sigPng = null; a.signatureAudit = null; }
+        else {
+          a.sigPng = (prevAdults[i] && prevAdults[i].sigPng) || null;
+          a.signatureAudit = (prevAdults[i] && prevAdults[i].signatureAudit) || null;
+        }
       });
       c.wizard = nextWizard;
       c.contentHash = nextContentHash;
@@ -1537,8 +1653,14 @@ export async function onRequest(context) {
     if (mW[2] && request.method === 'GET') {
       if (!c.wizard) return redirect(`/w/${c.token}`);
       const doc = mW[3];
+      if (doc === 'flood-disclosure' && !isAnnualRental(c)) return new Response('flood disclosure not required for this term', { status: 404, headers: SEC_HEADERS });
+      const compliance = await loadComplianceConfig(env);
       const data = { checkIn: c.checkIn, checkOut: c.checkOut, reservationCode: c.reservationCode,
-        applicationType: c.applicationType || 'lease', ownerSigPng: null, preview: true, todayISO: new Date().toISOString().slice(0, 10), ...c.wizard };
+        applicationType: c.applicationType || 'lease', ownerSigPng: null, preview: true,
+        todayISO: new Date().toISOString().slice(0, 10), reviewHash: c.reviewHash,
+        landlordNoticeAddress: compliance.landlordNoticeAddress,
+        floodDamageKnown: compliance.floodDamageKnown, floodClaimFiled: compliance.floodClaimFiled,
+        floodAssistanceReceived: compliance.floodAssistanceReceived, ...c.wizard };
       let bytes;
       const template = async (name) => {
         const response = await env.ASSETS.fetch(new URL(`/forms/${name}.pdf`, request.url));
@@ -1547,6 +1669,8 @@ export async function onRequest(context) {
       };
       if (doc === 'lease-agreement') {
         bytes = await generateLeaseAgreement(data);
+      } else if (doc === 'flood-disclosure') {
+        bytes = await generateFloodDisclosure(data);
       } else if (doc === 'lease-application' || doc === 'background-authorization') {
         const filled = await fillLeaseApplication(await template('lease-application'), data);
         const split = await splitLeaseApplicationPackage(filled);
@@ -1570,7 +1694,7 @@ export async function onRequest(context) {
     const denied = await checkAdmin(request, env);
     if (denied) return denied;
     if (p === '/admin' && request.method === 'GET') {
-      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      const ownerSigOnFile = validateSignaturePng(await getEncryptedSecret(env, 'owner-signature-png'));
       const liveMode = (await env.CASES.get('submit-live')) === 'yes';
       const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
       const board = JSON.parse((await env.CASES.get('admin-board')) || '[]');
@@ -1583,18 +1707,25 @@ export async function onRequest(context) {
       return html(newsView(news, url.searchParams.get('msg')));
     }
     if (p === '/admin/cases' && request.method === 'GET') {
-      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      const ownerSigOnFile = validateSignaturePng(await getEncryptedSecret(env, 'owner-signature-png'));
       const liveMode = (await env.CASES.get('submit-live')) === 'yes';
-      return html(casesView(await loadCases(env), url.searchParams.get('msg'), ownerSigOnFile, liveMode));
+      return html(casesView(await loadCases(env), url.searchParams.get('msg'), ownerSigOnFile, liveMode, await loadComplianceConfig(env)));
     }
     if (p === '/admin/contacts' && request.method === 'GET') {
       const contacts = JSON.parse((await env.CASES.get('library-contacts')) || '[]');
       return html(contactsView(contacts, url.searchParams.get('msg')));
     }
+    if (p === '/admin/adverse-action' && request.method === 'GET') {
+      const c = (await loadCases(env)).find(item => item.id === url.searchParams.get('id'));
+      if (!c) return new Response('case not found', { status: 404, headers: SEC_HEADERS });
+      return html(adverseActionView(c, await loadComplianceConfig(env), url.searchParams.get('msg')));
+    }
     if (p === '/admin/settings' && request.method === 'GET') {
-      const sig = await env.CASES.get('owner-signature-png');
+      const sig = await getEncryptedSecret(env, 'owner-signature-png');
       const liveMode = (await env.CASES.get('submit-live')) === 'yes';
-      return html(settingsView(validateSignaturePng(sig), liveMode, url.searchParams.get('msg')));
+      const compliance = await loadComplianceConfig(env);
+      const complianceState = liveComplianceState({ pathType: 'full', nights: 30, applicationType: 'lease' }, compliance, env);
+      return html(settingsView(validateSignaturePng(sig), liveMode, url.searchParams.get('msg'), compliance, complianceState));
     }
     if (p === '/admin/receipts' && request.method === 'GET') {
       return html(receiptsView(await rcptList(env), url.searchParams.get('msg')));
@@ -1707,11 +1838,82 @@ export async function onRequest(context) {
       await env.CASES.put('library-contacts', JSON.stringify(contacts));
       return redirect('/admin/contacts');
     }
+    if (p === '/admin/compliance' && request.method === 'POST') {
+      const form = await request.formData();
+      if (form.get('attest') !== 'yes') return new Response('owner attestation required', { status: 400, headers: SEC_HEADERS });
+      const textField = (name, max = 500) => String(form.get(name) || '').trim().slice(0, max);
+      const dateField = name => {
+        const value = textField(name, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error(`${name} must be an ISO date`);
+        return value;
+      };
+      let config;
+      try {
+        config = {
+          landlordNoticeAddress: textField('landlordNoticeAddress', 500),
+          governingDocumentsVerifiedAt: dateField('governingDocumentsVerifiedAt'),
+          approvalAuthorityCitation: textField('approvalAuthorityCitation', 1000),
+          feeAuthorityCitation: textField('feeAuthorityCitation', 1000),
+          airbnbFeeDisclosureVerifiedAt: dateField('airbnbFeeDisclosureVerifiedAt'),
+          rulesVersion: textField('rulesVersion', 500),
+          hoaESignAcceptedAt: dateField('hoaESignAcceptedAt'),
+          privacySecurityReviewedAt: dateField('privacySecurityReviewedAt'),
+          fairHousingReviewedAt: dateField('fairHousingReviewedAt'),
+          floodDamageKnown: ['yes', 'no'].includes(textField('floodDamageKnown', 3)) ? textField('floodDamageKnown', 3) : '',
+          floodClaimFiled: ['yes', 'no'].includes(textField('floodClaimFiled', 3)) ? textField('floodClaimFiled', 3) : '',
+          floodAssistanceReceived: ['yes', 'no'].includes(textField('floodAssistanceReceived', 3)) ? textField('floodAssistanceReceived', 3) : '',
+          craName: textField('craName', 300), craAddress: textField('craAddress', 500), craPhone: textField('craPhone', 100),
+          savedAt: new Date().toISOString(), verifiedBy: env.ADMIN_USER || 'markus', policyVersion: COMPLIANCE_POLICY_VERSION,
+          sourcePacket: { portalDocumentId: HOA_SOURCE_PACKET.portalDocumentId, sha256: HOA_SOURCE_PACKET.sha256 },
+        };
+      } catch (error) {
+        return new Response(String(error.message || error), { status: 400, headers: SEC_HEADERS });
+      }
+      if (!config.landlordNoticeAddress || !config.approvalAuthorityCitation || !config.rulesVersion) {
+        return new Response('required compliance fields are missing', { status: 400, headers: SEC_HEADERS });
+      }
+      await env.CASES.put('compliance-config', JSON.stringify(config));
+      await env.CASES.delete('submit-live');
+      return redirect('/admin/settings?msg=' + encodeURIComponent('Compliance-Angaben gespeichert; LIVE wurde vorsorglich deaktiviert und muss neu freigegeben werden'));
+    }
+    if (p === '/admin/case-classification' && request.method === 'POST') {
+      const form = await request.formData();
+      const cases = await loadCases(env);
+      const c = cases.find(item => item.id === form.get('id'));
+      if (!c) return new Response('case not found', { status: 404, headers: SEC_HEADERS });
+      if (c.submission) return new Response('submitted cases are locked', { status: 409, headers: SEC_HEADERS });
+      c.applicationType = form.get('applicationType') === 'renewal' ? 'renewal' : 'lease';
+      c.sameLesseesConfirmed = c.applicationType === 'renewal' && form.get('sameLesseesConfirmed') === 'yes';
+      delete c.aiReview;
+      delete c.ownerApprovedAt;
+      c.reviewHash = c.wizard ? await reviewDigest(c, c.wizard, true) : null;
+      await saveCases(env, cases);
+      return redirect('/admin/cases?msg=' + encodeURIComponent('Mietvorgang rechtlich eingeordnet; vorhandene Qualitätsprüfung wurde zurückgesetzt'));
+    }
+    if (p === '/admin/adverse-action' && request.method === 'POST') {
+      const form = await request.formData();
+      if (form.get('reportBased') !== 'yes' || form.get('fairHousingReviewed') !== 'yes') {
+        return new Response('consumer-report and fair-housing attestations are required', { status: 400, headers: SEC_HEADERS });
+      }
+      const cases = await loadCases(env);
+      const c = cases.find(item => item.id === form.get('id'));
+      if (!c) return new Response('case not found', { status: 404, headers: SEC_HEADERS });
+      try {
+        const notice = adverseActionNotice({ date: new Date().toISOString().slice(0, 10), applicantName: c.guestName,
+          property: 'Unit 405D, 6219 Palma Del Mar Blvd S, St. Petersburg, FL 33715',
+          action: String(form.get('action') || ''), craName: form.get('craName'), craAddress: form.get('craAddress'), craPhone: form.get('craPhone') });
+        c.adverseAction = { preparedAt: new Date().toISOString(), preparedBy: env.ADMIN_USER || 'markus', notice, delivered: false };
+      } catch (error) {
+        return new Response(String(error.message || error), { status: 400, headers: SEC_HEADERS });
+      }
+      await saveCases(env, cases);
+      return redirect(`/admin/adverse-action?id=${encodeURIComponent(c.id)}&msg=${encodeURIComponent('Entwurf erstellt; nicht automatisch versandt')}`);
+    }
     if (p === '/admin/submit' && request.method === 'POST') {
       const form = await request.formData();
       const cases = await loadCases(env);
       const c = cases.find(x => x.id === form.get('id'));
-      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
+      const ownerSigOnFile = validateSignaturePng(await getEncryptedSecret(env, 'owner-signature-png'));
       if (!c) return new Response('case not found', { status: 404, headers: SEC_HEADERS });
       if (c.pathType === 'full' && c.screeningRoute !== 'paper') {
         return new Response(c.screeningRoute === 'online'
@@ -1730,10 +1932,12 @@ export async function onRequest(context) {
       const expectedReviewHash = await reviewDigest(c, c.wizard, true);
       const submittedReviewHash = String(form.get('reviewHash') || '');
       if (!submittedReviewHash || submittedReviewHash !== c.reviewHash || expectedReviewHash !== c.reviewHash) {
-        return new Response('review version changed; reopen and review all four PDFs', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+        return new Response(`review version changed; reopen and review all ${isAnnualRental(c) ? 'five' : 'four'} PDFs`, { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
       const live = (await env.CASES.get('submit-live')) === 'yes';
       if (live) {
+        const compliance = liveComplianceState(c, await loadComplianceConfig(env), env);
+        if (!compliance.ok) return new Response(`live submission blocked by compliance policy ${compliance.policyVersion}: ${compliance.missing.join(', ')}`, { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
         const prerequisites = validateLiveSubmissionPrerequisites(c);
         if (!prerequisites.ok) return new Response(`live submission blocked: ${prerequisites.missing.join(', ')}`, { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
@@ -1748,13 +1952,15 @@ export async function onRequest(context) {
       const sent = await submitApprovedPackage(c, cases, env);
       if (!sent || !live) await env.CASES.delete(claimKey);
       else await env.CASES.put(claimKey, c.submission.sentAt, { expirationTtl: 604800 });
-      const message = sent ? (live ? 'Vier-Dokumente-Paket live an die Verwaltung versandt' : 'Testpaket nur an Owner versandt; Live-Versand bleibt offen') : 'Versand fehlgeschlagen — Details im Vorgang';
+      const message = sent ? (live ? `${isAnnualRental(c) ? 'Fünf' : 'Vier'}-Dokumente-Paket live an die Verwaltung versandt` : 'Testpaket nur an Owner versandt; Live-Versand bleibt offen') : 'Versand fehlgeschlagen — Details im Vorgang';
       return redirect('/admin/cases?msg=' + encodeURIComponent(message));
     }
     if (p === '/admin/submit-live' && request.method === 'POST') {
       const form = await request.formData();
       if (form.get('mode') === 'yes') {
         if (String(form.get('confirm') || '') !== 'LIVE') return new Response('type LIVE to enable external delivery', { status: 400, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+        const compliance = liveComplianceState({ pathType: 'full', nights: 30, applicationType: 'lease' }, await loadComplianceConfig(env), env);
+        if (!compliance.ok) return new Response(`LIVE blocked by compliance policy ${compliance.policyVersion}: ${compliance.missing.join(', ')}`, { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
         await env.CASES.put('submit-live', 'yes');
         await env.CASES.put('submit-live-audit', JSON.stringify({ at: new Date().toISOString(), by: env.ADMIN_USER || 'markus' }));
       } else await env.CASES.delete('submit-live');
@@ -1765,7 +1971,7 @@ export async function onRequest(context) {
       const dataUrl = await request.text();
       const m = dataUrl.match(/^data:image\/png;base64,(.+)$/s);
       if (!m || !validateSignaturePng(m[1])) return new Response('invalid signature PNG', { status: 400, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
-      await env.CASES.put('owner-signature-png', m[1]);
+      await putEncryptedSecret(env, 'owner-signature-png', m[1]);
       return new Response('ok');
     }
     if (p === '/admin/create' && request.method === 'POST') {

@@ -39,7 +39,8 @@ function completeCase() {
         firstName: 'DemoGuest', middleName: 'None', lastName: 'DemoNameL', birthDate: '1980-01-01', gender: 'F',
         phone: '+1-555-000-005', email: 'demoGuest@example.com',
         street: '1 Main St', city: 'St Petersburg', state: 'FL', zip: '33715',
-        idType: 'drivers_license', idNumber: 'X1234567', idState: 'FL', employer: 'Retired', employerPhone: 'N/A', sigPng: validSignaturePng(), esignConsent: true
+        idType: 'drivers_license', idNumber: 'X1234567', idState: 'FL', employer: 'Retired', employerPhone: 'N/A', sigPng: validSignaturePng(), esignConsent: true,
+        signatureAudit: { signedAt: '2026-09-02T12:00:00Z', contentHash: 'abc123' }
       }],
       references: [
         { name: 'Reference One', phone: '+1-555-000-001', address: '1 Ref St, Tampa, FL' },
@@ -50,6 +51,7 @@ function completeCase() {
         { name: 'Emergency Two', phone: '+1-555-000-004' },
       ],
       esignConsent: true,
+      esignConsentVersion: 'fl-2026.09.02',
       rulesAcknowledged: true,
     },
   };
@@ -79,10 +81,11 @@ test('Airbnb rentals with more than two adults are routed to a manual HOA packag
   assert.match(result.error, /more than two adults/i);
 });
 
-test('a paid Airbnb rental has exactly four HOA document components', () => {
+test('a paid Airbnb rental has four components and an annual rental adds the flood disclosure', () => {
   assert.deepEqual(requiredPackageDocuments('full').map(d => d.key), [
     'lease-application', 'background-authorization', 'rules-and-regulations', 'lease-agreement',
   ]);
+  assert.deepEqual(requiredPackageDocuments('full', 365).map(d => d.key).slice(-1), ['flood-disclosure']);
   assert.throws(() => requiredPackageDocuments('guest-registration'), /paid Airbnb/i);
 });
 
@@ -104,22 +107,22 @@ test('live HOA submission waits for secure IDs and confirmed fee receipt', () =>
   assert.equal(validateLiveSubmissionPrerequisites(c).ok, true);
 });
 
-test('renewal suppresses payment requests while the discretionary fee waiver is pending', () => {
+test('same-lessee renewal prohibits the application fee and removes the receipt prerequisite', () => {
   const c = completeCase();
   c.applicationType = 'renewal';
-  c.feeStatus = 'waiver_pending';
+  c.sameLesseesConfirmed = true;
   c.steps = [{ id: 'ids_provided', done: true }, { id: 'fee_sent', done: false }];
-  assert.equal(applicationFeeState(c), 'waiver_pending');
-  assert.deepEqual(validateLiveSubmissionPrerequisites(c).missing, ['fee_waiver_confirmation']);
+  assert.equal(applicationFeeState(c), 'prohibited_same_lessee_renewal');
+  assert.equal(validateLiveSubmissionPrerequisites(c).ok, true);
 });
 
-test('confirmed renewal fee waiver removes the fee receipt prerequisite', () => {
+test('a renewal without confirmation of identical lessees still requires the fee workflow', () => {
   const c = completeCase();
   c.applicationType = 'renewal';
-  c.feeStatus = 'waived';
+  c.sameLesseesConfirmed = false;
   c.steps = [{ id: 'ids_provided', done: true }, { id: 'fee_sent', done: false }];
-  assert.equal(applicationFeeState(c), 'waived');
-  assert.equal(validateLiveSubmissionPrerequisites(c).ok, true);
+  assert.equal(applicationFeeState(c), 'required');
+  assert.deepEqual(validateLiveSubmissionPrerequisites(c).missing, ['fee_sent']);
 });
 
 test('renewal applications mark the renewal box instead of the lease box', () => {

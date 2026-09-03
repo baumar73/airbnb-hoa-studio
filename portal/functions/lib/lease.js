@@ -1,7 +1,8 @@
-// Short-Term Residential Lease Agreement — generated from scratch (owner's own document).
-// Reproduces the wording of the version used for the DemoSurnameA/DemoSurnameD HOA files.
+// Short-Term Residential Lease Agreement generated from the portal's reviewed policy text.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { UNIT } from './fill.js';
+
+export const RADON_NOTICE = 'RADON GAS: Radon is a naturally occurring radioactive gas that, when it has accumulated in a building in sufficient quantities, may present health risks to persons who are exposed to it over time. Levels of radon that exceed federal and state guidelines have been found in buildings in Florida. Additional information regarding radon and radon testing may be obtained from your county health department.';
 
 const fmtLong = (iso) => {
   if (!iso) return '';
@@ -24,6 +25,9 @@ export function occupancyClause(data) {
 
 export async function generateLeaseAgreement(data) {
   const doc = await PDFDocument.create();
+  doc.setTitle('Short-Term Residential Lease Agreement - Unit 405D');
+  doc.setSubject('Florida rental agreement, HOA compliance, required disclosures, and electronic-signature audit record');
+  doc.setProducer('Unit 405D HOA Approval Portal');
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
@@ -79,7 +83,7 @@ export async function generateLeaseAgreement(data) {
   para(`This lease shall commence on ${start} and shall terminate on ${end}. The lease term corresponds exactly to the confirmed Airbnb reservation${res} and shall automatically terminate on ${end} without further notice.`);
 
   heading('3. Governing Reservation');
-  para('This Agreement is ancillary to and governed by the Airbnb reservation between the parties. All payment terms, cancellation policies, fees, and booking conditions are exclusively governed by the Airbnb platform agreement. No additional rent or payment is due under this Agreement.');
+  para('This Agreement supplements the confirmed Airbnb reservation between the parties. Payment and platform cancellation terms are administered through Airbnb. Nothing in this Agreement or the Airbnb reservation waives a right or remedy that cannot lawfully be waived under applicable Florida or federal law. No additional rent or payment is due under this Agreement.');
 
   heading('4. Rent');
   para('Rent has been agreed and processed exclusively via Airbnb. No separate financial obligation arises under this lease.');
@@ -92,6 +96,18 @@ export async function generateLeaseAgreement(data) {
 
   heading('7. Occupancy');
   para(occupancyClause(data));
+
+  heading('8. Notices to Landlord');
+  para(`The name and address of the person authorized to receive notices and demands on behalf of Landlord is: ${UNIT.owner}, ${String(data.landlordNoticeAddress || '[OWNER MUST CONFIGURE NOTICE ADDRESS BEFORE EXECUTION]')}. A change will be communicated in writing.`);
+
+  heading('9. Required Radon Notification');
+  para(RADON_NOTICE, font, 9.5, 12.5, 6);
+
+  heading('10. Equal Housing and Reasonable Accommodation');
+  para('The Property is offered and administered without discrimination prohibited by applicable fair-housing law. A tenant may request a reasonable accommodation through the existing Airbnb conversation or another written channel agreed with Landlord. Disability or medical details should not be entered in the HOA portal.');
+
+  heading('11. Electronic Transactions');
+  para('Each signing party affirmatively consents to transact electronically, intends the electronic signature to have the same effect as a handwritten signature, and may download or print a copy of the signed record. A party may request a non-electronic alternative before signing by contacting Landlord through the existing Airbnb conversation.');
 
   y -= 8;
   const b64ToBytes = (b64) => Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
@@ -119,8 +135,20 @@ export async function generateLeaseAgreement(data) {
     sigBlock('Tenant', tenants[i], tSig);
   }
 
+  if (data.reviewHash || adults.some(a => a && a.signatureAudit)) {
+    ensure(150 + adults.length * 42);
+    heading('Electronic Signature Audit Record');
+    para(`Document package digest (SHA-256): ${String(data.reviewHash || 'not assigned')}`, font, 8.5, 11, 4);
+    para(`Consent text version: ${String(data.esignConsentVersion || 'fl-2026.09.02')}`, font, 8.5, 11, 4);
+    adults.forEach((adult, i) => {
+      const audit = adult && adult.signatureAudit || {};
+      para(`Tenant ${i + 1}: signed ${String(audit.signedAt || 'not recorded')}; content digest ${String(audit.contentHash || 'not recorded')}; network event ${String(audit.networkHash || 'not recorded')}; browser event ${String(audit.userAgentHash || 'not recorded')}.`, font, 8.5, 11, 4);
+    });
+    para('The hashes above are evidence references. Raw IP addresses and full browser identifiers are not retained in this document.', font, 8.5, 11, 4);
+  }
+
   if (data.preview) {
-    for (const p of doc.getPages()) p.drawText('DRAFT — OWNER REVIEW REQUIRED', {
+    for (const p of doc.getPages()) p.drawText('DRAFT - OWNER REVIEW REQUIRED', {
       x: 145, y: 760, size: 18, font: bold, color: rgb(0.75, 0.1, 0.1), opacity: 0.55,
     });
   }

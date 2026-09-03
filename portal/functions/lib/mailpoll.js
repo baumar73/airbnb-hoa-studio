@@ -5,6 +5,7 @@ import { Imap, decodeMessage } from './imap.js';
 import { parseBooking, parseCancellation, looksLikeApproval } from './parse.js';
 import { sendTelegram } from './email.js';
 import { validateAirbnbCaseInput, shouldAutoApproveFromEmail } from './workflow.js';
+import { loadStoredCases, saveStoredCases } from './storage.js';
 
 const PORTAL = 'https://portal.example.test';
 
@@ -43,8 +44,7 @@ export async function pollMail(env) {
     const bookingUids = await imap.searchRaw('from:airbnb.com subject:("reservation confirmed" OR buchung) newer_than:30d');
     const cancellationUids = await imap.searchRaw('from:airbnb.com subject:(canceled OR cancelled OR storniert) newer_than:30d');
     const hoaUids = await imap.searchRaw('from:condominiumassociates.com newer_than:14d');
-    const raw = await env.CASES.get('cases');
-    const cases = raw ? JSON.parse(raw) : [];
+    const cases = await loadStoredCases(env);
     let dirty = false;
 
     const ambiguous = seen.ambiguous || {};
@@ -149,7 +149,7 @@ export async function pollMail(env) {
       news.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
       await env.CASES.put('hoa-news', JSON.stringify(news.slice(0, 100)));
     }
-    if (dirty) await env.CASES.put('cases', JSON.stringify(cases));
+    if (dirty) await saveStoredCases(env, cases);
     seen.uids = [...seenSet].slice(-2000);
     await env.CASES.put('mail-seen', JSON.stringify(seen));
   } finally {

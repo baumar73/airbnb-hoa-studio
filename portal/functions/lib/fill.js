@@ -90,6 +90,10 @@ export async function fillLeaseApplication(templateBytes, data) {
   draw(p1, font, 285, 535, UNIT.address);
   draw(p1, font, 1085, 535, UNIT.number);
   draw(p1, font, 440, 573, UNIT.owner);
+  // This is an owner-direct rental. Leaving these association-form fields blank
+  // caused applicants to ask whether their package was incomplete.
+  draw(p1, font, 190, 612, 'N/A'); // Realtor
+  draw(p1, font, 805, 612, 'N/A'); // Realtor phone
   draw(p1, font, 500, 650, fmtDate(data.checkIn));
   draw(p1, font, 890, 650, fmtDate(data.checkOut));
 

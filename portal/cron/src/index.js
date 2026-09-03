@@ -81,6 +81,7 @@ async function sendTelegram(env, text) {
 
 import { purgeExpiredCases, applicationFeeState } from '../../functions/lib/workflow.js';
 import { pollMail } from '../../functions/lib/mailpoll.js';
+import { loadStoredCases, saveStoredCases } from '../../functions/lib/storage.js';
 
 export default {
   async scheduled(event, env, ctx) {
@@ -97,11 +98,10 @@ export default {
       }
       return;
     }
-    const raw = await env.CASES.get('cases');
-    const loadedCases = raw ? JSON.parse(raw) : [];
+    const loadedCases = await loadStoredCases(env);
     const { kept: cases, purged } = purgeExpiredCases(loadedCases, now, 90);
     if (purged.length) {
-      await env.CASES.put('cases', JSON.stringify(cases));
+      await saveStoredCases(env, cases);
       await sendTelegram(env, `🧹 Datenschutz: ${purged.length} abgeschlossene Gastvorgänge wurden 90 Tage nach Check-out aus dem Portal gelöscht.`);
     }
 
@@ -110,7 +110,7 @@ export default {
       if (await sendTelegram(env, a.text)) a.c.notify[a.key] = now.toISOString();
     }
     if (now.getUTCDay() === 0) await sendTelegram(env, buildDigest(cases, now));
-    if (alerts.length) await env.CASES.put('cases', JSON.stringify(cases));
+    if (alerts.length) await saveStoredCases(env, cases);
     console.log(`isla-cron: ${alerts.length} alert(s), ${cases.length} case(s)`);
   },
 

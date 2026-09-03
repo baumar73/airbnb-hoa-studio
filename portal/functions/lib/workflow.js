@@ -1,6 +1,7 @@
 // Pure workflow policy shared by Pages and the scheduled worker.
 // Guest actions may prepare a package, but only an authenticated owner action
 // may submit it or confirm an approval.
+import { isAnnualRental, isSameLesseeRenewal } from './compliance.js';
 
 export function validateSignaturePng(value) {
   try {
@@ -62,18 +63,20 @@ export function validateAirbnbCaseInput(input) {
   return { ...result, pathType: 'full' };
 }
 
-export function requiredPackageDocuments(pathType) {
+export function requiredPackageDocuments(pathType, nights = 0) {
   if (pathType !== 'full') throw new Error('Paid Airbnb rentals require the full HOA package');
-  return [
+  const documents = [
     { key: 'lease-application', label: 'Lease Application' },
     { key: 'background-authorization', label: 'Background Check Authorization' },
     { key: 'rules-and-regulations', label: 'Rules & Regulations and signed acknowledgment' },
     { key: 'lease-agreement', label: 'Short-Term Lease Agreement' },
   ];
+  if (Number(nights) >= 365) documents.push({ key: 'flood-disclosure', label: 'Florida Flood Disclosure' });
+  return documents;
 }
 
-export function validateOwnerReviewAttestations(values) {
-  const missing = requiredPackageDocuments('full')
+export function validateOwnerReviewAttestations(values, nights = 0) {
+  const missing = requiredPackageDocuments('full', nights)
     .filter(doc => !values || values[doc.key] !== 'yes')
     .map(doc => doc.key);
   return { ok: missing.length === 0, missing };
@@ -81,10 +84,9 @@ export function validateOwnerReviewAttestations(values) {
 
 export function applicationFeeState(c) {
   if (!c || c.pathType !== 'full') return 'not_required';
-  if (c.applicationType === 'renewal') {
-    if (c.feeStatus === 'waived') return 'waived';
-    if (c.feeStatus === 'waiver_pending') return 'waiver_pending';
-  }
+  // Fla. Stat. 718.112(2)(k): an association may not charge a fee for a
+  // renewal with the same lessee. This is a statutory rule, not a waiver.
+  if (isSameLesseeRenewal(c)) return 'prohibited_same_lessee_renewal';
   if (c.screeningRoute === 'online') return 'handled_online';
   if (c.screeningRoute === 'undecided') return 'route_required';
   return 'required';
@@ -103,7 +105,6 @@ export function validateLiveSubmissionPrerequisites(c) {
     if (c.screeningRoute === 'paper') required.unshift('screening_complete');
     const feeState = applicationFeeState(c);
     if (feeState === 'required') required.push('fee_sent');
-    if (feeState === 'waiver_pending') required.push('fee_waiver_confirmation');
   }
   const steps = (c && c.steps) || [];
   const missing = required.filter(id => !steps.some(step => step.id === id && step.done));
@@ -130,6 +131,9 @@ export function validatePaperwork(c) {
     if (a && a.birthDate && !isValidISODate(a.birthDate)) missing.push(`adult ${i + 1} birthDate invalid`);
     if (!a || !validateSignaturePng(a.sigPng)) missing.push(`adult ${i + 1} signature`);
     if (!a || !a.esignConsent) missing.push(`adult ${i + 1} e-sign consent`);
+    if (!a || !a.signatureAudit || !a.signatureAudit.signedAt || !a.signatureAudit.contentHash) {
+      missing.push(`adult ${i + 1} signature audit`);
+    }
   });
   if (c && c.pathType === 'full') {
     const references = (w && w.references) || [];
@@ -154,7 +158,9 @@ export function validatePaperwork(c) {
     }
   }
   if (!w || !w.esignConsent) missing.push('esign consent');
+  if (!w || w.esignConsentVersion !== 'fl-2026.09.02') missing.push('current e-sign consent version');
   if (c && c.pathType === 'full' && (!w || !w.rulesAcknowledged)) missing.push('rules acknowledgment');
+  if (isAnnualRental(c) && (!w || !w.floodDisclosureAcknowledged)) missing.push('flood disclosure acknowledgment');
   return { ok: missing.length === 0, missing };
 }
 

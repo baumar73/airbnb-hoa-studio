@@ -10,6 +10,7 @@ register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
 
 const { socketAttempts, resetSocketAttempts } = await import('cloudflare:sockets');
 const { onRequest } = await import('../functions/[[path]].js');
+const { loadStoredCases } = await import('../functions/lib/storage.js');
 const {
   shouldAutoSubmitAfterGuestSave,
   isGuestAccessibleCase,
@@ -33,8 +34,14 @@ function mockEnv() {
     },
     ADMIN_USER: 'markus',
     ADMIN_PASSWORD: 'unused-in-tests',
+    DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+    AUDIT_HASH_SALT: 'test-audit-salt-32-characters-long',
   };
   return { env, store };
+}
+
+async function readCases(env) {
+  return loadStoredCases(env);
 }
 
 function guestRequest(path, { method = 'POST', form, origin = ORIGIN, fetchSite } = {}) {
@@ -98,7 +105,7 @@ test('guest draft save persists only a draft and performs no outbound HOA submis
     waitUntil: () => {},
   });
   assert.equal(res.status, 303);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.equal(cases[0].submission, undefined);
   assert.equal(cases[0].testSubmission, undefined);
   assert.equal(cases[0].wizard.adults.length, 2); // fixed slots preserved
@@ -119,7 +126,7 @@ test('materially complete guest save reaches owner review but never opens an ema
     waitUntil: () => {},
   });
   assert.equal(res.status, 303);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.equal(cases[0].submission, undefined);
   assert.equal(cases[0].ownerApprovedAt, undefined);
   assert.ok(cases[0].ownerReviewReadyAt);
@@ -141,7 +148,7 @@ test('complete guest paperwork reaches owner review even when the owner signatur
 
   assert.equal(res.status, 303);
   assert.equal(res.headers.get('location'), `/w/${TOKEN}?saved=ready`);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.ok(cases[0].ownerReviewReadyAt);
   assert.equal(cases[0].submission, undefined);
   assert.equal(cases[0].ownerApprovedAt, undefined);
@@ -161,7 +168,7 @@ test('complete guest paperwork updates the guest-owned progress steps accurately
   });
 
   assert.equal(res.status, 303);
-  const [saved] = JSON.parse(store.get('cases'));
+  const [saved] = await readCases(env);
   for (const id of ['forms_sent', 'application', 'background', 'rules_ack']) {
     const step = saved.steps.find(candidate => candidate.id === id);
     assert.equal(step.done, true, `${id} should be complete`);
@@ -191,6 +198,31 @@ test('the returning guest status page says the forms are complete after a succes
   assert.equal(res.status, 200);
   assert.match(body, /Your forms are complete/i);
   assert.doesNotMatch(body, /<h2>Complete your forms online<\/h2>/i);
+});
+
+test('fee payment instructions stay hidden until HOA authority and Airbnb disclosure are verified', async () => {
+  const { env, store } = mockEnv();
+  seedCase(store);
+  let res = await onRequest({ request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }), env, waitUntil: () => {} });
+  let body = await res.text();
+  assert.match(body, /Payment instructions are not released/i);
+  assert.doesNotMatch(body, /I've mailed the check/i);
+
+  store.set('compliance-config', JSON.stringify({ feeAuthorityCitation: 'Declaration Article X', airbnbFeeDisclosureVerifiedAt: '2026-09-02' }));
+  res = await onRequest({ request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }), env, waitUntil: () => {} });
+  body = await res.text();
+  assert.match(body, /I've mailed the check/i);
+});
+
+test('public fair-housing page treats assistance animals separately from pets and protects demographic privacy', async () => {
+  const { env } = mockEnv();
+  const res = await onRequest({ request: guestRequest('/fair-housing', { method: 'GET', origin: null }), env, waitUntil: () => {} });
+  const body = await res.text();
+  assert.match(body, /Service animals and other assistance animals are not pets/i);
+  assert.match(body, /does not disclose or discuss the race/i);
+  assert.match(body, /No pet fee or animal deposit/i);
+  assert.match(body, /No particular certificate or registration is required/i);
+  assert.match(body, /breed, size, or weight alone is not a reason for denial/i);
 });
 
 test('a full rental chooses the official application route before showing local paper forms', async () => {
@@ -225,7 +257,7 @@ test('choosing the online route persists the choice without collecting screening
   });
   assert.equal(choose.status, 303);
   assert.equal(choose.headers.get('location'), `/v/${TOKEN}`);
-  const [saved] = JSON.parse(store.get('cases'));
+  const [saved] = await readCases(env);
   assert.equal(saved.screeningRoute, 'online');
   assert.equal(saved.wizard, undefined);
 
@@ -254,7 +286,7 @@ test('online completion can be reported but only the owner can confirm the offic
     waitUntil: () => {},
   });
   assert.equal(report.status, 303);
-  const [saved] = JSON.parse(store.get('cases'));
+  const [saved] = await readCases(env);
   assert.ok(saved.screeningReportedAt);
   assert.equal(saved.steps.find(step => step.id === 'screening_complete').done, false);
 });
@@ -323,7 +355,7 @@ test('removing a stored signature invalidates the stale owner-review-ready state
   });
 
   assert.equal(res.status, 303);
-  const [saved] = JSON.parse(store.get('cases'));
+  const [saved] = await readCases(env);
   assert.equal(saved.wizard.adults[0].sigPng, null);
   assert.equal(saved.ownerReviewReadyAt, undefined);
   assert.equal(saved.steps.find(step => step.id === 'application').done, false);
@@ -338,7 +370,7 @@ test('guest POST from a foreign origin is rejected before any state change', asy
     waitUntil: () => {},
   });
   assert.equal(res.status, 403);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.equal(cases[0].wizard, undefined); // nothing was persisted
 });
 
@@ -355,7 +387,7 @@ test('same-origin browser metadata permits an in-app browser POST with a null Or
     waitUntil: () => {},
   });
   assert.equal(res.status, 303);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.equal(cases[0].wizard.adults[0].firstName, 'DemoGuest');
 });
 
@@ -372,7 +404,7 @@ test('cross-site browser metadata never permits a POST with a null Origin', asyn
     waitUntil: () => {},
   });
   assert.equal(res.status, 403);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.equal(cases[0].wizard, undefined);
 });
 
@@ -399,7 +431,7 @@ test('canceled cases reject guest draft saves and stay closed', async () => {
     waitUntil: () => {},
   });
   assert.equal(res.status, 410);
-  const cases = JSON.parse(store.get('cases'));
+  const cases = await readCases(env);
   assert.equal(cases[0].wizard, undefined);
 });
 
