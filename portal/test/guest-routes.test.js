@@ -32,9 +32,10 @@ function mockEnv() {
   return { env, store };
 }
 
-function guestRequest(path, { method = 'POST', form, origin = ORIGIN } = {}) {
+function guestRequest(path, { method = 'POST', form, origin = ORIGIN, fetchSite } = {}) {
   const headers = new Headers({ 'Content-Type': 'application/x-www-form-urlencoded' });
   if (origin) headers.set('Origin', origin);
+  if (fetchSite) headers.set('Sec-Fetch-Site', fetchSite);
   const body = method === 'POST' && form ? new URLSearchParams(form).toString() : undefined;
   return new Request(ORIGIN + path, { method, headers, body, redirect: 'manual' });
 }
@@ -120,6 +121,101 @@ test('materially complete guest save reaches owner review but never opens an ema
   assert.equal(socketAttempts(), 0);
 });
 
+test('complete guest paperwork reaches owner review even when the owner signature is not configured yet', async () => {
+  resetSocketAttempts();
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.adults = 1;
+  store.set('cases', JSON.stringify([c]));
+
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: completeGuestForm() }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get('location'), `/w/${TOKEN}?saved=ready`);
+  const cases = JSON.parse(store.get('cases'));
+  assert.ok(cases[0].ownerReviewReadyAt);
+  assert.equal(cases[0].submission, undefined);
+  assert.equal(cases[0].ownerApprovedAt, undefined);
+  assert.equal(socketAttempts(), 0);
+});
+
+test('complete guest paperwork updates the guest-owned progress steps accurately', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.adults = 1;
+  store.set('cases', JSON.stringify([c]));
+
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: completeGuestForm() }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 303);
+  const [saved] = JSON.parse(store.get('cases'));
+  for (const id of ['forms_sent', 'application', 'background', 'rules_ack']) {
+    const step = saved.steps.find(candidate => candidate.id === id);
+    assert.equal(step.done, true, `${id} should be complete`);
+    assert.ok(step.date, `${id} should have a completion date`);
+  }
+  assert.equal(saved.steps.find(step => step.id === 'lease_signed').done, false);
+  assert.equal(saved.steps.filter(step => step.done).length, 4);
+});
+
+test('the returning guest status page says the forms are complete after a successful save', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.adults = 1;
+  store.set('cases', JSON.stringify([c]));
+  await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: completeGuestForm() }),
+    env,
+    waitUntil: () => {},
+  });
+
+  const res = await onRequest({
+    request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }),
+    env,
+    waitUntil: () => {},
+  });
+  const body = await res.text();
+  assert.equal(res.status, 200);
+  assert.match(body, /Your forms are complete/i);
+  assert.doesNotMatch(body, /<h2>Complete your forms online<\/h2>/i);
+});
+
+test('removing a stored signature invalidates the stale owner-review-ready state', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  c.adults = 1;
+  store.set('cases', JSON.stringify([c]));
+  await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: completeGuestForm() }),
+    env,
+    waitUntil: () => {},
+  });
+
+  const withoutSignature = completeGuestForm();
+  delete withoutSignature.a0_sig;
+  withoutSignature.a0_remove_sig = 'yes';
+  withoutSignature.saveMode = 'draft';
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, { form: withoutSignature }),
+    env,
+    waitUntil: () => {},
+  });
+
+  assert.equal(res.status, 303);
+  const [saved] = JSON.parse(store.get('cases'));
+  assert.equal(saved.wizard.adults[0].sigPng, null);
+  assert.equal(saved.ownerReviewReadyAt, undefined);
+  assert.equal(saved.steps.find(step => step.id === 'application').done, false);
+});
+
 test('guest POST from a foreign origin is rejected before any state change', async () => {
   const { env, store } = mockEnv();
   seedCase(store);
@@ -131,6 +227,40 @@ test('guest POST from a foreign origin is rejected before any state change', asy
   assert.equal(res.status, 403);
   const cases = JSON.parse(store.get('cases'));
   assert.equal(cases[0].wizard, undefined); // nothing was persisted
+});
+
+test('same-origin browser metadata permits an in-app browser POST with a null Origin', async () => {
+  const { env, store } = mockEnv();
+  seedCase(store);
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, {
+      form: { saveMode: 'draft', a0_firstName: 'DemoGuest' },
+      origin: 'null',
+      fetchSite: 'same-origin',
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 303);
+  const cases = JSON.parse(store.get('cases'));
+  assert.equal(cases[0].wizard.adults[0].firstName, 'DemoGuest');
+});
+
+test('cross-site browser metadata never permits a POST with a null Origin', async () => {
+  const { env, store } = mockEnv();
+  seedCase(store);
+  const res = await onRequest({
+    request: guestRequest(`/w/${TOKEN}`, {
+      form: { saveMode: 'draft', a0_firstName: 'DemoGuest' },
+      origin: 'null',
+      fetchSite: 'cross-site',
+    }),
+    env,
+    waitUntil: () => {},
+  });
+  assert.equal(res.status, 403);
+  const cases = JSON.parse(store.get('cases'));
+  assert.equal(cases[0].wizard, undefined);
 });
 
 test('cross-origin public lookup is rejected before consuming rate-limit state', async () => {

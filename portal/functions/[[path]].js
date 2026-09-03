@@ -4,7 +4,7 @@
 import { fillLeaseApplication, fillGuestRegistration, splitLeaseApplicationPackage, buildRulesAcknowledgment } from './lib/fill.js';
 import { generateLeaseAgreement } from './lib/lease.js';
 import { submitApprovedPackage, isReadyForOwnerReview, docStates } from './lib/submit.js';
-import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState } from './lib/workflow.js';
+import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isGuestPaperworkComplete } from './lib/workflow.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
 
@@ -417,7 +417,14 @@ St. Petersburg, FL 33716</div>
              <span class="muted" style="margin-left:10px">Tap this once your envelope is in the mail — it helps us confirm receipt.</span>
            </form>`}
     </div>` : '';
-  const wizardCard = approved ? '' : `
+  const wizardCard = approved ? '' : c.ownerReviewReadyAt ? `
+    <div class="card"><h2>Your forms are complete</h2>
+      <p><span class="pill ok">Ready for Owner review</span></p>
+      <p>Your information and signatures are saved. Owner reviews the current documents next; the secure photo-ID handoff and association fee are tracked separately. You do not need to fill out the forms again.</p>
+      <p><a class="btn ghost" href="/w/${c.token}">Review / edit your details</a>
+      <span class="pill ok" style="margin-left:10px">completed ${esc((c.ownerReviewReadyAt || '').slice(0, 10))}</span></p>
+      <p class="muted">If you change personal details, the affected signatures must be provided again before the forms return to Owner review.</p>
+    </div>` : `
     <div class="card"><h2>Complete your forms online</h2>
       <p>Enter your details once and sign online. You can save an unfinished draft and return later. We prepare the association's official PDFs and an AI quality check reviews the complete package for missing data and inconsistencies. Owner confirms the green quality report and explicitly releases the package. Usually takes 20–30 minutes.</p>
       <p><a class="btn" href="/w/${c.token}">${c.wizard ? 'Review / edit your details' : 'Start the paperwork'}</a>
@@ -1222,7 +1229,11 @@ export async function onRequest(context) {
   const waitUntil = context.waitUntil ? context.waitUntil.bind(context) : (p) => p;
   const url = new URL(request.url);
   const p = url.pathname;
-  if (request.method === 'POST' && !isAllowedMutationOrigin(request.headers.get('Origin'), url.origin)) {
+  if (request.method === 'POST' && !isAllowedMutationOrigin(
+    request.headers.get('Origin'),
+    url.origin,
+    request.headers.get('Sec-Fetch-Site'),
+  )) {
     return new Response('Forbidden: invalid request origin', { status: 403, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
   }
 
@@ -1357,6 +1368,7 @@ export async function onRequest(context) {
       const prevWizard = c.wizard || null;
       const prevAdults = (prevWizard && prevWizard.adults) || [];
       const { adults, explicitSigs, removeSigs } = parseAdultFormSlots(form, c.adults);
+      const savedAt = new Date().toISOString();
       const nextWizard = {
         adults,
         esignConsent: adults.length === c.adults && adults.every(a => a.esignConsent),
@@ -1365,9 +1377,10 @@ export async function onRequest(context) {
         references: [0,1].map(i => ({ name: g(`ref${i}_name`), phone: g(`ref${i}_phone`), address: g(`ref${i}_address`) })),
         emergency: [0,1].map(i => ({ name: g(`em${i}_name`), phone: g(`em${i}_phone`) })),
         children: [0,1].map(i => ({ name: g(`ch${i}_name`, 120), birthDate: g(`ch${i}_birthDate`, 10) })),
-        savedAt: new Date().toISOString(),
+        savedAt,
       };
       const previousContentHash = prevWizard ? await reviewDigest(c, prevWizard, false) : null;
+      const previousReviewHash = prevWizard ? (c.reviewHash || await reviewDigest(c, prevWizard, true)) : null;
       const nextContentHash = await reviewDigest(c, nextWizard, false);
       const materialChange = !!prevWizard && previousContentHash !== nextContentHash;
       nextWizard.adults.forEach((a, i) => {
@@ -1375,12 +1388,12 @@ export async function onRequest(context) {
         else if (explicitSigs[i]) a.sigPng = explicitSigs[i];
         else a.sigPng = materialChange ? null : ((prevAdults[i] && prevAdults[i].sigPng) || null);
       });
-      const previousReviewHash = c.reviewHash || null;
       c.wizard = nextWizard;
       c.contentHash = nextContentHash;
       c.reviewHash = await reviewDigest(c, nextWizard, true);
       if (previousReviewHash !== c.reviewHash) delete c.aiReview;
-      if (materialChange) {
+      const reviewChanged = !!prevWizard && previousReviewHash !== c.reviewHash;
+      if (reviewChanged) {
         delete c.ownerReviewReadyAt;
         delete c.ownerApprovedAt;
         delete c.ownerApprovedBy;
@@ -1388,13 +1401,21 @@ export async function onRequest(context) {
         delete c.ownerReviewedDocuments;
       }
       const opened = c.steps.find(s => s.id === 'forms_sent');
-      if (opened && !opened.done) { opened.done = true; opened.date = new Date().toISOString(); }
-      const ownerSigOnFile = validateSignaturePng(await env.CASES.get('owner-signature-png'));
-      const becameReady = saveMode !== 'draft' && isReadyForOwnerReview(c, ownerSigOnFile) && !c.ownerReviewReadyAt;
-      if (becameReady) c.ownerReviewReadyAt = new Date().toISOString();
+      if (opened && !opened.done) { opened.done = true; opened.date = savedAt; }
+      const guestPaperworkComplete = isGuestPaperworkComplete(c);
+      if (c.pathType === 'full') {
+        for (const id of ['application', 'background', 'rules_ack']) {
+          const step = c.steps.find(candidate => candidate.id === id);
+          if (!step) continue;
+          step.done = guestPaperworkComplete;
+          step.date = guestPaperworkComplete ? (step.date || savedAt) : null;
+        }
+      }
+      const becameReady = saveMode !== 'draft' && guestPaperworkComplete && !c.ownerReviewReadyAt;
+      if (becameReady) c.ownerReviewReadyAt = savedAt;
       await saveCases(env, cases);
       if (becameReady) waitUntil(sendTelegram(env, `🤖 ${c.guestName} (${c.checkIn}): Unterlagen vollständig. Die OpenAI-KI-Vorprüfung läuft; du erhältst nur bei Abweichungen Rückfragen oder anschließend eine kompakte Versandfreigabe.`));
-      const saveState = saveMode !== 'draft' && (becameReady || isReadyForOwnerReview(c, ownerSigOnFile)) ? 'ready' : 'draft';
+      const saveState = saveMode !== 'draft' && guestPaperworkComplete ? 'ready' : 'draft';
       return redirect(`/w/${c.token}?saved=${saveState}`);
     }
 

@@ -161,13 +161,18 @@ export function paperworkState(c, ownerSigOnFile) {
   return { namesOk, allSigned, rulesOk, complete: validation.ok, missing: validation.missing, ownerSigOnFile: !!ownerSigOnFile };
 }
 
-export function isReadyForOwnerReview(c, ownerSigOnFile) {
+export function isGuestPaperworkComplete(c) {
   if (!c || !c.wizard || c.submission) return false;
-  const s = paperworkState(c, ownerSigOnFile);
-  return s.complete && s.namesOk && s.allSigned && s.rulesOk && s.ownerSigOnFile;
+  const s = paperworkState(c, false);
+  return s.complete && s.namesOk && s.allSigned && s.rulesOk;
 }
 
-export function isAllowedMutationOrigin(origin, expectedOrigin) {
+export function isReadyForOwnerReview(c, ownerSigOnFile) {
+  return isGuestPaperworkComplete(c) && !!ownerSigOnFile;
+}
+
+export function isAllowedMutationOrigin(origin, expectedOrigin, fetchSite) {
+  if ((!origin || origin === 'null') && fetchSite === 'same-origin') return true;
   try {
     return !!origin && origin !== 'null' && new URL(origin).origin === new URL(expectedOrigin).origin;
   } catch (_) {
