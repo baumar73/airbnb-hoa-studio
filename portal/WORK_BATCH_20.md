@@ -12,7 +12,7 @@ gesonderte Arbeit.
 - [x] 3. Telegram-Störungsmeldungen mit Zeitlimit senden
 - [x] 4. Versandabgleich: unmögliche UTC-Zeitangaben abweisen
 - [x] 5. Stornierungsmails mit mehreren Buchungscodes nicht automatisch zuordnen
-- [ ] 6. Explizite Jahreszahlen in Buchungsdaten erhalten
+- [x] 6. Explizite Jahreszahlen in Buchungsdaten erhalten
 - [ ] 7. Prüfversion an Gastname, Verfahrensweg und Kinderzahl binden
 - [ ] 8. Leere oder strukturell ungültige KI-Prüfberichte abweisen
 - [ ] 9. Abgereiste Buchungen aus dem Prüfrückstand nehmen

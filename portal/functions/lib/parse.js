@@ -56,6 +56,8 @@ export function parseYearlessRange(text, today) {
   const found = [];
   let m;
   while ((m = re.exec(text)) && found.length < 2) {
+    // An explicit year is authoritative, even for past bookings.
+    if (/^[,\s]+\d{4}\b/.test(text.slice(re.lastIndex))) return [];
     const monName = m[1] || m[4], day = m[2] || m[3];
     const mo = MONTHS[(monName || '').slice(0, 3).toLowerCase()];
     if (mo) found.push({ mo, d: parseInt(day, 10) });
@@ -95,8 +97,11 @@ export function parseBooking({ subject, text }, today) {
   // cancellation deadlines or forwarded-message timestamps.
   const stayLabel = all.search(/\bCheck-?in\b/i);
   const stayWindow = stayLabel >= 0 ? all.slice(stayLabel, stayLabel + 500) : all;
-  let dates = parseYearlessRange(stayWindow, today);
-  if (dates.length < 2) dates = parseDates(stayWindow);
+  let dates = parseDates(stayWindow);
+  if (dates.length < 2) {
+    const yearless = parseYearlessRange(stayWindow, today);
+    if (yearless.length===2) dates=yearless;
+  }
   if (dates.length < 2 && stayWindow !== all) dates = parseDates(all);
   // Capture the whole name up to a known boundary, never just two words.
   // A labelled body value is stronger evidence than a shortened subject.

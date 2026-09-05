@@ -99,6 +99,16 @@ test('rejects impossible calendar dates', () => {
   assert.equal(parsed.complete, false);
 });
 
+test('explicit years are not shifted when processing old confirmations',()=>{
+  for(const [range,start,end] of [
+    ['Sat, Oct 17, 2026 Sun, Dec 20, 2026','2026-10-17','2026-12-20'],
+    ['Sun, Dec 20, 2026 Tue, Jan 5, 2027','2026-12-20','2027-01-05'],
+  ]) {
+    const result=parseBooking({...demoGuestMail,text:demoGuestMail.text.replace('Sat, Oct 17 Sun, Dec 20',range)},'2028-01-01');
+    assert.equal(result.checkIn,start);assert.equal(result.checkOut,end);assert.equal(result.complete,true);
+  }
+  assert.equal(parseBooking({...demoGuestMail,text:demoGuestMail.text.replace('Sat, Oct 17 Sun, Dec 20','Sat, Oct 17, 2026 Sun, Dec 20')},'2028-01-01').complete,false);
+});
 test('supports plural adult counts and a year-crossing stay', () => {
   const parsed = parseBooking({
     subject: 'Reservation confirmed - Jane Doe arrives Dec 20',
