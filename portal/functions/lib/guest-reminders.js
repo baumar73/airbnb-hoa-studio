@@ -3,12 +3,15 @@ import {reminderDeliveryTarget} from './guest-contact.js';
 import {planGuestJourney,guestReminderMessage} from './journey.js';
 import {sendViaGmail} from './email.js';
 import {externalFeeRequestAuthorized} from './compliance.js';
+import {recipientDigest} from './reminder-delivery.js';
 
 async function recordResult(env,id,claimId,state,now) {
   for(let attempt=0;attempt<4;attempt++) {
     const cases=await loadStoredCases(env),c=cases.find(c=>c.id===id);
     if(!c || c.automation?.reminderClaim?.id!==claimId) return false;
     c.automation.reminderClaim.state=state;
+    const attempt=c.automation.reminderAttempts?.find(a=>a.id===claimId);
+    if(attempt) attempt.state=state;
     if(state==='sent') c.automation.lastGuestReminderAt=now.toISOString();
     try {await saveStoredCases(env,cases);return true;}
     catch(error) {if(error.code!=='CASE_CONFLICT'||attempt===3) throw error;}
@@ -26,6 +29,7 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     // Reload at claim time: old incomplete snapshots must not generate reminders.
     const cases=await loadStoredCases(env),c=cases.find(c=>c.id===id);
     if(!c) continue;
+    if((c.automation?.reminderAttempts||[]).some(a=>Object.values(a.deliveryNotices||{}).some(n=>!n.reviewedAt))) { result.uncertain++; continue; }
     const compliance=JSON.parse(await env.CASES.get('compliance-config')||'{}');
     const plan=planGuestJourney(c,now,{feeRequestAuthorized:externalFeeRequestAuthorized(c,compliance)}),claim=c.automation?.reminderClaim;
     if(!plan.guestTasks.length||!plan.nextReminderAt||new Date(plan.nextReminderAt)>now) continue;
@@ -36,7 +40,8 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     if(!target) {result.waitingForContact++;continue;}
     const claimId=crypto.randomUUID();
     const messageId=`<${claimId}@${origin.hostname}>`;
-    c.automation={...c.automation,reminderClaim:{id:claimId,state:'claimed',channel:target.channel,messageId,claimedAt:now.toISOString(),tasks:plan.guestTasks.map(t=>t.id)}};
+    const attempt={id:claimId,state:'claimed',channel:target.channel,messageId,recipientHash:await recipientDigest(target.to),claimedAt:now.toISOString(),tasks:plan.guestTasks.map(t=>t.id)};
+    c.automation={...c.automation,reminderClaim:{id:claimId,state:'claimed',channel:target.channel,messageId,claimedAt:now.toISOString(),tasks:attempt.tasks},reminderAttempts:[...(c.automation?.reminderAttempts||[]),attempt].slice(-100)};
     try {await saveStoredCases(env,cases);}
     catch(error) {if(error.code==='CASE_CONFLICT'){result.conflicts++;continue;}throw error;}
     const latest=(await loadStoredCases(env)).find(c=>c.id===id);

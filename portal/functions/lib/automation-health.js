@@ -5,7 +5,7 @@ const KEY='automation-health-v1';
 const MINUTE=60000;
 const age=(value,now)=>{const parsed=Date.parse(value||'');return Number.isFinite(parsed)?now.getTime()-parsed:Infinity;};
 const save=(env,status)=>env.CASES.put(KEY,JSON.stringify(status));
-const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflicts','uncertain','suppressed','created','bookings','cancellations','approvals','alerts','news','released','skipped','hoaLinked','hoaUnassigned'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
+const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflicts','uncertain','suppressed','deliveryNotices','created','bookings','cancellations','approvals','alerts','news','released','skipped','hoaLinked','hoaUnassigned'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
 
 export async function readAutomationStatus(env) {
   const raw=await env.CASES.get(KEY);
@@ -17,7 +17,8 @@ export function findStalledWork(cases,now=new Date()) {
   for(const c of cases) {
     const claim=c.automation?.reminderClaim;
     // Cancellation stops new work, but does not resolve a send already begun.
-    if(claim?.state==='uncertain'||(claim?.state==='claimed'&&age(claim.claimedAt,now)>15*MINUTE)) result.reminderDelivery++;
+    if(claim?.state==='uncertain'||(claim?.state==='claimed'&&age(claim.claimedAt,now)>15*MINUTE)||
+      (c.automation?.reminderAttempts||[]).some(a=>Object.values(a.deliveryNotices||{}).some(n=>!n.reviewedAt))) result.reminderDelivery++;
     if(!c.submission && (c.submissionError?.phase==='delivery_uncertain'||(c.reviewLockedAt&&age(c.reviewLockedAt,now)>15*MINUTE))) result.hoaDelivery++;
   }
   return result;

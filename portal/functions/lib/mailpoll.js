@@ -7,6 +7,7 @@ import { validateAirbnbCaseInput } from './workflow.js';
 import { loadStoredCases, saveStoredCases } from './storage.js';
 import {configuredHoaSenders,analyseHoaReply,archiveHoaReply,markHoaReplyProcessed,refreshHoaArchiveRetention} from './hoa-mail.js';
 import {captureAirbnbRelay} from './airbnb-relay.js';
+import {pollReminderDelivery} from './reminder-delivery.js';
 
 const PORTAL = 'https://portal.example.test';
 
@@ -118,6 +119,13 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
           dirty=true;summary.relayCandidates=(summary.relayCandidates||0)+1;
         }
       }
+    }
+
+    if(env.REMINDER_DELIVERY_MONITOR==='yes') {
+      summary.deliveryNotices=await pollReminderDelivery(env,imap,cases);
+      if(summary.deliveryNotices>0) dirty=true;
+      if(env.HOA_MAILBOX) await imap.selectMailbox(env.HOA_MAILBOX);
+      else await imap.selectMailbox('INBOX');
     }
 
     // Every distinct reply becomes an encrypted source plus a metadata-only

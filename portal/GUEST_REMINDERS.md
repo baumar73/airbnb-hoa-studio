@@ -41,6 +41,12 @@ real addresses or guest records belong in this repository.
   The existing exception notifier uses its cooldown; failed alerts remain retryable.
 - Ambiguous SMTP results stay blocked for delivery reconciliation. A successful
   SMTP send records transport acceptance, not proof that a guest read the message.
+- An optional, default-disabled monitor can inspect structured RFC 3464 delivery
+  reports in a separately verified mailbox. It matches the stable outbound
+  Message-ID and a one-way recipient hash, records only a review hold, and never
+  marks a task failed, retries, or switches channels automatically. The owner
+  can acknowledge the exact notice in the admin area; that acknowledgement does
+  not authorize a resend.
 
 ## Airbnb boundary and remaining acceptance
 
@@ -72,7 +78,8 @@ Regression tests cover independent online-route contact, explicit request, repea
 address entry, malformed input, stale revisions, cross-origin rejection, canceled
 access, encrypted storage/corruption, plaintext rejection, legacy storage, disabled
 delivery disclosure, opt-out/old-address precedence, pre-send opt-out, parallel
-workers, late completion/cancellation, missing-contact health and alert cooldown.
+workers, late completion/cancellation, missing-contact health and alert cooldown,
+structured delivery notices, hashed attempt history, mailbox monitoring and review holds.
 
 Baseline before relay implementation: `npm test`: 189 passing JavaScript tests. `python3 -m unittest discover -s test -p
 'test_*.py'`: 34 passing tests. Syntax check and Pages build pass; `npm audit --json`

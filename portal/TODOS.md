@@ -38,7 +38,7 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 **Priority:** P1
 **Depends on:** Eindeutige offene Aufgaben und belastbare Statusänderungen.
 
-**Lokaler Fortschritt 2026-09-05:** Freiwilliger, verschlüsselt gespeicherter E-Mail-Erinnerungswunsch auch ohne Papierformular; Abmeldung verhindert den Rückfall auf eine alte Formularadresse. Fehlende Erreichbarkeit erscheint im Verwaltungsbereich und bei fälligen Erinnerungen als überwachte Ausnahme. Parallelität, späte Erledigung/Stornierung und Abmeldung unmittelbar vor Versand sind getestet. Details: [Gast-Erinnerungen](GUEST_REMINDERS.md). Zusätzlich ist der bereits von Hermes genutzte Airbnb-Antwortweg per Gmail als standardmäßig deaktivierter Fallback implementiert: verschlüsselte Kandidaten, Originalprüfung durch Eigentümer, buchungsgebundene Freigabe, Antwort-Header und gemeinsamer Schutz vor doppeltem Versand. Details: [Airbnb-Antwortweg](AIRBNB_RELAY.md). Automatische Erstzuordnung ohne Eigentümerprüfung, Rückläuferabgleich und kontrollierte Live-Abnahme bleiben offen. Der Gesamtpunkt ist daher nicht abgeschlossen.
+**Lokaler Fortschritt 2026-09-05:** Freiwilliger, verschlüsselt gespeicherter E-Mail-Erinnerungswunsch auch ohne Papierformular; Abmeldung verhindert den Rückfall auf eine alte Formularadresse. Fehlende Erreichbarkeit erscheint im Verwaltungsbereich und bei fälligen Erinnerungen als überwachte Ausnahme. Parallelität, späte Erledigung/Stornierung und Abmeldung unmittelbar vor Versand sind getestet. Details: [Gast-Erinnerungen](GUEST_REMINDERS.md). Zusätzlich ist der bereits von Hermes genutzte Airbnb-Antwortweg per Gmail als standardmäßig deaktivierter Fallback implementiert: verschlüsselte Kandidaten, Originalprüfung durch Eigentümer, buchungsgebundene Freigabe, Antwort-Header und gemeinsamer Schutz vor doppeltem Versand. Strukturierte Zustellberichte werden nun optional anhand der stabilen Versand-ID und eines Empfänger-Hashs als Prüfhinweis erfasst; sie lösen weder Wiederholung noch Statusfreigabe aus. Details: [Airbnb-Antwortweg](AIRBNB_RELAY.md). Automatische Erstzuordnung ohne Eigentümerprüfung, Rückläuferabgleich im realen Postfach und kontrollierte Live-Abnahme bleiben offen. Der Gesamtpunkt ist daher nicht abgeschlossen.
 
 - [ ] E-Mail-Erreichbarkeit und den zulässigen Airbnb-Nachfassweg klären und testen.
 - [ ] Erinnerungen konkret auf fehlende Angaben, Unterlagen, Zahlung oder Nachforderungen beziehen.
@@ -119,7 +119,7 @@ Diese drei Commits und der Beleg-/Nachforderungsablauf wurden am 2026-09-05 bis 
 
 ## Prüfstand und Abnahmeregeln
 
-Nach der lokalen Ergänzung des Airbnb-Antwortwegs bestanden 206 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34 und 189/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
+Nach der lokalen Ergänzung des Airbnb-Antwortwegs und der optionalen Zustellüberwachung bestanden 212 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34, 189/34 und 206/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
 
 - Neue Abläufe brauchen Tests für vollständige, unvollständige, verspätete, geänderte und stornierte Buchungen sowie technische Ausfälle.
 - Eine Buchung kann vor HOA-Zustimmung bestehen; Bezug erst nach erforderlicher Zustimmung. Ablehnungen und mögliche Stornierungen bleiben gesondert zu prüfende Ausnahmen, keine automatische Schuldzuweisung an den Gast.

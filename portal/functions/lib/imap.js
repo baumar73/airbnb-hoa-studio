@@ -72,6 +72,19 @@ export class Imap {
     return this.cmd(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID REPLY-TO REFERENCES)] BODY.PEEK[1])`);
   }
 
+  async fetchFullMessage(uid) {
+    if(!/^\d+$/.test(String(uid))) throw new Error('Invalid IMAP UID');
+    const raw=await this.cmd(`UID FETCH ${uid} (BODY.PEEK[]<0.131073>)`);
+    const marker=raw.match(/BODY\[\](?:<0>)?\s*\{(\d+)\}\r\n/i);
+    if(!marker) throw new Error('Incomplete IMAP message');
+    const start=(marker.index||0)+marker[0].length,close=raw.match(/(\r?\n?)\)\r\nA\d+ (?:OK|NO|BAD)/i);
+    const end=close&&close.index>=start?close.index+close[1].length: -1;
+    if(end<start) throw new Error('Incomplete IMAP message');
+    const size=Number(marker[1]),body=raw.slice(start,end);
+    if(!Number.isSafeInteger(size)||size!==new TextEncoder().encode(body).length||size>131072) throw new Error('Incomplete IMAP message');
+    return body;
+  }
+
   async close() {
     try { await this.cmd('LOGOUT'); } catch (e) {}
     try { await this.bounded(this.sock.close()); } catch (e) {}

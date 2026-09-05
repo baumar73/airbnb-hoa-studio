@@ -52,6 +52,19 @@ message provenance are verified. Thus this stage still requires owner work.
   QUIT later fails. Timeout/uncertainty remains blocked: no blind resend and no
   fallback to another channel. SMTP acceptance is not Airbnb delivery/read proof.
 
+## Structured delivery notices
+
+`REMINDER_DELIVERY_MONITOR=yes` can inspect a separately verified mailbox for
+RFC 3464 `multipart/report` messages. Configure an exact comma-separated
+allowlist in `REMINDER_DELIVERY_SENDERS` and the exact mailbox in
+`REMINDER_DELIVERY_MAILBOX`. The monitor requires the atomic case store, reads
+messages without marking them seen, and restores the normal HOA mailbox after
+inspection. It matches the historical outbound Message-ID and a one-way
+recipient hash, stores only action/status/source-hash metadata and opens an
+owner review hold. Malformed, ambiguous, stale, duplicate or wrong-recipient
+reports are ignored. Nothing is classified as a confirmed bounce, and no retry,
+channel switch, cancellation or HOA decision is triggered automatically.
+
 ## Before live activation
 
 Obtain explicit operational approval; confirm the existing deployment and
