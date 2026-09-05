@@ -11,6 +11,9 @@ import {pollReminderDelivery} from './reminder-delivery.js';
 import {reconcileBookingUpdate} from './booking-reconcile.js';
 
 const PORTAL = 'https://portal.example.test';
+async function safeNotify(notify, text) {
+  try { await notify(text); } catch { /* A notification outage must not lose a durable case change. */ }
+}
 
 function newCaseFrom(b) {
   const validation = validateAirbnbCaseInput({ guestName: b.guestName, checkIn: b.checkIn, checkOut: b.checkOut, adults: b.adults });
@@ -65,19 +68,19 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
           const c = newCaseFrom(b);
           cases.push(c); dirty = true; summary.bookings++;
           seenSet.add('b' + uid); delete ambiguous[uid];
-          await sendTelegram(env, `🆕 Buchung erkannt & Vorgang angelegt: ${b.guestName}, ${b.checkIn} → ${b.checkOut} (${c.nights} Nächte, ${c.pathType}, ${b.code}, ${b.adults} Erwachsene).\n\n➡️ Bitte Daten im Admin prüfen und den Portalzugang per Airbnb-Chat senden:\n${PORTAL}/admin`);
+          await safeNotify(notify, `🆕 Buchung erkannt & Vorgang angelegt: ${b.guestName}, ${b.checkIn} → ${b.checkOut} (${c.nights} Nächte, ${c.pathType}, ${b.code}, ${b.adults} Erwachsene).\n\n➡️ Bitte Daten im Admin prüfen und den Portalzugang per Airbnb-Chat senden:\n${PORTAL}/admin`);
         } catch (e) {
           summary.alerts++;
           if (!ambiguous[uid]) {
             ambiguous[uid] = { firstSeenAt: new Date().toISOString(), subject: msg.subject.slice(0, 160), reason: String(e && e.message || e).slice(0, 200) };
-            await sendTelegram(env, `📥 Airbnb-Buchung braucht manuelle Bearbeitung: ${b.guestName || msg.subject.slice(0, 80)} — ${String(e && e.message || e).slice(0, 160)}. Kein unvollständiger Vorgang wurde angelegt. ${PORTAL}/admin`);
+            await safeNotify(notify, `📥 Airbnb-Buchung braucht manuelle Bearbeitung: ${b.guestName || msg.subject.slice(0, 80)} — ${String(e && e.message || e).slice(0, 160)}. Kein unvollständiger Vorgang wurde angelegt. ${PORTAL}/admin`);
           }
         }
       } else {
         summary.alerts++;
         if (!ambiguous[uid]) {
           ambiguous[uid] = { firstSeenAt: new Date().toISOString(), subject: msg.subject.slice(0, 160) };
-          await sendTelegram(env, `📥 Airbnb-Mail erkannt, aber nicht sicher parsebar („${msg.subject.slice(0, 80)}"). Kein Vorgang wurde geraten oder angelegt. Bitte im Admin prüfen: ${PORTAL}/admin`);
+          await safeNotify(notify, `📥 Airbnb-Mail erkannt, aber nicht sicher parsebar („${msg.subject.slice(0, 80)}"). Kein Vorgang wurde geraten oder angelegt. Bitte im Admin prüfen: ${PORTAL}/admin`);
         }
       }
     }
@@ -92,7 +95,7 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
         : null;
       if (!hit) {
         summary.alerts++;
-        await sendTelegram(env, `⚠️ Airbnb-Stornierung erkannt, aber keinem Vorgang sicher zugeordnet: „${msg.subject.slice(0, 100)}“. Kein Fall wurde automatisch verändert.`);
+        await safeNotify(notify, `⚠️ Airbnb-Stornierung erkannt, aber keinem Vorgang sicher zugeordnet: „${msg.subject.slice(0, 100)}“. Kein Fall wurde automatisch verändert.`);
       } else if (hit.status !== 'canceled') {
         hit.status = 'canceled';
         hit.cancellation = {
@@ -106,7 +109,7 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
         // an in-flight/uncertain send or permit a duplicate submission.
         dirty = true;
         summary.cancellations++;
-        await sendTelegram(env, `🚫 Airbnb-Stornierung verarbeitet: ${hit.guestName} (${hit.reservationCode}). Der Portalzugang ist gesperrt; es wurde keine Gast- oder HOA-Nachricht gesendet.`);
+        await safeNotify(notify, `🚫 Airbnb-Stornierung verarbeitet: ${hit.guestName} (${hit.reservationCode}). Der Portalzugang ist gesperrt; es wurde keine Gast- oder HOA-Nachricht gesendet.`);
       }
       seenSet.add('c' + uid);
     }

@@ -89,6 +89,25 @@ test('poller links every HOA reply once, sends no guest email and never confirms
   assert.equal((await pollMail(env,deps)).hoaLinked,0);assert.equal(notifications,1);
   assert.doesNotMatch(values.get('hoa-news'),/\$100 payment|manager@/);
 });
+test('repeated Airbnb cancellation mail closes a case once and never reopens or re-notifies it',async()=>{
+  const {env,values}=environment();let notifications=0;
+  const imap={open:async()=>{},close:async()=>{},searchRaw:async query=>{
+    if(query.includes('canceled OR cancelled OR storniert')) return [77];
+    return [];
+  },fetchMessage:async()=>rawMessage('Reservation canceled HMDEMO0002','Your Airbnb reservation was canceled.','cancel-77')};
+  const deps={imap,notify:async()=>{notifications++;return true;}};
+  assert.equal((await pollMail(env,deps)).cancellations,1);
+  assert.equal(JSON.parse(values.get('cases'))[0].status,'canceled');assert.equal(notifications,1);
+  assert.equal((await pollMail(env,deps)).cancellations,0);
+  assert.equal(JSON.parse(values.get('cases'))[0].status,'canceled');assert.equal(notifications,1);
+});
+test('a notification outage does not discard a durable Airbnb cancellation',async()=>{
+  const {env,values}=environment();
+  const imap={open:async()=>{},close:async()=>{},searchRaw:async query=>query.includes('canceled OR cancelled OR storniert')?[78]:[],fetchMessage:async()=>rawMessage('Reservation canceled HMDEMO0002','Your Airbnb reservation was canceled.','cancel-78')};
+  await pollMail(env,{imap,notify:async()=>{throw Error('notification transport unavailable');}});
+  assert.equal(JSON.parse(values.get('cases'))[0].status,'canceled');
+  assert.equal(JSON.parse(values.get('mail-seen')).uids.includes('c78'),true);
+});
 test('a failed case save cannot acknowledge an email as processed before retry',async()=>{
   const {env,values}=environment();let fail=true,notifications=0;
   const put=env.CASES.put;
