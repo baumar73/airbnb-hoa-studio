@@ -1,0 +1,73 @@
+// Diagnostic metadata only. This eventually consistent KV record must NEVER
+// authorize a send, unlock a claim or replace atomic per-case delivery state.
+const KEY='automation-health-v1';
+const MINUTE=60000;
+const age=(value,now)=>{const parsed=Date.parse(value||'');return Number.isFinite(parsed)?now.getTime()-parsed:Infinity;};
+const save=(env,status)=>env.CASES.put(KEY,JSON.stringify(status));
+const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflicts','uncertain','suppressed','created','cancellations','approvals','alerts','news','released','skipped'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
+
+export async function readAutomationStatus(env) {
+  const raw=await env.CASES.get(KEY);
+  return raw?JSON.parse(raw):null;
+}
+
+export function findStalledWork(cases,now=new Date()) {
+  const result={reminderDelivery:0,hoaDelivery:0};
+  for(const c of cases) {
+    const claim=c.automation?.reminderClaim;
+    // Cancellation stops new work, but does not resolve a send already begun.
+    if(claim?.state==='uncertain'||(claim?.state==='claimed'&&age(claim.claimedAt,now)>15*MINUTE)) result.reminderDelivery++;
+    if(!c.submission && (c.submissionError?.phase==='delivery_uncertain'||(c.reviewLockedAt&&age(c.reviewLockedAt,now)>15*MINUTE))) result.hoaDelivery++;
+  }
+  return result;
+}
+
+export function automationHealth(status,now=new Date()) {
+  if(!status) return {ok:false,reason:'not_started'};
+  if(age(status.lastSuccessAt,now)>90*MINUTE) return {ok:false,reason:'stale'};
+  if(status.state==='failed') return {ok:false,reason:'stage_failed'};
+  if(status.state==='running'&&age(status.startedAt,now)>15*MINUTE) return {ok:false,reason:'stalled'};
+  if(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery) return {ok:false,reason:'delivery_reconciliation'};
+  return {ok:true,reason:'ok'};
+}
+
+export async function notifyAutomationFailure(env,status,now,notify) {
+  if(!status) return;
+  const health=automationHealth(status,now);
+  // One transient failure stays quiet. Persistent failure, a stale successful
+  // heartbeat or uncertain delivery is a genuine exception, not a guest to-do.
+  const actionable=(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
+    (status.lastSuccessAt&&age(status.lastSuccessAt,now)>90*MINUTE)||
+    (status.state==='running'&&age(status.startedAt,now)>15*MINUTE);
+  if(!actionable||health.ok||age(status.lastAlertAt,now)<24*60*MINUTE) return;
+  try {
+    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf ist ausgefallen oder ein Versand muss abgeglichen werden. Technischen Status unter /admin/automation-health prüfen. Unklare Sendungen werden nicht automatisch erneut versendet.')) {
+      status.lastAlertAt=now.toISOString();await save(env,status);
+    }
+  } catch { /* Leave cooldown open; the public health endpoint remains unhealthy. */ }
+}
+
+export async function runAutomationCycle(env,jobs,now=new Date()) {
+  const previous=await readAutomationStatus(env);
+  const status={state:'running',stage:'mail',startedAt:now.toISOString(),
+    enabled:{guestReminders:env.AUTO_GUEST_REMINDERS==='yes',hoaSubmission:env.AUTO_HOA_SUBMIT==='yes'},results:{},
+    consecutiveFailures:previous?.consecutiveFailures||0,lastSuccessAt:previous?.lastSuccessAt,
+    lastAlertAt:previous?.lastAlertAt,stalled:previous?.stalled};
+  // Persist before work so abrupt termination is observable by the next check.
+  await save(env,status);
+  try {
+    for(const stage of ['mail','reminders','submissions','inspect']) {
+      status.stage=stage;await save(env,status);
+      const result=await jobs[stage]();
+      if(stage==='inspect') status.stalled=findStalledWork(result,now);
+      else status.results[stage]=safeCounts(result);
+    }
+    status.state='completed';status.consecutiveFailures=0;status.lastSuccessAt=now.toISOString();
+  } catch {
+    // Never store transport error strings, mailbox contents, names or secrets.
+    status.state='failed';status.consecutiveFailures++;
+  }
+  await save(env,status);
+  await notifyAutomationFailure(env,status,now,jobs.notify);
+  return status;
+}

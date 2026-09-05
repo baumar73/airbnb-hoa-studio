@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {runInNewContext} from 'node:vm';
 import { CaseStore } from '../case-store/src/index.js';
 import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret } from '../functions/lib/storage.js';
 import {caseReviewDigest,reviewContextHash} from '../functions/lib/review.js';
@@ -33,6 +34,41 @@ async function seed(env) {
   cases.push({id:'a',guestName:'Jane Smith',wizard:{adults:[{firstName:'Jane',idNumber:'private-test-id'}]}},{id:'b',guestName:'John Doe'});
   await saveStoredCases(env,cases);
 }
+test('an old browser draft cannot overwrite a newer saved form or changed booking',async()=>{
+  const {env}=setup();
+  const cases=await loadStoredCases(env);
+  cases.push({id:'draft-case',token:'drafttoken123',guestName:'Jane Smith',pathType:'full',screeningRoute:'paper',hoaOccupancyConfirmedAt:'2026-09-01',adults:1,nights:30,checkIn:'2026-11-01',checkOut:'2026-12-01',steps:[]});
+  await saveStoredCases(env,cases);
+  const request=(method,form)=>onRequest({env,request:new Request('https://portal.example.test/w/drafttoken123',{method,headers:{Origin:'https://portal.example.test'},...(form?{body:new URLSearchParams(form)}:{})})});
+  const page=await (await request('GET')).text();
+  const version=page.match(/name="draftVersion" value="([0-9]+)"/)?.[1];
+  assert.ok(version,'the rendered form carries its source revision');
+  // Execute the actual rendered handler against a minimal DOM adapter. This
+  // is a unit test, not a claim of full real-browser/mobile verification.
+  const script=[...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.includes('let saving = false'));
+  let handler,posted,navigated=false;
+  const notice={textContent:''},form={action:'https://portal.example.test/w/drafttoken123',elements:{draftVersion:{value:version},a0_firstName:{value:'Keep my entries'}},addEventListener:(event,fn)=>{handler=fn;}};
+  const sandbox={document:{querySelectorAll:()=>[],querySelector:()=>form,getElementById:()=>notice},location:{assign:()=>{navigated=true;}},FormData:class extends Map{constructor(f){super(Object.entries(f.elements).map(([k,v])=>[k,v.value]));}},fetch:async(url,options)=>{posted=options.body;return {status:409,ok:false};}};
+  runInNewContext(script,sandbox);
+  await handler({currentTarget:form,preventDefault(){},submitter:{name:'saveMode',value:'draft'}});
+  assert.equal(posted.get('saveMode'),'draft');assert.equal(posted.get('draftVersion'),version);
+  assert.equal(navigated,false);assert.equal(form.elements.a0_firstName.value,'Keep my entries');assert.match(notice.textContent,/Not saved/);
+  sandbox.fetch=async()=>{throw new Error('offline');};
+  await handler({currentTarget:form,preventDefault(){}});
+  assert.equal(navigated,false);assert.match(notice.textContent,/connection was interrupted/);
+  assert.equal((await request('POST',{draftVersion:version,saveMode:'draft',a0_firstName:'New draft'})).status,303);
+  const stale=await request('POST',{draftVersion:version,saveMode:'draft',a0_firstName:'Old tab'});
+  assert.equal(stale.status,409);
+  assert.match(await stale.text(),/not saved/);
+  assert.equal((await loadStoredCases(env))[0].wizard.adults[0].firstName,'New draft');
+  assert.equal((await request('POST',{saveMode:'draft',a0_firstName:'Missing revision'})).status,409);
+  const newerPage=await (await request('GET')).text();
+  const newerVersion=newerPage.match(/name="draftVersion" value="([0-9]+)"/)[1];
+  const changed=await loadStoredCases(env);changed[0].checkIn='2026-11-02';await saveStoredCases(env,changed);
+  assert.equal((await request('POST',{draftVersion:newerVersion,saveMode:'draft',a0_firstName:'Stale dates'})).status,409);
+  const saved=(await loadStoredCases(env))[0];
+  assert.equal(saved.checkIn,'2026-11-02');assert.equal(saved.submission,undefined);
+});
 test('separate case edits merge without replacing other reservations', async()=>{
   const {env,legacy,values}=setup(); await seed(env);
   const first=await loadStoredCases(env),second=await loadStoredCases(env);

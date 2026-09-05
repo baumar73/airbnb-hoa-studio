@@ -85,28 +85,24 @@ import { pollMail } from '../../functions/lib/mailpoll.js';
 import { loadStoredCases, saveStoredCases, inheritCaseSnapshot } from '../../functions/lib/storage.js';
 import { runGuestReminders } from '../../functions/lib/guest-reminders.js';
 import { runAutomaticSubmissions } from '../../functions/lib/auto-submit.js';
+import {runAutomationCycle,readAutomationStatus,notifyAutomationFailure} from '../../functions/lib/automation-health.js';
 
 export default {
   async scheduled(event, env, ctx) {
     const now = new Date();
 
-    // half-hourly runs: mail polling only
+    // Mail is always first: a failed poll must not hide a missed cancellation
+    // while later stages continue sending reminders or HOA packages.
     if (event.cron === '*/30 * * * *') {
-      try {
-        const s = await pollMail(env);
-        console.log('mailpoll:', JSON.stringify(s));
-        // Poll first so known cancellations suppress messages. Disabled until
-        // the approved atomic-storage and guest-communication cutover.
-        const reminders=await runGuestReminders(env,now);
-        console.log('guest reminders:',JSON.stringify(reminders));
-        const submissions=await runAutomaticSubmissions(env,now);
-        console.log('automatic submissions:',JSON.stringify(submissions));
-      } catch (e) {
-        console.log('mailpoll error:', String(e && e.message || e));
-        // alert at most the daily run handles persistent errors; one-off IMAP hiccups stay silent
-      }
+      const status=await runAutomationCycle(env,{
+        mail:()=>pollMail(env),reminders:()=>runGuestReminders(env,now),
+        submissions:()=>runAutomaticSubmissions(env,now),inspect:()=>loadStoredCases(env),
+        notify:text=>sendTelegram(env,text),
+      },now);
+      console.log('automation:',status.state,status.stage);
       return;
     }
+    await notifyAutomationFailure(env,await readAutomationStatus(env),now,text=>sendTelegram(env,text));
     const loadedCases = await loadStoredCases(env);
     const { kept: cases, purged } = purgeExpiredCases(loadedCases, now, 90);
     inheritCaseSnapshot(loadedCases,cases);

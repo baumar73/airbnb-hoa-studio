@@ -7,13 +7,14 @@ import { generateFloodDisclosure } from './lib/flood.js';
 import { submitApprovedPackage, isReadyForOwnerReview, docStates, generatePackage } from './lib/submit.js';
 import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isGuestPaperworkComplete } from './lib/workflow.js';
 import { COMPLIANCE_POLICY_VERSION, HOA_SOURCE_PACKET, adverseActionNotice, isAnnualRental, isSameLesseeRenewal, liveComplianceState, externalFeeRequestAuthorized } from './lib/compliance.js';
-import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases, inheritCaseSnapshot } from './lib/storage.js';
+import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases, inheritCaseSnapshot, caseSnapshotVersion } from './lib/storage.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
 import { bookingLastName } from './lib/parse.js';
 import { needsReview, reviewContextHash, validateReviewReport, reviewCaseData, caseReviewDigest } from './lib/review.js';
 import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib/package-archive.js';
 import {planGuestJourney} from './lib/journey.js';
+import {readAutomationStatus,automationHealth} from './lib/automation-health.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -653,7 +654,7 @@ function applicationRouteView(c, error) {
      <div class="card"><p class="muted">Choose only one route. If the HOA already sent you a Tenant Evaluation invitation, choose Online. If you are unsure, message Owner through Airbnb before choosing.</p></div>`);
 }
 
-function wizardView(c, saved) {
+function wizardView(c, saved, draftVersion = null) {
   const w = c.wizard || {};
   const adults = w.adults || [];
   const A = (i, f) => {
@@ -800,10 +801,29 @@ function wizardView(c, saved) {
       return { cv, isDrawn: () => drawn, reset: () => { ctx.clearRect(0,0,cv.width,cv.height); drawn = false; } };
     });
     document.querySelectorAll('[data-clear]').forEach(btn => btn.onclick = () => pads[+btn.dataset.clear].reset());
-    document.querySelector('form').addEventListener('submit', () => {
+    let saving = false;
+    document.querySelector('form').addEventListener('submit', async (event) => {
       pads.forEach((p, i) => {
         if (p.isDrawn()) document.querySelector('[name=a' + i + '_sig]').value = p.cv.toDataURL('image/png');
       });
+      const form = event.currentTarget;
+      if (!form.elements.draftVersion) return;
+      event.preventDefault();
+      if (saving) return;
+      saving = true;
+      const notice = document.getElementById('save-notice');
+      notice.textContent = 'Saving your paperwork…';
+      const data = new FormData(form);
+      if (event.submitter?.name) data.set(event.submitter.name, event.submitter.value);
+      try {
+        const response = await fetch(form.action, { method: 'POST', body: data, credentials: 'same-origin' });
+        if (response.ok && response.redirected) { location.assign(response.url); return; }
+        notice.textContent = response.status === 409
+          ? 'Not saved: this reservation or draft changed in another window. Your entries are still here. Open the latest saved form below in a new tab and compare before continuing.'
+          : 'We could not confirm your save. Keep this page open and check the latest saved form below before trying again.';
+      } catch {
+        notice.textContent = 'The connection was interrupted. Keep this page open and check the latest saved form below before trying again. Your entries are still here.';
+      } finally { saving = false; }
     });
     </script>`;
   return page('Your paperwork — Demo Unit',
@@ -811,6 +831,7 @@ function wizardView(c, saved) {
      <p>Stay ${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.adults} adult${c.adults === 1 ? '' : 's'} age 18+${Number(c.expectedMinors || 0) ? ` · ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''} · ${isFull ? 'full HOA application package' : 'guest registration'}</p>
      ${saved === 'ready' ? '<span class="pill ok">Complete — ready for Owner to review</span>' : saved === 'draft' ? '<span class="pill warn">Draft saved — some required details or signatures are still missing below</span>' : ''}`,
     `<form method="post" action="/w/${c.token}">
+       ${draftVersion === null ? '' : `<input type="hidden" name="draftVersion" value="${draftVersion}"><div class="card"><p id="save-notice" role="status" aria-live="polite"></p><a href="/w/${c.token}" target="_blank" rel="noopener">Open latest saved form in a new tab</a></div>`}
        ${Array.from({ length: c.adults }, (_, i) => adultBlock(i)).join('')}
        ${extras}
        ${rulesSection}
@@ -1432,6 +1453,11 @@ async function routeRequest(context) {
   if (p === '/privacy' && request.method === 'GET') return html(page('Privacy — Demo Unit', '<h1>Privacy notice</h1><p>This private portal is operated by Property Owner for the limited purpose of preparing and tracking Example Condominium guest-registration and lease-approval paperwork for Unit 405D.</p>', `<div class="card"><h2>What is collected</h2><p>Booking reference, stay dates, applicant names and contact details, address, birth date and identification details where the association form requires them, electronic consent, signatures, signature-event hashes, and workflow status. Raw IP addresses, Social Security numbers, medical information, and ID-image uploads are deliberately not retained through this portal.</p><h2>Why and with whom</h2><p>The information is used only to prepare and quality-check the association forms and, after an explicit owner release, submit the package to Example Property Management / Example Condominium. Cloudflare provides the portal infrastructure. OpenAI processes the purpose-bound application data and generated document text in the United States for automated completeness and consistency review. Google Gmail is used only for an owner-approved submission email. Infrastructure credentials and unrelated personal data are not included in the AI review.</p><h2>Retention and security</h2><p>Sensitive wizard contents, including government-ID numbers and applicant signatures, and the reusable owner signature are encrypted by the application with AES-256-GCM before KV storage. Operational case metadata remains access-controlled but is not represented as application-layer encrypted. Private pages are marked no-store and noindex. Access links use high-entropy bearer tokens and must not be forwarded. Active guest case data is deleted 90 days after checkout unless a documented legal hold or mandatory recordkeeping duty applies. Temporary review files are deleted after processing. If a breach involving covered personal information is determined, the owner workflow requires the Florida Information Protection Act response plan, including notice deadlines and secure disposal.</p><h2>Your choices</h2><p>Do not enter information for another adult or sign on their behalf. To request access, correction, deletion, a paper alternative, or review without automated processing, contact Owner through the existing Airbnb conversation before submitting data.</p><p class="muted">Last updated: September 2, 2026 · policy ${COMPLIANCE_POLICY_VERSION}</p>`));
   if (p === '/fair-housing' && request.method === 'GET') return html(page('Fair housing — Demo Unit', '<h1>Fair housing and reasonable accommodations</h1><p>Applications are handled consistently and without discrimination prohibited by federal or Florida law.</p>', `<div class="card"><h2>How decisions are made</h2><p>No protected characteristic is used to rank, screen, approve or deny a stay. This portal never automatically approves or denies an applicant. Tenant-screening reports remain in the association's approved external process; any adverse action based on a consumer report requires a separate notice and human review.</p><h2>Assistance animals</h2><p>Service animals and other assistance animals are not pets. A no-pets rule does not by itself bar a reasonable accommodation. No pet fee or animal deposit is charged for an approved assistance animal. A request may be made through the existing Airbnb conversation; please describe the accommodation requested, but do not send a diagnosis or medical records through this portal. No particular certificate or registration is required, and breed, size, or weight alone is not a reason for denial. If both the disability and disability-related need are not apparent, Owner may request only reliable supporting information permitted by law. Any direct-threat or property-damage assessment is individualized and considers whether another accommodation can reduce the risk.</p><h2>Privacy and equal treatment</h2><p>Owner does not disclose or discuss the race, color, national origin, religion, sex, familial status, disability, or other protected characteristics of past, current, or prospective guests or neighbors. Every applicant receives the same neutral booking, occupancy, and condominium-association process information.</p><h2>Corrections</h2><p>If application data is wrong or incomplete, use the private edit link before submission or message Owner. A screening-report dispute must be made with the reporting agency identified in any adverse-action notice.</p></div>`));
   if (p === '/healthz') return new Response('ok', { headers: { 'Content-Type': 'text/plain', ...SEC_HEADERS, 'Cache-Control': 'no-store' } });
+  if (p === '/automation-healthz' && request.method === 'GET') {
+    let ok=false;
+    try {ok=automationHealth(await readAutomationStatus(env)).ok;} catch { /* Fail closed without exposing configuration or storage errors. */ }
+    return new Response(ok?'ok':'unavailable',{status:ok?200:503,headers:{'Content-Type':'text/plain',...SEC_HEADERS,'Cache-Control':'no-store'}});
+  }
   if (p.startsWith('/forms/') || p === '/robots.txt' || p === '/llms.txt' || p === '/sitemap.xml' || p === '/manifest.webmanifest' || p === '/favicon.svg') return env.ASSETS.fetch(request);
 
   // Read-only API for Hermes/GBrain — GET only, token-gated, no mutations possible.
@@ -1586,7 +1612,7 @@ async function routeRequest(context) {
       if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return html(occupancyView(c));
       if (c.pathType === 'full' && c.screeningRoute === 'undecided') return html(applicationRouteView(c));
       if (c.pathType === 'full' && c.screeningRoute === 'online') return redirect(`/v/${c.token}`);
-      return html(wizardView(c, url.searchParams.get('saved')));
+      return html(wizardView(c, url.searchParams.get('saved'), env.CASE_STORE ? caseSnapshotVersion(cases,c.id) : null));
     }
 
     if (!mW[2] && request.method === 'POST') {
@@ -1594,6 +1620,9 @@ async function routeRequest(context) {
       if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return redirect(`/w/${c.token}`);
       if (c.pathType === 'full' && c.screeningRoute !== 'paper') return new Response('choose the paper route before editing local forms', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       const form = await request.formData();
+      if (env.CASE_STORE && String(form.get('draftVersion') || '') !== String(caseSnapshotVersion(cases,c.id))) {
+        return html(page('Draft updated', '<h1>Your changes were not saved</h1>', `<div class="card"><p>This reservation or draft changed since you opened the form. Keep your entries in the original tab and compare them with the latest saved form before continuing.</p><a href="/w/${c.token}" target="_blank" rel="noopener">Open latest saved form</a></div>`),409);
+      }
       const g = (n, max = 254) => String(form.get(n) || '').trim().slice(0, max);
       const saveMode = g('saveMode', 16);
       const prevWizard = c.wizard || null;
@@ -1707,6 +1736,10 @@ async function routeRequest(context) {
     const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
     const denied = reviewer ? null : await checkAdmin(request, env);
     if (denied) return denied;
+    if (p === '/admin/automation-health' && request.method === 'GET') {
+      const status=await readAutomationStatus(env);
+      return new Response(JSON.stringify({health:automationHealth(status),status}),{headers:{'Content-Type':'application/json',...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+    }
     if (p==='/admin/case-store/initialize' && request.method==='POST') {
       const data=await request.json();
       if (env.ALLOW_CASE_IMPORT!=='yes' || !env.CASE_STORE || data.confirm!=='INITIALIZE') return new Response('explicit import is disabled',{status:403,headers:SEC_HEADERS});

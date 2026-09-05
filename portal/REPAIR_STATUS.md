@@ -66,6 +66,25 @@ It must be represented in the activation audit; it does not assert HOA approval.
   an excuse to add an owner surcharge. Documented legal holds prevent auto-purge.
 - Owner case overview includes workflow state, last actual guest reminder,
   outstanding evidence and standing-authority release status.
+- Atomic-mode guest forms now carry their case revision. An older tab, missing
+  revision or booking change returns 409 before any wizard mutation. Concurrent
+  changes during the POST remain protected by the existing atomic store. With
+  JavaScript enabled, conflict/network errors keep current entries in the DOM and
+  offer a separate tab for comparison; no private browser storage is added.
+  Legacy KV mode intentionally retains its old behavior until approved cutover.
+- `functions/lib/automation-health.js` and cron record the last successful cycle,
+  current/failed stage and consecutive failures. Mail must succeed before any
+  downstream sends. Persistent failures and stranded/uncertain delivery claims
+  produce a technical exception notification, with a best-effort 24-hour cooldown.
+  Claims remain locked, including after cancellation; no blind resend or invented
+  receipt reconciliation is introduced. Diagnostics retain only allowlisted
+  numeric job counts, timestamps and flags, never transport error strings.
+- `/automation-healthz` returns only `ok`/`unavailable` (200/503). No successful
+  cycle within 90 minutes, stage failure or stranded delivery is unhealthy.
+  Owner-authenticated `/admin/automation-health` supplies details and separate
+  enabled flags; reviewer-only credentials cannot access it. The original
+  `/healthz` remains a basic web liveness check. A healthy cron heartbeat does not
+  mean guest communications are enabled or the product is release-ready.
 
 The legacy storage fallback deliberately remains active until an approved
 cutover. Therefore, adding this code alone does NOT repair live KV concurrency.
@@ -74,7 +93,12 @@ the parser fix does not reconstruct missing names from nothing.
 
 ## Verification
 
-- `node --test --test-reporter=dot test/*.test.js`: 104 tests pass.
+- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 111 tests pass.
+  Seven new regressions cover stale browser revisions/changed booking dates,
+  retained form inputs on conflict and connection loss, stage-specific failure,
+  recovery, alert cooldown, stranded claims, safe counters and authenticated
+  health access. The rendered form script is exercised in a minimal DOM adapter,
+  not represented as a real mobile/browser end-to-end test.
 - `python3 -m unittest discover -s test -p 'test_*.py'`: 7 tests pass.
 - `node scripts/test_atomic_runtime.mjs`: passes in local Miniflare/workerd with
   SQLite Durable Objects, synthetic encrypted records and no cloud account.
@@ -182,11 +206,21 @@ existing machine. No migration to another host is proposed.
 
 Remaining release blockers include a tested activation/rollback mechanism,
 deployment of dedicated review credentials, real-template and transport tests,
-delivery-uncertainty reconciliation, stale-browser draft handling, retry/health
-monitoring, date-change reconciliation, manual state guards and verified external
+delivery-uncertainty reconciliation, date-change reconciliation, manual state guards and verified external
 payment permission. Existing signed contracts must be backfilled from actual sent
 originals; never regenerate them and represent them as historical executed copies.
 The existing runner's Hermes version/zero-tool behavior and retained transcript
 storage need verification and an explicit retention solution before sensitive
 production input is processed. Local temporary-file cleanup does not itself purge
 Hermes history. This is not yet a complete production rollout package.
+
+Monitoring limitations: the heartbeat is diagnostic, eventually consistent KV,
+not an atomic send/authorization lock. Overlapping cron runs can race the status
+or notification cooldown; delivery safety remains in atomic case claims. Wire an
+independent external monitor to `/automation-healthz` during approved rollout:
+an entirely stopped scheduler cannot alert about its own outage. Neither that
+monitor nor production heartbeat routes have been activated here. SMTP/IMAP
+timeouts and verified delivery reconciliation remain pending; a stalled claim is
+detected, not automatically unlocked. A booking date change already recorded in
+the portal invalidates an old form, but ingestion of Airbnb amendments is still
+unimplemented. No actual HOA or payment acceptance is inferred by these repairs.
