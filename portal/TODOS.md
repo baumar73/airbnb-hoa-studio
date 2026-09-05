@@ -33,6 +33,9 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 
 Diese Teilaufgaben belegen lokale Technik, keine Live-Abnahme.
 
+Die anschließenden 20 selbständig beauftragten technischen Teilaufgaben werden
+einzeln in [Arbeitsblock 20](WORK_BATCH_20.md) mit ihrem Abschluss nachgehalten.
+
 ## Tenant Evaluation und HOA-Rückmeldungen
 
 ### Verifizierbare Rückmeldungen und Nachforderungen verarbeiten

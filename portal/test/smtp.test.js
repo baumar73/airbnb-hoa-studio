@@ -23,6 +23,12 @@ function fakeSocket({rejectAuth=false,failQuit=false}={}) {
 }
 const env={GMAIL_USER:'synthetic@example.test',GMAIL_APP_PASSWORD:'synthetic-private-password'};
 const message={to:['guest@example.test'],cc:[],subject:'Synthetic test',text:'No real email'};
+test('attachment filenames cannot inject MIME headers or paths',async()=>{
+  for(const filename of ['a.pdf\r\nBcc: x@y','a".pdf','../a.pdf','a\\b.pdf','', 'x'.repeat(256)]) {
+    await assert.rejects(sendViaGmail(env,{...message,attachments:[{filename,bytes:new Uint8Array([1])}]},()=>assert.fail('unsafe attachment opened socket')),/attachment/);
+  }
+  assert.match(buildMime({...message,from:env.GMAIL_USER,attachments:[{filename:'HOA application.pdf',bytes:new Uint8Array([1,2,3])}]}),/filename="HOA application.pdf"/);
+});
 test('accepted SMTP DATA remains success when QUIT loses the connection',async()=>{
   assert.equal(await sendViaGmail(env,message,()=>fakeSocket({failQuit:true})),true);
 });

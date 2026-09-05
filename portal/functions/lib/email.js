@@ -26,6 +26,9 @@ export function buildMime({ fromName, from, to, cc, subject, text, attachments,m
   ].filter(Boolean).join('\r\n');
   let body = `--${boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap76(b64(text))}\r\n`;
   for (const att of attachments || []) {
+    if (!att || typeof att.filename !== 'string' || !att.filename.length || att.filename.length > 255 || /[\x00-\x1f\x7f"\\/]/.test(att.filename) || !(att.bytes instanceof Uint8Array)) {
+      throw new Error('Invalid email attachment');
+    }
     body += `--${boundary}\r\nContent-Type: application/pdf; name="${att.filename}"\r\n` +
       `Content-Disposition: attachment; filename="${att.filename}"\r\nContent-Transfer-Encoding: base64\r\n\r\n` +
       wrap76(bytesToB64(att.bytes)) + '\r\n';
