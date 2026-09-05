@@ -1,5 +1,6 @@
 import {needsReview,reviewContextHash} from './review.js';
 import {getEncryptedSecret} from './storage.js';
+import {isValidISODate} from './workflow.js';
 
 const MINUTE=60000;
 const HEARTBEAT='reviewer-heartbeat-v1';
@@ -60,6 +61,7 @@ export async function reviewBacklog(env,cases,now=new Date()) {
   let pending=0,urgent=0,stalled=0;
   for(const c of cases) {
     if(!needsReview(c)) continue;
+    if(isValidISODate(c.checkOut)&&c.checkOut<now.toISOString().slice(0,10)) continue;
     const context=await reviewContextHash(c,owner,compliance);
     if(completedReview(c,context)) continue;
     pending++;

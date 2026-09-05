@@ -15,7 +15,7 @@ gesonderte Arbeit.
 - [x] 6. Explizite Jahreszahlen in Buchungsdaten erhalten
 - [x] 7. Prüfversion an Gastname, Verfahrensweg und Kinderzahl binden
 - [x] 8. Leere oder strukturell ungültige KI-Prüfberichte abweisen
-- [ ] 9. Abgereiste Buchungen aus dem Prüfrückstand nehmen
+- [x] 9. Abgereiste Buchungen aus dem Prüfrückstand nehmen
 - [ ] 10. Beschädigte Prüfwiederholungszähler begrenzen
 - [ ] 11. gbrain-Schreibergebnis anhand des tatsächlichen Inhalts prüfen
 - [ ] 12. gbrain-Ablaufbereinigung vor überholten Löschständen schützen

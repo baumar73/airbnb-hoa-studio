@@ -35,6 +35,14 @@ test('backlog detects stalled progress and near arrivals without retaining guest
   assert.doesNotMatch(JSON.stringify(status),/private guest|synthetic/);
   assert.equal((await reviewBacklog(env,[],now)).unhealthy,true);
 });
+test('past stays do not inflate review backlog, while missing dates remain visible',async()=>{
+  const env={CASES:{get:async()=>null}};
+  const past={...fixture(),checkOut:'2026-09-04'};
+  assert.equal((await reviewBacklog(env,[past],now)).pending,0);
+  for(const checkOut of [undefined,'invalid','2026-09-05','2026-09-06']) {
+    assert.equal((await reviewBacklog(env,[{...past,checkOut}],now)).pending,1);
+  }
+});
 test('a reachable reviewer is not healthy if it never completes a scan',async()=>{
   const values=new Map();const env={CASES:{get:async k=>values.get(k)||null,put:async(k,v)=>values.set(k,v)}};
   await recordReviewerHeartbeat(env,'failed',now);
