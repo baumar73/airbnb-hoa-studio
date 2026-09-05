@@ -17,7 +17,7 @@ gesonderte Arbeit.
 - [x] 8. Leere oder strukturell ungültige KI-Prüfberichte abweisen
 - [x] 9. Abgereiste Buchungen aus dem Prüfrückstand nehmen
 - [x] 10. Beschädigte Prüfwiederholungszähler begrenzen
-- [ ] 11. gbrain-Schreibergebnis anhand des tatsächlichen Inhalts prüfen
+- [x] 11. gbrain-Schreibergebnis anhand des tatsächlichen Inhalts prüfen
 - [ ] 12. gbrain-Ablaufbereinigung vor überholten Löschständen schützen
 - [ ] 13. gbrain-Importe ohne gültige Aufbewahrungsfrist abweisen
 - [ ] 14. gbrain-Zustandsgrenze vor neuen Schreibvorgängen durchsetzen

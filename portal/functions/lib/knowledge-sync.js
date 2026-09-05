@@ -80,6 +80,11 @@ function destinationRevision(current) {
   return current && isRevision(current.revision) ? current.revision : null;
 }
 
+async function exactOutcome(current,change) {
+  return destinationRevision(current)===change.revision && current.operation===change.operation &&
+    (change.operation==='delete'||await digest(current.record)===await digest(change.record));
+}
+
 async function applyChange(destination, change) {
   const before = await readDestination(destination, change.id);
   const beforeRevision = destinationRevision(before);
@@ -94,13 +99,13 @@ async function applyChange(destination, change) {
     // A timeout is not permission to replay blindly. Read the destination and
     // accept only an exact, durable outcome.
     const afterUncertain = await readDestination(destination, change.id);
-    if (destinationRevision(afterUncertain) !== change.revision || afterUncertain.operation !== change.operation) {
+    if (!await exactOutcome(afterUncertain,change)) {
       throw new KnowledgeSyncError('DESTINATION_UNCERTAIN', 'Knowledge destination write needs reconciliation');
     }
     return 'confirmed-after-error';
   }
   const after = await readDestination(destination, change.id);
-  if (destinationRevision(after) !== change.revision || after.operation !== change.operation) {
+  if (!await exactOutcome(after,change)) {
     throw new KnowledgeSyncError('DESTINATION_RACE', 'Knowledge destination changed during synchronization');
   }
   return 'applied';
@@ -122,7 +127,7 @@ async function consumePage(pageInput, stateInput, destination, now) {
     if (priorRevision === change.revision && prior.operation === 'delete' && change.operation === 'upsert') { skipped++; continue; }
     if (priorRevision === change.revision && prior.operation === change.operation) {
       const existing = await readDestination(destination, change.id);
-      if (destinationRevision(existing) === change.revision && existing.operation === change.operation) { skipped++; continue; }
+      if (await exactOutcome(existing,change)) { skipped++; continue; }
     }
     const outcome = await applyChange(destination, change);
     if (outcome === 'stale' || outcome === 'delete-wins') { skipped++; continue; }

@@ -82,6 +82,21 @@ test('uncertain writes are accepted only when a read confirms the exact durable 
   assert.equal(failedStore.saves,0); assert.equal(failed.values.has('a'),false);
 });
 
+test('matching revision alone does not confirm truncated or wrong destination content',async()=>{
+  for(const throws of [false,true]) {
+    const d=destination(),s=store();
+    d.upsert=async(id,record,revision)=>{d.values.set(id,{id,revision,operation:'upsert',record:{...record,booking:{guestName:'Wrong'}}});if(throws)throw Error('uncertain');};
+    await assert.rejects(syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage:async()=>page('e',[upsert('a',1)])}),{code:throws?'DESTINATION_UNCERTAIN':'DESTINATION_RACE'});
+    assert.equal(s.saves,0);
+  }
+});
+test('a replay repairs changed content instead of trusting only the revision fence',async()=>{
+  const d=destination(),s=store(),fetchPage=async()=>page('e',[upsert('a',1)]);
+  await syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage});
+  d.values.get('a').record.booking.guestName='Wrong';
+  const result=await syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage});
+  assert.equal(result.applied,1);assert.equal(d.values.get('a').record.booking.guestName,'Synthetic');
+});
 test('expiry runs independently of source polling and records a deletion fence', async () => {
   const d = destination([{id:'a',operation:'upsert',revision:7,record:{retention:{expiresAt:'2026-09-05T11:59:59Z'}}},{id:'b',operation:'upsert',revision:8,record:{retention:{expiresAt:'2026-10-01T00:00:00Z'}}}]);
   const s = store({protocol:1,epoch:'e',cursor:'c',throughRevision:8,revisions:{}});
