@@ -6,6 +6,7 @@
 const PROTOCOL = 1;
 const MAX_CHANGES = 100;
 const MAX_PAGES = 1000;
+const MAX_STATE_ENTRIES = 100000;
 
 export class KnowledgeSyncError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -17,7 +18,8 @@ export function emptyKnowledgeSyncState() {
 
 const clone = value => structuredClone(value);
 const isRevision = value => Number.isSafeInteger(value) && value >= 0;
-const isId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+const isId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value) &&
+  !['__proto__', 'constructor', 'prototype'].includes(value);
 const isCursor = value => value === null || (typeof value === 'string' && value.length <= 2048);
 
 function fail(code) { throw new KnowledgeSyncError(code, 'Knowledge synchronization requires reconciliation'); }
@@ -36,7 +38,11 @@ async function digest(value) {
 function validateState(input) {
   const state = input && typeof input === 'object' ? input : emptyKnowledgeSyncState();
   if (state.protocol !== PROTOCOL || (state.epoch !== null && typeof state.epoch !== 'string') ||
-      !isCursor(state.cursor) || !isRevision(state.throughRevision) || !state.revisions || typeof state.revisions !== 'object') fail('SYNC_STATE_INVALID');
+      !isCursor(state.cursor) || !isRevision(state.throughRevision) || !state.revisions || typeof state.revisions !== 'object' ||
+      Array.isArray(state.revisions) || Object.keys(state.revisions).length > MAX_STATE_ENTRIES) fail('SYNC_STATE_INVALID');
+  for (const [id, fence] of Object.entries(state.revisions)) {
+    if (!isId(id) || !fence || typeof fence !== 'object' || !isRevision(fence.revision) || !['upsert', 'delete'].includes(fence.operation)) fail('SYNC_STATE_INVALID');
+  }
   return clone(state);
 }
 

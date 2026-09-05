@@ -66,6 +66,13 @@ test('epoch rollback, malformed pages, stalled cursors and page limits fail clos
   await assert.rejects(() => syncKnowledgeExport({stateStore:store(),destination:d,maxPages:1,fetchPage:async()=>page('e',[upsert('a',1)],'next',true,1)}), e => e.code === 'SYNC_PAGE_LIMIT');
 });
 
+test('checkpoint state rejects prototype-pollution keys and malformed revision fences', async () => {
+  const d = destination();
+  for (const revisions of [JSON.parse('{"__proto__":{"revision":1,"operation":"upsert"}}'),{a:{revision:1,operation:'other'}},[]]) {
+    await assert.rejects(() => syncKnowledgeExport({stateStore:store({protocol:1,epoch:null,cursor:null,throughRevision:0,revisions}),destination:d,fetchPage:async()=>page('e',[],null,false,0)}), e => e.code === 'SYNC_STATE_INVALID');
+  }
+});
+
 test('uncertain writes are accepted only when a read confirms the exact durable outcome', async () => {
   const d = destination(), s = store(); d.setFailure('after-upsert');
   const result = await syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage:async()=>page('e',[upsert('a',1)],null,false,1)});
