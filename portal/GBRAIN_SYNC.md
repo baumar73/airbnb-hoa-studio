@@ -1,7 +1,7 @@
-# Guest knowledge synchronization — export prepared, writer not activated
+# Guest knowledge synchronization — export and local consumer prepared, writer not activated
 
-The direct Codex MCP connection is working. This increment implements only the
-portal's protected, revisioned export. On 2026-09-05 the owner explicitly approved
+The direct Codex MCP connection is working. This increment implements the portal's
+protected, revisioned export and a destination-neutral local consumer. On 2026-09-05 the owner explicitly approved
 creating a dedicated source and sync identity on the existing brain. They now
 exist, with partial live access verification as recorded below. No real guest
 data has been imported, no scheduler was installed, and no production portal
@@ -150,7 +150,7 @@ does not claim this duration is a new legal requirement. Upserts carry an explic
 Held records are withheld from the secondary search index while their originals
 remain preserved under the portal's legal hold. No legal hold is lifted here.
 
-## Required destination contract (not yet implemented)
+## Required destination contract (consumer scaffold implemented; activation blocked)
 
 Before any real import, complete verification of the newly prepared source in
 the EXISTING brain and its dedicated, source-scoped sync identity. Verify with positive AND negative
@@ -161,7 +161,12 @@ The current `put_page` MCP interface has no explicit `source_id` argument; sourc
 selection must therefore be enforced by the authenticated server grant, not an
 assumed slug prefix. The filtered Codex bridge does not expose deletion tools.
 
-The consumer must implement and test all of the following:
+`functions/lib/knowledge-sync.js` implements the source-side consumer contract with
+an injected destination adapter. It has no gbrain SDK, network client, scheduler,
+credential handling or production binding. This keeps the tested state machine
+separate from the not-yet-verified destination permissions.
+
+The consumer implements and tests all of the following locally:
 
 1. Persist the source epoch, checkpoint, per-case revision and deletion fences.
    Start with an empty cursor. Never persist `nextCursor` until every change in
@@ -203,4 +208,7 @@ corrupt ciphertext, redacted failures, retention and evidence distinctions.
 
 `node scripts/test_atomic_runtime.mjs` additionally exercises pagination and
 deletion checkpoints in local workerd/SQLite Durable Objects with synthetic data.
-There are no real emails, HOA submissions, gbrain writes or production requests.
+`node --test test/knowledge-sync.test.js` covers paginated checkpoint commits,
+epoch/cursor rollback fences, stale/equal revision handling, uncertain writes,
+and offline expiry deletion. There are no real emails, HOA submissions, gbrain
+writes or production requests.

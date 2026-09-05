@@ -129,12 +129,12 @@ Diese drei Commits und der Beleg-/Nachforderungsablauf wurden am 2026-09-05 bis 
 **Priority:** P2
 **Depends on:** Stabiler Kernablauf und sichere Fallrevisionen.
 
-- [ ] Synchronisierung, Aktualisierung, Löschung und Zugriffsbeschränkungen testen.
+- [x] Lokalen Consumer für Synchronisierung, Aktualisierung, Löschung und Zugriffsbeschränkungen mit synthetischen Daten testen; echte Zielrechte und der Live-Roundtrip bleiben offen.
 - [ ] Keine Geheimnisse oder realen Gastunterlagen in GitHub speichern; Datenumfang zweckgebunden halten.
 
 ## Prüfstand und Abnahmeregeln
 
-Nach der lokalen Ergänzung des Airbnb-Antwortwegs, der optionalen Zustellüberwachung und des Buchungsabgleichs bestanden 216 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34, 189/34, 206/34 und 212/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
+Nach der lokalen Ergänzung des Airbnb-Antwortwegs, der optionalen Zustellüberwachung, des Buchungsabgleichs und des gbrain-Consumer-Scaffolds bestanden 222 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34, 189/34, 206/34 und 212/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
 
 - Neue Abläufe brauchen Tests für vollständige, unvollständige, verspätete, geänderte und stornierte Buchungen sowie technische Ausfälle.
 - Eine Buchung kann vor HOA-Zustimmung bestehen; Bezug erst nach erforderlicher Zustimmung. Ablehnungen und mögliche Stornierungen bleiben gesondert zu prüfende Ausnahmen, keine automatische Schuldzuweisung an den Gast.
