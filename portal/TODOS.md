@@ -59,7 +59,9 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 Buchungsnummer werden nicht mehr blind als Duplikat verworfen. Abweichende
 Reisedaten, Belegung oder Gastdaten markieren den Vorgang als ausstehende
 Buchungsänderung, kennzeichnen alte Schritte/Pakete als überholt und halten den
-Gästeablauf bis zur Eigentümerprüfung an. Es erfolgt keine automatische
+Gästeablauf bis zur Eigentümerprüfung an. Der Eigentümer kann den neuen
+Aufenthaltskontext nun im geschützten Verwaltungsbereich ausdrücklich bestätigen.
+Es erfolgt keine automatische
 Stornierung oder Freigabe; der Abgleich bleibt mit echten Airbnb-Formaten und
 einem kontrollierten Testfall abzunehmen.
 
