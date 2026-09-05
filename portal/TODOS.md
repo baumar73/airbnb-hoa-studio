@@ -130,7 +130,7 @@ Diese drei Commits und der Beleg-/Nachforderungsablauf wurden am 2026-09-05 bis 
 **Depends on:** Stabiler Kernablauf und sichere Fallrevisionen.
 
 - [x] Lokalen Consumer für Synchronisierung, Aktualisierung, Löschung und Zugriffsbeschränkungen mit synthetischen Daten testen; echte Zielrechte und der Live-Roundtrip bleiben offen.
-- [ ] Keine Geheimnisse oder realen Gastunterlagen in GitHub speichern; Datenumfang zweckgebunden halten.
+- [x] Repository-Sicherheitsprüfung durchgeführt: keine Schlüssel-/Credential-/Gastdokument-Dateien in den getrackten Dateien; Export-Allowlist und synthetische Tests halten den gbrain-Umfang zweckgebunden. Vor jedem weiteren Import erneut prüfen.
 
 ## Prüfstand und Abnahmeregeln
 
