@@ -7,6 +7,23 @@ Insbesondere existiert der gbrain-Zielschreiber noch nicht; der lokale Consumer
 ist keine aktivierte Synchronisierung. HOA-Quellen werden weiterhin ausdrücklich
 geprüft, nicht allein durch eine KI-Klassifizierung bestätigt.
 
+## Ergänzung: isolierte Cloudflare-Abnahmevorschau
+
+Nach ausdrücklicher Freigabe wurde am 2026-09-05 eine geschützte Testversion
+im bestehenden Cloudflare-Projekt veröffentlicht, mit eigenem KV-Testspeicher,
+privatem atomarem Fallspeicher und ausschließlich synthetischen Daten.
+44 anfängliche und 17 weitere HTTP-Prüfungen nach erneuter Bereitstellung des
+Testspeichers bestanden. Die Produktionsveröffentlichung und deren Konfiguration
+blieben unverändert. Kein realer Versand, kein Produktivimport, kein Zeitplan.
+Details und Grenzen stehen in [preview/README.md](preview/README.md).
+
+Der lesende Live-Abgleich bestätigte den älteren Produktivstand ohne neue
+Gäste-Erinnerungen und ohne atomaren Fallspeicher. Dem Produktiv-Cron fehlt
+außerdem die Schlüsselbindung zum Lesen verschlüsselter Gastformulare. Der
+Fehler wurde mit synthetischen Daten reproduziert; daraus folgt weder ein
+Nachweis früherer Datenverluste noch eine Freigabe zur Schlüsselrotation.
+Diese Produktionskorrekturen sind durch die Vorschau nicht erledigt.
+
 ## Ergänzung: HOA-Originale und Dokumentenüberwachung
 
 Nach Freigabe des privaten Bestandsabgleichs und Anmeldung durch den Eigentümer
@@ -21,9 +38,13 @@ implementiert: SHA-256-/Versionsabgleich, Wochenfälligkeit, Fehler-Wiederholung
 und seitenweise Archiv-/Indexvorbereitung. Aktuell bestehen 292 JavaScript-
 und 38 Python-Tests, Syntaxprüfung und Pages-Build; npm audit meldet weiterhin
 null Schwachstellen. Der Scheduler/Account-Collector ist noch nicht angebunden
-oder aktiviert. Zwei MCP-Leseaufrufe zu gbrain scheiterten; daher sind die
-neuen Inhalte noch **nicht vektorisiert**. Es gab keine gbrain-Schreibzugriffe,
-Neustarts, realen Nachrichten, Zahlungen oder Produktionsänderungen.
+oder aktiviert. Nach den ersten gescheiterten MCP-Leseaufrufen war gbrain wieder
+erreichbar und der freigegebene Dokumentenimport begann. Ein privater Prüfbeleg
+sichert die ersten 24 bestätigten Seiten; der vollständige Import ist noch nicht
+bestätigt. Der neue wiederholbare Indexprüfer hat 13 Tests. Zusammen mit den
+sechs Vorschau-Sicherheitstests bestehen jetzt 311 JavaScript-Tests sowie erneut
+Syntaxprüfung und Build; npm audit bleibt bei null gemeldeten Schwachstellen.
+Es gab keine realen Nachrichten, Zahlungen oder Produktivänderungen.
 
 ## Wiederholbare technische Prüfung
 
