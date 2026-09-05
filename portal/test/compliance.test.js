@@ -29,6 +29,7 @@ function completeConfig() {
     approvalAuthorityCitation: 'Declaration Article X, Official Records Book/Page',
     feeAuthorityCitation: 'Bylaws Article Y, Official Records Book/Page',
     airbnbFeeDisclosureVerifiedAt: '2026-09-02',
+    airbnbExternalFeeAuthorizationReference: 'synthetic documented exception reference',
     rulesVersion: 'Rules adopted 2026-08-01',
     hoaESignAcceptedAt: '2026-09-02',
     privacySecurityReviewedAt: '2026-09-02',
@@ -51,6 +52,10 @@ test('annual rentals require all owner flood answers before live delivery', () =
   const state = liveComplianceState({ pathType: 'full', nights: 365 }, config, env);
   assert.equal(state.ok, false);
   assert.equal(state.missing.filter(item => item.startsWith('flood disclosure')).length, 3);
+});
+test('fee disclosure alone does not authorize external collection',()=>{
+  const {env}=mockEnv(),config=completeConfig();delete config.airbnbExternalFeeAuthorizationReference;
+  assert.match(liveComplianceState({pathType:'full',nights:30},config,env).missing.join(' '),/external.fee/i);
 });
 
 test('wizard records and reusable owner signature are encrypted at rest', async () => {

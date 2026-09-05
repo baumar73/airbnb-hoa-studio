@@ -3,9 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fillLeaseApplication, fillGuestRegistration, splitLeaseApplicationPackage, buildRulesAcknowledgment } from '../functions/lib/fill.js';
 import { generateLeaseAgreement } from '../functions/lib/lease.js';
+import { generateFloodDisclosure } from '../functions/lib/flood.js';
 import { validatePaperwork, validateSignaturePng } from '../functions/lib/workflow.js';
 
-const [casePath, ownerSigPath, outDir] = process.argv.slice(2);
+const [casePath, ownerSigPath, outDir, compliancePath] = process.argv.slice(2);
 if (!casePath || !ownerSigPath || !outDir) {
   console.error('usage: node scripts/generate_review_bundle.mjs CASE_JSON OWNER_SIG OUT_DIR');
   process.exit(2);
@@ -23,9 +24,12 @@ if (!validateSignaturePng(ownerSigPng)) {
 }
 fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
 const data = {
+  ...(compliancePath ? JSON.parse(fs.readFileSync(compliancePath,'utf8')) : {}),
   checkIn: c.checkIn,
   checkOut: c.checkOut,
   reservationCode: c.reservationCode,
+  applicationType: c.applicationType || 'lease',
+  reviewHash: c.reviewHash,
   ownerSigPng,
   preview: false,
   todayISO: new Date().toISOString().slice(0, 10),
@@ -45,6 +49,7 @@ if (c.pathType === 'full') {
   write('02-background-authorization.pdf', split.background);
   write('03-rules-and-acknowledgment.pdf', await buildRulesAcknowledgment(fs.readFileSync(path.join(root, 'public/forms/rules-and-regulations.pdf')), data));
   write('04-short-term-lease.pdf', await generateLeaseAgreement(data));
+  if (c.nights>=365) write('05-flood-disclosure.pdf', await generateFloodDisclosure(data));
 } else {
   write('01-guest-registration.pdf', await fillGuestRegistration(fs.readFileSync(path.join(root, 'public/forms/guest-registration.pdf')), data));
 }

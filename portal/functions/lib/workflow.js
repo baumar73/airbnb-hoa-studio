@@ -211,6 +211,7 @@ export function purgeExpiredCases(cases, now = new Date(), retentionDays = 90) {
   const cutoff = now.getTime() - retentionDays * 86400000;
   const kept = [], purged = [];
   for (const c of cases || []) {
+    if(c.legalHold) {kept.push(c);continue;}
     const checkout = /^\d{4}-\d{2}-\d{2}$/.test(String(c.checkOut || ''))
       ? new Date(`${c.checkOut}T23:59:59Z`).getTime() : Number.NaN;
     if (Number.isFinite(checkout) && checkout < cutoff) purged.push(c);

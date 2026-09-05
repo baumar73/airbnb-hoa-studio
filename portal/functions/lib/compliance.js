@@ -26,6 +26,11 @@ export function isSameLesseeRenewal(c) {
   return Boolean(c && c.applicationType === 'renewal' && c.sameLesseesConfirmed === true);
 }
 
+export function externalFeeRequestAuthorized(c,config={}) {
+  if(c.pathType!=='full'||isSameLesseeRenewal(c)) return true;
+  return Boolean(String(config.feeAuthorityCitation||'').trim() && String(config.airbnbFeeDisclosureVerifiedAt||'').trim() && String(config.airbnbExternalFeeAuthorizationReference||'').trim());
+}
+
 export function hasValidEncryptionKey(env) {
   try {
     const raw = String(env && env.DATA_ENCRYPTION_KEY || '').replace(/-/g, '+').replace(/_/g, '/');
@@ -55,6 +60,9 @@ export function liveComplianceState(c, config, env) {
   if (!isSameLesseeRenewal(c) && !String(cfg.airbnbFeeDisclosureVerifiedAt || '').trim()) {
     missing.push('Airbnb price-breakdown/fee-field verification date');
   }
+  // Airbnb's fee policy distinguishes disclosure from permission to collect
+  // outside Airbnb. A verified HOA rule is not, by itself, that permission.
+  if(c.pathType==='full'&&!isSameLesseeRenewal(c)&&!String(cfg.airbnbExternalFeeAuthorizationReference||'').trim()) missing.push('documented Airbnb external-fee authorization/exception reference');
   if (isAnnualRental(c)) {
     for (const field of ['floodDamageKnown', 'floodClaimFiled', 'floodAssistanceReceived']) {
       if (!['yes', 'no'].includes(cfg[field])) missing.push(`flood disclosure answer: ${field}`);

@@ -4,12 +4,16 @@
 import { fillLeaseApplication, fillGuestRegistration, splitLeaseApplicationPackage, buildRulesAcknowledgment } from './lib/fill.js';
 import { generateLeaseAgreement } from './lib/lease.js';
 import { generateFloodDisclosure } from './lib/flood.js';
-import { submitApprovedPackage, isReadyForOwnerReview, docStates } from './lib/submit.js';
+import { submitApprovedPackage, isReadyForOwnerReview, docStates, generatePackage } from './lib/submit.js';
 import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isGuestPaperworkComplete } from './lib/workflow.js';
-import { COMPLIANCE_POLICY_VERSION, HOA_SOURCE_PACKET, adverseActionNotice, isAnnualRental, isSameLesseeRenewal, liveComplianceState } from './lib/compliance.js';
-import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases } from './lib/storage.js';
+import { COMPLIANCE_POLICY_VERSION, HOA_SOURCE_PACKET, adverseActionNotice, isAnnualRental, isSameLesseeRenewal, liveComplianceState, externalFeeRequestAuthorized } from './lib/compliance.js';
+import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases, inheritCaseSnapshot } from './lib/storage.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
+import { bookingLastName } from './lib/parse.js';
+import { needsReview, reviewContextHash, validateReviewReport, reviewCaseData, caseReviewDigest } from './lib/review.js';
+import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib/package-archive.js';
+import {planGuestJourney} from './lib/journey.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -62,7 +66,7 @@ function newCase(input) {
 // ---------- storage ----------
 async function loadCases(env) {
   const cases = await loadStoredCases(env);
-  return cases.map(c => {
+  return inheritCaseSnapshot(cases, cases.map(c => {
     const template = STEP_TEMPLATES[c.pathType] || STEP_TEMPLATES.full;
     const previous = new Map((c.steps || []).map(step => [step.id, step]));
     const known = new Set(template.map(([id]) => id));
@@ -76,7 +80,7 @@ async function loadCases(env) {
       screeningRoute: c.pathType === 'full' ? (c.screeningRoute || 'undecided') : c.screeningRoute,
       steps: normalized,
     };
-  });
+  }), true);
 }
 async function saveCases(env, cases) {
   await saveStoredCases(env, cases);
@@ -141,12 +145,10 @@ function reviewPayload(c, wizard, includeSignatures) {
   };
 }
 async function reviewDigest(c, wizard, includeSignatures = true) {
-  return sha256hex(JSON.stringify(reviewPayload(c, wizard, includeSignatures)));
+  return caseReviewDigest(c,wizard,includeSignatures);
 }
 function normalizedLastName(s) {
-  const parts = String(s || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase().replace(/[^a-z0-9' -]/g, ' ').trim().split(/\s+/).filter(Boolean);
-  return parts.at(-1) || '';
+  return bookingLastName(s);
 }
 async function findRateAllowed(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -407,10 +409,7 @@ function guestProgressSteps(c) {
 }
 
 function feeRequestReleased(c, compliance) {
-  return applicationFeeState(c) !== 'required' || Boolean(
-    String(compliance && compliance.feeAuthorityCitation || '').trim() &&
-    String(compliance && compliance.airbnbFeeDisclosureVerifiedAt || '').trim()
-  );
+  return applicationFeeState(c) !== 'required' || externalFeeRequestAuthorized(c,compliance);
 }
 
 function statusView(c, compliance) {
@@ -854,6 +853,7 @@ function settingsView(hasSig, liveMode, msg, compliance, complianceState) {
         <label>Fundstelle der eingetragenen Genehmigungsbefugnis *</label><input name="approvalAuthorityCitation" value="${esc(cfg.approvalAuthorityCitation || '')}" placeholder="z. B. Declaration Art. …, OR Book/Page …" required>
         <label>Fundstelle der eingetragenen Gebührenbefugnis *</label><input name="feeAuthorityCitation" value="${esc(cfg.feeAuthorityCitation || '')}" placeholder="Declaration/Articles/Bylaws + OR Book/Page">
         <label>Airbnb-Preisaufschlüsselung/Gebührenfeld für die verpflichtende HOA-Gebühr geprüft am *</label><input type="date" name="airbnbFeeDisclosureVerifiedAt" value="${esc(cfg.airbnbFeeDisclosureVerifiedAt || '')}" required>
+        <label>Nachweis der Airbnb-Erlaubnis/Ausnahme für externe Gebührenzahlung *</label><input name="airbnbExternalFeeAuthorizationReference" value="${esc(cfg.airbnbExternalFeeAuthorizationReference || '')}" placeholder="Konkrete Airbnb-Bestätigung oder nachgewiesene Ausnahme; HOA-Akzeptanz allein reicht nicht">
         <p class="muted">Ein Hinweis nur in Beschreibung oder Hausregeln genügt nach Airbnbs aktueller Fee-Transparency-Policy nicht. Die Pflichtgebühr muss im passenden Gebührenfeld bzw. im Übernachtungspreis enthalten sein; eine externe Einziehung ist nur zulässig, wenn Airbnb den Host dafür ausdrücklich autorisiert.</p>
         <label>Aktuelle Rules-Version / Beschlussdatum *</label><input name="rulesVersion" value="${esc(cfg.rulesVersion || '')}" required>
         <h3>Consumer-Report-Auskunft (nur falls eine Entscheidung auf einem Screeningbericht beruht)</h3>
@@ -1296,6 +1296,8 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
   const gmail = (to, cc, subject, body) =>
     `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}${cc ? '&cc=' + encodeURIComponent(cc) : ''}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   const rows = cases.map(c => {
+    const journey=planGuestJourney(c,new Date(),{feeRequestAuthorized:externalFeeRequestAuthorized(c,compliance)});
+    const journeyLine=`<p class="muted">Workflow: <b>${esc(journey.state.replace(/_/g,' '))}</b>${c.automation?.lastGuestReminderAt?` · Last guest reminder: ${esc(c.automation.lastGuestReminderAt.slice(0,16).replace('T',' '))} UTC`:''}${journey.waitingForEvidence.length?`<br>Pending evidence: ${esc(journey.waitingForEvidence.join(', ').replace(/_/g,' '))}`:''}${c.autoRelease?'<br>Released automatically under standing owner authorization.':''}</p>`;
     const visibleSteps = guestProgressSteps(c);
     const done = visibleSteps.filter(s => s.done).length;
     const stepBtns = visibleSteps.map(s =>
@@ -1369,7 +1371,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
       <td><b>${esc(c.guestName)}</b><br><span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights}n · ${esc(c.pathType)}</span><br>
           ${c.screeningRoute === 'online' ? '<span class="pill teal">external application — no local wizard required</span>' : c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
           ${feeState}<br>${screeningControl}
-          <span class="muted">${docLine}</span><br>${subLine}${classification}${reviewButton}</td>
+          <span class="muted">${docLine}</span><br>${subLine}${journeyLine}${classification}${reviewButton}</td>
       <td>${done}/${visibleSteps.length}<br>${stepBtns}<br>${mailBtns}</td>
       <td><a href="/v/${c.token}" target="_blank">/v/${c.token}</a><br>
           ${c.pathType === 'full' ? `<a href="/admin/adverse-action?id=${encodeURIComponent(c.id)}">Adverse-Action-Hinweis</a><br>` : ''}
@@ -1397,6 +1399,17 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
 
 // ---------- router ----------
 export async function onRequest(context) {
+  try { return await routeRequest(context); }
+  catch (error) {
+    if (!String(error.code || '').startsWith('CASE_')) throw error;
+    const conflict=error.code==='CASE_CONFLICT';
+    return html(page(conflict ? 'Reservation updated' : 'Please try again shortly',
+      `<h1>${conflict ? 'This reservation was updated' : 'Your paperwork is temporarily unavailable'}</h1>`,
+      `<div class="card"><p>${conflict ? 'Your latest action was not saved because the reservation changed. Open your latest page before trying again.' : 'Please keep your paperwork open and try again shortly. If this continues, message Owner through Airbnb.'}</p><p><a href="/">Return to your reservation</a></p></div>`),conflict ? 409 : 503);
+  }
+}
+
+async function routeRequest(context) {
   const { request, env } = context;
   const waitUntil = context.waitUntil ? context.waitUntil.bind(context) : (p) => p;
   const url = new URL(request.url);
@@ -1515,15 +1528,13 @@ export async function onRequest(context) {
     if ((mV[2] === '/executed-lease.pdf' || mV[2] === '/executed-flood-disclosure.pdf') && request.method === 'GET') {
       if (!c.submission || !c.wizard) return new Response('executed documents are available only after live owner release', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       if (mV[2] === '/executed-flood-disclosure.pdf' && !isAnnualRental(c)) return new Response('flood disclosure not required for this term', { status: 404, headers: SEC_HEADERS });
-      const compliance = await loadComplianceConfig(env);
-      const ownerSigPng = await getEncryptedSecret(env, 'owner-signature-png');
-      const data = { checkIn: c.checkIn, checkOut: c.checkOut, reservationCode: c.reservationCode,
-        applicationType: c.applicationType || 'lease', ownerSigPng, preview: false,
-        todayISO: c.ownerApprovedAt.slice(0, 10), reviewHash: c.ownerApprovedReviewHash,
-        landlordNoticeAddress: compliance.landlordNoticeAddress,
-        floodDamageKnown: compliance.floodDamageKnown, floodClaimFiled: compliance.floodClaimFiled,
-        floodAssistanceReceived: compliance.floodAssistanceReceived, ...c.wizard };
-      const bytes = mV[2] === '/executed-lease.pdf' ? await generateLeaseAgreement(data) : await generateFloodDisclosure(data);
+      const manifest=c.submission.packageManifest||c.preparedPackage;
+      if(!env.CASE_STORE||!manifest||manifest.id!==c.submission.packageId||manifest.packageHash!==c.submission.packageHash) return new Response('The original signed document has not been archived. Please request the original through the existing Airbnb conversation. A newly generated document cannot replace the original.',{status:409,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      const archive=await loadArchivedPackage(env,{...c,preparedPackage:manifest});
+      const name=mV[2]==='/executed-lease.pdf'?'04-short-term-lease.pdf':'05-flood-disclosure.pdf';
+      const index=archive.manifest.documents.findIndex(d=>d.reviewFilename===name);
+      if(index<0) return new Response('document not in this signed package',{status:404,headers:SEC_HEADERS});
+      const bytes=archive.attachments[index].bytes;
       return new Response(bytes, { headers: { 'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${mV[2].slice(1)}"`, 'Cache-Control': 'private, no-store, max-age=0',
         'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
@@ -1691,8 +1702,56 @@ export async function onRequest(context) {
   }
 
   if (p.startsWith('/admin')) {
-    const denied = await checkAdmin(request, env);
+    const reviewRoute=['/admin/review/candidates','/admin/review/package','/admin/review/result'].includes(p);
+    const reviewToken=String(env.REVIEW_API_TOKEN||'');
+    const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
+    const denied = reviewer ? null : await checkAdmin(request, env);
     if (denied) return denied;
+    if (p==='/admin/case-store/initialize' && request.method==='POST') {
+      const data=await request.json();
+      if (env.ALLOW_CASE_IMPORT!=='yes' || !env.CASE_STORE || data.confirm!=='INITIALIZE') return new Response('explicit import is disabled',{status:403,headers:SEC_HEADERS});
+      const store=env.CASE_STORE.get(env.CASE_STORE.idFromName('reservations-v1'));
+      const result=await store.fetch('https://case-store/initialize',{method:'POST',body:JSON.stringify({expectedHash:data.expectedHash,expectedCount:data.expectedCount})});
+      return new Response(await result.text(),{status:result.status,headers:{...SEC_HEADERS,'Content-Type':'application/json','Cache-Control':'no-store'}});
+    }
+    if (p.startsWith('/admin/review/')) {
+      if (!env.CASE_STORE) return new Response('atomic storage must be activated before the new reviewer',{status:503,headers:SEC_HEADERS});
+      const json=(data,status=200)=>Response.json(data,{status,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store','X-Robots-Tag':'noindex'}});
+      const ownerSignature=await getEncryptedSecret(env,'owner-signature-png');
+      const compliance=await loadComplianceConfig(env);
+      if (p==='/admin/review/candidates' && request.method==='GET') {
+        const candidates=[];
+        for (const c of await loadCases(env)) {
+          if (!needsReview(c)) continue;
+          const contextHash=await reviewContextHash(c,ownerSignature,compliance);
+          if (c.aiReview?.reviewHash===c.reviewHash && c.aiReview?.reviewContextHash===contextHash && c.preparedPackage && c.aiReview?.packageId===c.preparedPackage.id) continue;
+          candidates.push({...reviewCaseData(c),reviewContextHash:contextHash});
+        }
+        return json({cases:candidates});
+      }
+      if(p==='/admin/review/package' && request.method==='POST') {
+        let data;try {data=await request.json();} catch {return json({error:'invalid JSON'},400);}
+        const cases=await loadCases(env),c=cases.find(c=>c.id===data.id);
+        if(!c || !needsReview(c) || c.reviewHash!==data.reviewHash || await reviewContextHash(c,ownerSignature,compliance)!==data.reviewContextHash || !isReadyForOwnerReview(c,validateSignaturePng(ownerSignature)) || await reviewDigest(c,c.wizard,true)!==c.reviewHash) return json({error:'paperwork changed or is incomplete'},409);
+        if(!c.preparedPackage || c.preparedPackage.reviewHash!==c.reviewHash || c.preparedPackage.contextHash!==data.reviewContextHash) {
+          c.preparedPackage=await archivePackage(env,cases,c,await generatePackage(c,env,{ownerSignature,compliance}),data.reviewContextHash);
+        }
+        return json(reviewPackagePayload(await loadArchivedPackage(env,c)));
+      }
+      if (p==='/admin/review/result' && request.method==='POST') {
+        let data;try { data=await request.json(); } catch {return json({error:'invalid JSON'},400);}
+        if (!validateReviewReport(data.report)) return json({error:'invalid structured review report'},400);
+        const cases=await loadCases(env),c=cases.find(c=>c.id===data.id);
+        if (!c || !needsReview(c) || c.reviewHash!==data.reviewHash || await reviewContextHash(c,ownerSignature,compliance)!==data.reviewContextHash) return json({error:'review inputs changed'},409);
+        if (data.report.status==='green' && (!isReadyForOwnerReview(c,validateSignaturePng(ownerSignature)) || await reviewDigest(c,c.wizard,true)!==c.reviewHash)) return json({error:'paperwork does not pass server validation'},409);
+        if((data.report.status==='green'||c.preparedPackage) && (!c.preparedPackage || data.packageId!==c.preparedPackage.id || data.packageHash!==c.preparedPackage.packageHash || c.preparedPackage.reviewHash!==c.reviewHash || c.preparedPackage.contextHash!==data.reviewContextHash)) return json({error:'reviewed package version changed'},409);
+        const {status,summary,findings,confidence,model}=data.report;
+        c.aiReview={status,summary,findings,confidence,model,reviewHash:c.reviewHash,reviewContextHash:data.reviewContextHash,packageId:c.preparedPackage?.id,packageHash:c.preparedPackage?.packageHash,reviewedAt:new Date().toISOString()};
+        await saveCases(env,cases);
+        return json({ok:true});
+      }
+      return json({error:'not found'},404);
+    }
     if (p === '/admin' && request.method === 'GET') {
       const ownerSigOnFile = validateSignaturePng(await getEncryptedSecret(env, 'owner-signature-png'));
       const liveMode = (await env.CASES.get('submit-live')) === 'yes';
@@ -1855,6 +1914,7 @@ export async function onRequest(context) {
           approvalAuthorityCitation: textField('approvalAuthorityCitation', 1000),
           feeAuthorityCitation: textField('feeAuthorityCitation', 1000),
           airbnbFeeDisclosureVerifiedAt: dateField('airbnbFeeDisclosureVerifiedAt'),
+          airbnbExternalFeeAuthorizationReference: textField('airbnbExternalFeeAuthorizationReference',1000),
           rulesVersion: textField('rulesVersion', 500),
           hoaESignAcceptedAt: dateField('hoaESignAcceptedAt'),
           privacySecurityReviewedAt: dateField('privacySecurityReviewedAt'),
@@ -1921,6 +1981,8 @@ export async function onRequest(context) {
           : 'choose the official application route before preparing a local package',
         { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
+      if (!isGuestAccessibleCase(c) || c.reviewLockedAt) return new Response('reservation is canceled or delivery has already been claimed',{status:409,headers:SEC_HEADERS});
+      if(env.CASE_STORE && (!c.preparedPackage || c.aiReview?.packageId!==c.preparedPackage.id || c.aiReview?.packageHash!==c.preparedPackage.packageHash)) return new Response('the exact document package must be prepared and reviewed before release',{status:409,headers:SEC_HEADERS});
       if (!isReadyForOwnerReview(c, ownerSigOnFile)) {
         return new Response('paperwork is not complete or was already submitted', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
@@ -1928,6 +1990,7 @@ export async function onRequest(context) {
       if (!ai || ai.reviewHash !== c.reviewHash || ai.status !== 'green') {
         return new Response('OpenAI review is missing, stale, or not green', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       }
+      if (env.CASE_STORE && ai.reviewContextHash!==await reviewContextHash(c,await getEncryptedSecret(env,'owner-signature-png'),await loadComplianceConfig(env))) return new Response('review inputs changed; run the review again',{status:409,headers:SEC_HEADERS});
       c.ownerReviewedDocuments = ['openai-ai-review'];
       const expectedReviewHash = await reviewDigest(c, c.wizard, true);
       const submittedReviewHash = String(form.get('reviewHash') || '');
@@ -1952,7 +2015,7 @@ export async function onRequest(context) {
       const sent = await submitApprovedPackage(c, cases, env);
       if (!sent || !live) await env.CASES.delete(claimKey);
       else await env.CASES.put(claimKey, c.submission.sentAt, { expirationTtl: 604800 });
-      const message = sent ? (live ? `${isAnnualRental(c) ? 'Fünf' : 'Vier'}-Dokumente-Paket live an die Verwaltung versandt` : 'Testpaket nur an Owner versandt; Live-Versand bleibt offen') : 'Versand fehlgeschlagen — Details im Vorgang';
+      const message = sent ? (live ? `${isAnnualRental(c) ? 'Fünf' : 'Vier'}-Dokumente-Paket live an die Verwaltung versandt` : 'Testpaket nur an Owner versandt; Live-Versand bleibt offen') : 'Versand nicht bestätigt — vor einem neuen Versuch Vorgang und Gesendet-Ordner prüfen';
       return redirect('/admin/cases?msg=' + encodeURIComponent(message));
     }
     if (p === '/admin/submit-live' && request.method === 'POST') {
@@ -2008,7 +2071,8 @@ export async function onRequest(context) {
     }
     if (p === '/admin/delete' && request.method === 'POST') {
       const form = await request.formData();
-      await saveCases(env, (await loadCases(env)).filter(c => c.id !== form.get('id')));
+      const cases=await loadCases(env);
+      await saveCases(env, inheritCaseSnapshot(cases,cases.filter(c => c.id !== form.get('id'))));
       return redirect('/admin/cases');
     }
   }

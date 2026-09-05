@@ -96,7 +96,8 @@ export async function pollMail(env) {
           subject: msg.subject.slice(0, 160),
         };
         delete hit.aiReview;
-        delete hit.reviewLockedAt;
+        // Retain any delivery claim: cancellation must not erase evidence of
+        // an in-flight/uncertain send or permit a duplicate submission.
         dirty = true;
         summary.cancellations++;
         await sendTelegram(env, `🚫 Airbnb-Stornierung verarbeitet: ${hit.guestName} (${hit.reservationCode}). Der Portalzugang ist gesperrt; es wurde keine Gast- oder HOA-Nachricht gesendet.`);

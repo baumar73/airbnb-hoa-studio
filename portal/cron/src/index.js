@@ -16,9 +16,10 @@ function stepDone(c, id) {
   return c.steps.find(s => s.id === id && s.done);
 }
 
-export function computeAlerts(cases, now) {
+export function computeAlerts(cases, now, {directGuestReminders=false}={}) {
   const alerts = [];
   for (const c of cases) {
+    if(c.status==='canceled') continue;
     c.notify = c.notify || {};
     const n = c.notify;
     const days = daysUntil(c.checkIn, now);
@@ -29,10 +30,10 @@ export function computeAlerts(cases, now) {
     const link = `${PORTAL}/admin`;
     const who = `${c.guestName} (${c.checkIn} → ${c.checkOut})`;
 
-    if (!c.wizard && ageDays(c.createdAt, now) >= 3 && ageDays(n.wizardNudge, now) >= 3) {
+    if (!directGuestReminders && c.screeningRoute!=='online' && !c.wizard && ageDays(c.createdAt, now) >= 3 && ageDays(n.wizardNudge, now) >= 3) {
       alerts.push({ c, key: 'wizardNudge', text: `📝 ${who}: Gast hat den Formular-Wizard noch nicht ausgefüllt. Erinnerung über den Airbnb-Chat senden? Magic-Link: ${PORTAL}/v/${c.token}` });
     }
-    if (c.wizard && !stepDone(c, 'submitted_hoa') && ageDays(c.wizard.savedAt, now) >= 2 && ageDays(n.submitNudge, now) >= 3) {
+    if (c.screeningRoute!=='online' && c.wizard && !stepDone(c, 'submitted_hoa') && ageDays(c.wizard.savedAt, now) >= 2 && ageDays(n.submitNudge, now) >= 3) {
       alerts.push({ c, key: 'submitNudge', text: `📤 ${who}: Wizard-Daten liegen seit ${Math.floor(ageDays(c.wizard.savedAt, now))} Tagen vor, aber das Paket ist noch nicht bei der HOA eingereicht. ${link}` });
     }
     const submitted = c.steps.find(s => s.id === 'submitted_hoa');
@@ -42,7 +43,7 @@ export function computeAlerts(cases, now) {
     // fee tracking applies only when the association fee is actually required.
     if (applicationFeeState(c) === 'required') {
       const feeConfirmed = stepDone(c, 'fee_sent');
-      if (c.wizard && !c.feeMailed && !feeConfirmed && ageDays(c.wizard.savedAt, now) >= 4 && ageDays(n.feeGuestNudge, now) >= 3) {
+      if (!directGuestReminders && c.wizard && !c.feeMailed && !feeConfirmed && ageDays(c.wizard.savedAt, now) >= 4 && ageDays(n.feeGuestNudge, now) >= 3) {
         alerts.push({ c, key: 'feeGuestNudge', text: `💵 ${who}: Gast hat den $100-Scheck noch nicht als "mailed" gemeldet (Formulare seit ${Math.floor(ageDays(c.wizard.savedAt, now))} Tagen fertig). Erinnerung senden → ${link} („Gast: Gebühr erinnern").` });
       }
       if (c.feeMailed && !feeConfirmed && ageDays(c.feeMailed, now) >= 7 && ageDays(n.feeHoaNudge, now) >= 3) {
@@ -60,7 +61,7 @@ export function computeAlerts(cases, now) {
 }
 
 export function buildDigest(cases, now) {
-  const active = cases.filter(c => daysUntil(c.checkIn, now) >= -1 && !(stepDone(c, 'board_approved') && stepDone(c, 'checkin_released')));
+  const active = cases.filter(c => c.status!=='canceled' && daysUntil(c.checkIn, now) >= -1 && !(stepDone(c, 'board_approved') && stepDone(c, 'checkin_released')));
   if (!active.length) return '🌴 Demo Unit Wochen-Digest: keine offenen Vorgänge.';
   const lines = active.map(c => {
     const done = c.steps.filter(s => s.done).length;
@@ -81,7 +82,9 @@ async function sendTelegram(env, text) {
 
 import { purgeExpiredCases, applicationFeeState } from '../../functions/lib/workflow.js';
 import { pollMail } from '../../functions/lib/mailpoll.js';
-import { loadStoredCases, saveStoredCases } from '../../functions/lib/storage.js';
+import { loadStoredCases, saveStoredCases, inheritCaseSnapshot } from '../../functions/lib/storage.js';
+import { runGuestReminders } from '../../functions/lib/guest-reminders.js';
+import { runAutomaticSubmissions } from '../../functions/lib/auto-submit.js';
 
 export default {
   async scheduled(event, env, ctx) {
@@ -92,6 +95,12 @@ export default {
       try {
         const s = await pollMail(env);
         console.log('mailpoll:', JSON.stringify(s));
+        // Poll first so known cancellations suppress messages. Disabled until
+        // the approved atomic-storage and guest-communication cutover.
+        const reminders=await runGuestReminders(env,now);
+        console.log('guest reminders:',JSON.stringify(reminders));
+        const submissions=await runAutomaticSubmissions(env,now);
+        console.log('automatic submissions:',JSON.stringify(submissions));
       } catch (e) {
         console.log('mailpoll error:', String(e && e.message || e));
         // alert at most the daily run handles persistent errors; one-off IMAP hiccups stay silent
@@ -100,12 +109,13 @@ export default {
     }
     const loadedCases = await loadStoredCases(env);
     const { kept: cases, purged } = purgeExpiredCases(loadedCases, now, 90);
+    inheritCaseSnapshot(loadedCases,cases);
     if (purged.length) {
       await saveStoredCases(env, cases);
       await sendTelegram(env, `🧹 Datenschutz: ${purged.length} abgeschlossene Gastvorgänge wurden 90 Tage nach Check-out aus dem Portal gelöscht.`);
     }
 
-    const alerts = computeAlerts(cases, now);
+    const alerts = computeAlerts(cases, now, {directGuestReminders:env.AUTO_GUEST_REMINDERS==='yes'});
     for (const a of alerts) {
       if (await sendTelegram(env, a.text)) a.c.notify[a.key] = now.toISOString();
     }

@@ -6,7 +6,11 @@ import { generateFloodDisclosure } from './flood.js';
 import { sendViaGmail, sendTelegram } from './email.js';
 import { isReadyForOwnerReview as workflowReadyForOwnerReview, submissionRecipients, paperworkState, requiredPackageDocuments, applicationFeeState } from './workflow.js';
 import { isAnnualRental } from './compliance.js';
-import { getEncryptedSecret, saveStoredCases } from './storage.js';
+import { getEncryptedSecret, loadStoredCases } from './storage.js';
+import { persistDeliveryOutcome } from './delivery.js';
+import { loadArchivedPackage } from './package-archive.js';
+import {caseReviewDigest,reviewContextHash} from './review.js';
+import {validateLiveSubmissionPrerequisites} from './workflow.js';
 
 const PORTAL = 'https://portal.example.test';
 const OWNER = 'contact008@example.test';
@@ -33,10 +37,10 @@ export function isReadyForOwnerReview(c, ownerSigOnFile) {
   return workflowReadyForOwnerReview(c, ownerSigOnFile);
 }
 
-async function generatePackage(c, env) {
-  const sigB64 = await getEncryptedSecret(env, 'owner-signature-png');
+export async function generatePackage(c, env, source={}) {
+  const sigB64 = source.ownerSignature===undefined ? await getEncryptedSecret(env, 'owner-signature-png') : source.ownerSignature;
   const ownerSigPng = sigB64 ? b64ToBytes(sigB64) : null;
-  const compliance = JSON.parse((await env.CASES.get('compliance-config')) || '{}');
+  const compliance = source.compliance || JSON.parse((await env.CASES.get('compliance-config')) || '{}');
   const data = { checkIn: c.checkIn, checkOut: c.checkOut, reservationCode: c.reservationCode,
     applicationType: c.applicationType || 'lease', ownerSigPng, todayISO: new Date().toISOString().slice(0, 10),
     reviewHash: c.reviewHash, landlordNoticeAddress: compliance.landlordNoticeAddress,
@@ -67,6 +71,8 @@ async function generatePackage(c, env) {
 
 export async function submitApprovedPackage(c, cases, env) {
   const live = (await env.CASES.get('submit-live')) === 'yes';
+  let mailAttempted=false,mailSent=false;
+  const notify=async message=>{try {await sendTelegram(env,message);} catch {console.error('delivery notification failed');}};
   const stayRef = `Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
   const renewal = c.applicationType === 'renewal';
   const feeState = applicationFeeState(c);
@@ -79,7 +85,9 @@ export async function submitApprovedPackage(c, cases, env) {
         ? 'online Tenant Evaluation applications must not be emailed as a local paper package'
         : 'the official application route must be selected before a local package is generated');
     }
-    const attachments = await generatePackage(c, env);
+    const archive=env.CASE_STORE ? await loadArchivedPackage(env,c) : null;
+    if(archive && (c.aiReview?.packageId!==archive.manifest.id || c.aiReview?.packageHash!==archive.manifest.packageHash)) throw new Error('The archived package has not passed the current review');
+    const attachments = archive ? archive.attachments : await generatePackage(c, env);
     const subject = (live ? '' : '[TEST] ') + (c.pathType === 'full'
       ? `${renewal ? 'Lease renewal package' : 'Lease application package'} — ${stayRef}`
       : `Guest registration — ${stayRef}`);
@@ -87,13 +95,22 @@ export async function submitApprovedPackage(c, cases, env) {
       ? `Dear Example Property Management / Example Condominium,\n\nPlease find attached the local paper-route documents for the upcoming ${renewal ? 'lease renewal' : 'lease application'}:\n\n${stayRef}\n\nAttached as separately reviewable PDF components:\n1. Application for Lease of Condominium\n2. Background Check Authorization (signed by each adult applicant)\n3. Rules & Regulations with signed acknowledgment\n4. Short-Term Residential Lease Agreement (signed by tenant(s) and owner)${isAnnualRental(c) ? '\n5. Florida Flood Disclosure' : ''}\n\nThe applicants have reviewed the Rules and Regulations and signed the attached acknowledgment. Completion of the association's separate official screening has been confirmed in the owner workflow; sensitive screening data is not included in these attachments. Photo IDs have been provided through the association's secure channel. ${feeText}\n\nPlease confirm receipt and let us know once the file proceeds to Board approval.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D / 6219 Palma Del Mar Blvd S${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`
       : `Dear Example Property Management / Example Condominium,\n\nPlease find attached the completed Guest Registration for:\n\n${stayRef}\n\nSigned by the guest and by me as unit owner. Please confirm receipt.\n\nBest regards,\nProperty Owner\nOwner, Unit 405D${live ? '' : '\n\n[TESTMODUS: Diese Mail ging nur an Owner, nicht an die Verwaltung.]'}`;
     const recipients = submissionRecipients();
+    if(env.CASE_STORE) {
+      const fresh=(await loadStoredCases(env)).find(item=>item.id===c.id);
+      const signature=await getEncryptedSecret(env,'owner-signature-png');
+      const compliance=JSON.parse(await env.CASES.get('compliance-config')||'{}');
+      if(!fresh||fresh.status==='canceled'||fresh.reviewLockedAt!==c.reviewLockedAt||fresh.preparedPackage?.id!==archive.manifest.id||await caseReviewDigest(fresh,fresh.wizard)!==c.reviewHash||await reviewContextHash(fresh,signature,compliance)!==archive.manifest.contextHash||(live&&!validateLiveSubmissionPrerequisites(fresh).ok)) throw new Error('Reservation or release prerequisites changed before delivery');
+    }
+    mailAttempted=true;
     await sendViaGmail(env, {
       to: live ? recipients.to : [OWNER],
       cc: live ? recipients.cc : [],
       subject, text, attachments,
     });
+    mailSent=true;
     if (live) {
       c.submission = { sentAt: new Date().toISOString(), live: true, docs: attachments.map(a => a.filename), reviewHash: c.ownerApprovedReviewHash || null };
+      if(archive) Object.assign(c.submission,{packageId:archive.manifest.id,packageHash:archive.manifest.packageHash,packageManifest:archive.manifest});
       delete c.submissionError;
       for (const id of ['application', 'background', 'rules_ack', 'lease_signed', 'registration', 'owner_reviewed', 'submitted_hoa']) {
         const s = c.steps.find(s => s.id === id);
@@ -103,14 +120,20 @@ export async function submitApprovedPackage(c, cases, env) {
       c.testSubmission = { sentAt: new Date().toISOString(), live: false, docs: attachments.map(a => a.filename), reviewHash: c.ownerApprovedReviewHash || c.reviewHash || null };
       delete c.testSubmissionError;
     }
-    await saveStoredCases(env, cases);
+    await persistDeliveryOutcome(env,cases,c,live ? {submission:c.submission,submissionError:null} : {testSubmission:c.testSubmission,testSubmissionError:null});
     const sentDocs = live ? c.submission.docs : c.testSubmission.docs;
-    await sendTelegram(env, `📬 ${c.guestName} (${c.checkIn}): Das von dir geprüfte Paket wurde ${live ? 'an die Verwaltung' : 'im TESTMODUS nur an dich'} gesendet (${sentDocs.join(', ')}). Portal: ${PORTAL}/admin`);
+    if(!c.autoRelease) await notify(`📬 ${c.guestName} (${c.checkIn}): Das von dir geprüfte Paket wurde ${live ? 'an die Verwaltung' : 'im TESTMODUS nur an dich'} gesendet (${sentDocs.join(', ')}). Portal: ${PORTAL}/admin`);
     return true;
   } catch (e) {
-    c.submissionError = { at: new Date().toISOString(), message: String(e && e.message || e).slice(0, 300) };
-    await saveStoredCases(env, cases);
-    await sendTelegram(env, `🚨 STÖRUNG bei ${c.guestName} (${c.checkIn}): Der manuell freigegebene Paketversand ist fehlgeschlagen — ${c.submissionError.message}. Es erfolgt kein automatischer Wiederholungsversuch. Bitte im Admin erneut prüfen: ${PORTAL}/admin`);
+    if (mailSent) {
+      console.error('delivery accepted but receipt persistence failed; retain delivery lock');
+      await notify(`🚨 ${c.guestName}: Die E-Mail wurde vom Mailserver angenommen, der Versandnachweis konnte aber nicht gespeichert werden. NICHT erneut senden. Gesendet-Ordner und Vorgang manuell abgleichen: ${PORTAL}/admin`);
+      return true;
+    }
+    const failure={at:new Date().toISOString(),phase:mailAttempted?'delivery_uncertain':'preparation_failed',message:String(e && e.message || e).slice(0,300)};
+    try {await persistDeliveryOutcome(env,cases,c,live?{submissionError:failure}:{testSubmissionError:failure});}
+    catch {console.error('delivery failure could not be recorded; retain delivery lock');}
+    await notify(`🚨 STÖRUNG bei ${c.guestName} (${c.checkIn}): ${mailAttempted?'Versandstatus unklar. Vor einem weiteren Versuch den Gesendet-Ordner prüfen.':'Paketvorbereitung fehlgeschlagen; keine E-Mail versandt.'} Es erfolgt kein automatischer Wiederholungsversuch. Details: ${PORTAL}/admin`);
     return false;
   }
 }

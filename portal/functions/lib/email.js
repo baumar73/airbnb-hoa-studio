@@ -32,7 +32,7 @@ export function buildMime({ fromName, from, to, cc, subject, text, attachments }
   return headers + '\r\n\r\n' + body;
 }
 
-export async function sendViaGmail(env, { to, cc, subject, text, attachments, fromName }) {
+export async function sendViaGmail(env, { to, cc, subject, text, attachments, fromName }, openSocket=connect) {
   const user = env.GMAIL_USER || 'contact008@example.test';
   const pass = env.GMAIL_APP_PASSWORD;
   const recipients = [...(to || []), ...(cc || [])];
@@ -46,7 +46,7 @@ export async function sendViaGmail(env, { to, cc, subject, text, attachments, fr
   const rcpts = recipients;
   const mime = buildMime({ fromName: fromName || 'Property Owner', from: user, to, cc, subject, text, attachments });
 
-  const sock = connect('smtp.gmail.com:465', { secureTransport: 'on', allowHalfOpen: false });
+  const sock = openSocket('smtp.gmail.com:465', { secureTransport: 'on', allowHalfOpen: false });
   const writer = sock.writable.getWriter();
   const reader = sock.readable.getReader();
   const dec = new TextDecoder(), enc = new TextEncoder();
@@ -66,7 +66,9 @@ export async function sendViaGmail(env, { to, cc, subject, text, attachments, fr
     if (line !== null) await writer.write(enc.encode(line + '\r\n'));
     const reply = await readReply();
     if (expect && !reply.trim().split('\r\n').pop().startsWith(String(expect))) {
-      throw new Error(`SMTP unexpected reply to "${line ? line.slice(0, 20) : 'greeting'}": ${reply.slice(0, 200)}`);
+      // AUTH commands contain encoded credentials. Never include the command
+      // or untrusted server text in an error stored on a guest case.
+      throw new Error(`SMTP response did not match expected status ${expect}`);
     }
     return reply;
   }
@@ -82,7 +84,9 @@ export async function sendViaGmail(env, { to, cc, subject, text, attachments, fr
     const dotStuffed = mime.replace(/\r\n\./g, '\r\n..');
     await writer.write(enc.encode(dotStuffed + '\r\n.\r\n'));
     await cmd(null, 250);
-    await cmd('QUIT', 221);
+    // The final DATA 250 is acceptance. A lost QUIT response cannot undo it
+    // and must not convert an accepted message into a retryable failure.
+    try {await cmd('QUIT', 221);} catch { /* message already accepted */ }
   } finally {
     try { await sock.close(); } catch (e) {}
   }

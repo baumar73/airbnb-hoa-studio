@@ -1,0 +1,22 @@
+name = "isla-case-store"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+workers_dev = false
+preview_urls = false
+
+[[durable_objects.bindings]]
+name = "CASE_STORE"
+class_name = "CaseStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CaseStore"]
+
+# Intentionally absent: LEGACY_CASES / ALLOW_CASE_IMPORT. Bind the verified
+# source namespace only for the confirmed one-time import, then remove it.
+[env.preview]
+name = "isla-case-store-preview"
+
+[[env.preview.durable_objects.bindings]]
+name = "CASE_STORE"
+class_name = "CaseStore"

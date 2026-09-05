@@ -14,6 +14,23 @@ HMDEMO0002
 64 nights room fee`,
 };
 
+for (const name of ['Mary Jane Smith', 'José de la Cruz', 'Anne-Marie O’Neill', 'JOHN MICHAEL SMITH', 'John Smith Jr.']) {
+  test(`preserves the full booking name: ${name}`, () => {
+    const parsed = parseBooking({ ...demoGuestMail, subject: `Reservation confirmed - ${name} arrives Oct 17` }, '2026-07-17');
+    assert.equal(parsed.guestName, name);
+    assert.equal(parsed.complete, true);
+  });
+}
+
+test('a labelled full name takes precedence over a shortened subject name', () => {
+  const parsed = parseBooking({ ...demoGuestMail, subject: 'Reservation confirmed - Mary Jane arrives Oct 17', text: `Guest: Mary Jane Smith\n${demoGuestMail.text}` }, '2026-07-17');
+  assert.equal(parsed.guestName, 'Mary Jane Smith');
+});
+
+test('unrecognized subject prose is not silently accepted as a guest name', () => {
+  assert.equal(parseBooking({ ...demoGuestMail, subject: 'Reservation confirmed - Your guest will arrive soon' }, '2026-07-17').complete, false);
+});
+
 test('parses the real DemoGuest booking range and singular adult count', () => {
   assert.deepEqual(parseBooking(demoGuestMail, '2026-07-17'), {
     code: 'HMDEMO0002',

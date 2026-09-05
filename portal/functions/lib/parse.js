@@ -66,6 +66,22 @@ export function parseYearlessRange(text, today) {
   return out.every(validISO) ? out : [];
 }
 
+function completeName(value) {
+  const name = String(value || '').trim().replace(/\s+/g, ' ');
+  const parts = name.split(' ');
+  if (name.length > 160 || parts.length < 2 || parts.length > 10) return '';
+  const particle = /^(?:de|del|la|las|los|da|das|do|dos|van|von|der|den|di|du|le|al|bin)$/i;
+  const word = /^\p{Lu}[\p{L}\p{M}.'’ʼ-]*$/u;
+  return parts.every((part, i) => word.test(part) || (i > 0 && particle.test(part))) ? name : '';
+}
+
+export function bookingLastName(value) {
+  const name = String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+(?:Jr\.?|Sr\.?|II|III|IV)$/i, '').toLowerCase()
+    .replace(/['’ʼ]/g, '').replace(/[^\p{L}\p{N} -]/gu, ' ').trim();
+  return name.split(/\s+/).at(-1) || '';
+}
+
 export function parseBooking({ subject, text }, today) {
   const all = subject + '\n' + text;
   const code = (all.match(/\b(HM[A-Z0-9]{8,12})\b/) || [])[1] || '';
@@ -77,12 +93,13 @@ export function parseBooking({ subject, text }, today) {
   let dates = parseYearlessRange(stayWindow, today);
   if (dates.length < 2) dates = parseDates(stayWindow);
   if (dates.length < 2 && stayWindow !== all) dates = parseDates(all);
-  // guest name heuristics (confirmation mails usually carry the guest's full name)
-  const nameM =
-    all.match(/(?:Reservation confirmed|Buchung bestätigt)[^\n]{0,40}?[-–—:]\s*([A-ZÄÖÜ][\p{L}'-]+ [A-ZÄÖÜ][\p{L}'-]+)/u) ||
-    all.match(/\b([A-ZÄÖÜ][\p{L}'-]+ [A-ZÄÖÜ][\p{L}'-]+)\s+(?:arrives|kommt am|checkt)/u) ||
-    all.match(/Guest:\s*([A-ZÄÖÜ][\p{L}'-]+ [A-ZÄÖÜ][\p{L}'-]+)/u);
-  const guestName = nameM ? nameM[1] : '';
+  // Capture the whole name up to a known boundary, never just two words.
+  // A labelled body value is stronger evidence than a shortened subject.
+  const labelled = text.match(/^(?:Guest|Gast):[ \t]*([^\n\r]+)$/mi);
+  const subjectName = subject.match(/(?:Reservation confirmed|Buchung bestätigt)[^\n]{0,40}?[-–—:][ \t]*(.+?)(?=\s+(?:arrives|kommt am|checkt)\b|$)/i);
+  const arrivalName = all.match(/^([^\n]+?)\s+(?:arrives|kommt am|checkt)\b/m);
+  const guestName = labelled ? completeName(labelled[1])
+    : completeName(subjectName?.[1]) || completeName(arrivalName?.[1]);
   const adultsM = all.match(/\b(\d{1,2})\s+adult(?:s)?\b/i) || all.match(/\b(\d{1,2})\s+Erwachsene(?:n)?\b/i);
   const adults = adultsM ? parseInt(adultsM[1], 10) : null;
   const checkIn = dates[0] || '', checkOut = dates[1] || '';
@@ -98,4 +115,3 @@ export function parseBooking({ subject, text }, today) {
 export function looksLikeApproval(subject) {
   return /approv/i.test(subject) || /genehmig/i.test(subject);
 }
-

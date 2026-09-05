@@ -1,0 +1,254 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { CaseStore } from '../case-store/src/index.js';
+import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret } from '../functions/lib/storage.js';
+import {caseReviewDigest,reviewContextHash} from '../functions/lib/review.js';
+import { register } from 'node:module';
+register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
+const {onRequest}=await import('../functions/[[path]].js');
+const {persistDeliveryOutcome}=await import('../functions/lib/delivery.js');
+const {runGuestReminders}=await import('../functions/lib/guest-reminders.js');
+const {computeAlerts}=await import('../cron/src/index.js');
+const {archivePackage,loadArchivedPackage}=await import('../functions/lib/package-archive.js');
+const {automaticReleaseState,runAutomaticSubmissions}=await import('../functions/lib/auto-submit.js');
+
+// The fake serializes transactions, matching the actor's atomic storage API.
+// A separate workerd test verifies the same behavior in Cloudflare's runtime.
+function setup() {
+  const values = new Map(), legacy = new Map();
+  let queue = Promise.resolve();
+  const storage = {
+    get: async k => structuredClone(values.get(k)),
+    put: async (k,v) => values.set(k, structuredClone(v)),
+    delete: async k => values.delete(k),
+    transaction(fn) { const task = queue.then(() => fn(storage)); queue = task.catch(() => {}); return task; },
+  };
+  const actor = new CaseStore({storage}, {});
+  values.set('snapshot', {revision:0, ids:[], versions:{}});
+  const env = {DATA_ENCRYPTION_KEY: Buffer.alloc(32,7).toString('base64'), CASES:{get:async k=>legacy.get(k)??null,put:async(k,v)=>legacy.set(k,v),delete:async k=>legacy.delete(k)}, CASE_STORE:{idFromName:n=>n,get:()=>({fetch:(url,options)=>actor.fetch(new Request(url,options))})}};
+  return {env,values,legacy,actor};
+}
+async function seed(env) {
+  const cases=await loadStoredCases(env);
+  cases.push({id:'a',guestName:'Jane Smith',wizard:{adults:[{firstName:'Jane',idNumber:'private-test-id'}]}},{id:'b',guestName:'John Doe'});
+  await saveStoredCases(env,cases);
+}
+test('separate case edits merge without replacing other reservations', async()=>{
+  const {env,legacy,values}=setup(); await seed(env);
+  const first=await loadStoredCases(env),second=await loadStoredCases(env);
+  first[0].notes='first'; second[1].notes='second';
+  await Promise.all([saveStoredCases(env,first),saveStoredCases(env,second)]);
+  const saved=await loadStoredCases(env);
+  assert.equal(saved[0].notes,'first');assert.equal(saved[1].notes,'second');
+  assert.equal(legacy.has('cases'),false);
+  assert.doesNotMatch(JSON.stringify([...values]),/private-test-id/);
+});
+test('stale guest edit cannot revert a cancellation', async()=>{
+  const {env}=setup();await seed(env);
+  const guest=await loadStoredCases(env),poller=await loadStoredCases(env);
+  poller[0].status='canceled';await saveStoredCases(env,poller);
+  guest[0].wizard.adults[0].firstName='Updated';
+  await assert.rejects(saveStoredCases(env,guest),{code:'CASE_CONFLICT'});
+  assert.equal((await loadStoredCases(env))[0].status,'canceled');
+});
+test('stale edits do not resurrect deleted cases', async()=>{
+  const {env}=setup();await seed(env);
+  const stale=await loadStoredCases(env),owner=await loadStoredCases(env);
+  await saveStoredCases(env,inheritCaseSnapshot(owner,owner.filter(c=>c.id!=='a')));
+  stale[0].notes='later';await assert.rejects(saveStoredCases(env,stale),{code:'CASE_CONFLICT'});
+  assert.equal((await loadStoredCases(env)).some(c=>c.id==='a'),false);
+});
+test('delivery receipt preserves concurrent cancellation and never replaces the case', async()=>{
+  const {env}=setup();await seed(env);
+  const claimed=await loadStoredCases(env);
+  claimed[0].reviewLockedAt='claim-1';claimed[0].steps=[{id:'submitted_hoa',done:false}];
+  await saveStoredCases(env,claimed);
+  const poller=await loadStoredCases(env);poller[0].status='canceled';poller[0].notes='keep this';await saveStoredCases(env,poller);
+  await persistDeliveryOutcome(env,claimed,claimed[0],{submission:{sentAt:'2026-09-04T12:00:00Z',docs:['synthetic.pdf']}});
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.status,'canceled');assert.equal(saved.notes,'keep this');
+  assert.deepEqual(saved.submission.docs,['synthetic.pdf']);assert.equal(saved.steps[0].done,true);
+});
+test('delivery receipt refuses deleted or replaced delivery claims', async()=>{
+  const {env}=setup();await seed(env);
+  const claimed=await loadStoredCases(env);claimed[0].reviewLockedAt='first';await saveStoredCases(env,claimed);
+  const changed=await loadStoredCases(env);changed[0].reviewLockedAt='second';await saveStoredCases(env,changed);
+  await assert.rejects(persistDeliveryOutcome(env,claimed,claimed[0],{submission:{sentAt:'now'}}),{code:'CASE_DELIVERY_CHANGED'});
+  await saveStoredCases(env,inheritCaseSnapshot(changed,changed.filter(c=>c.id!=='a')));
+  await assert.rejects(persistDeliveryOutcome(env,claimed,claimed[0],{submission:{sentAt:'now'}}),{code:'CASE_DELIVERY_CHANGED'});
+  assert.equal((await loadStoredCases(env)).some(c=>c.id==='a'),false);
+});
+test('snapshot metadata is required and missing backend never falls back when required', async()=>{
+  const {env}=setup();await seed(env);
+  await assert.rejects(saveStoredCases(env,[{id:'a'}]),{code:'CASE_SNAPSHOT_REQUIRED'});
+  delete env.CASE_STORE;env.REQUIRE_ATOMIC_CASES='yes';
+  await assert.rejects(loadStoredCases(env),{code:'CASE_STORE_UNAVAILABLE'});
+});
+test('normalizing view labels is not treated as a write to unrelated cases', async()=>{
+  const {env}=setup();await seed(env);
+  const loaded=await loadStoredCases(env);
+  const view=inheritCaseSnapshot(loaded,loaded.map(c=>({...c,displayLabel:'normalized'})),true);
+  const poller=await loadStoredCases(env);poller[1].status='canceled';await saveStoredCases(env,poller);
+  view[0].notes='safe';await saveStoredCases(env,view);
+  const saved=await loadStoredCases(env);assert.equal(saved[1].status,'canceled');
+});
+test('actor refuses plaintext wizard data and uninitialized reads', async()=>{
+  const {actor,values}=setup();
+  const r=await actor.fetch(new Request('https://case-store/cases',{method:'PATCH',body:JSON.stringify({changes:[{id:'x',expectedVersion:0,value:{id:'x',wizard:{private:'data'}}}]})}));
+  assert.equal(r.status,400);
+  values.delete('snapshot');assert.equal((await actor.fetch(new Request('https://case-store/cases'))).status,503);
+});
+
+test('review API reads encrypted cases and accepts only a current structured report', async()=>{
+  const {env}=setup();
+  env.ADMIN_USER='review-test';env.ADMIN_PASSWORD='test-only';
+  const cases=await loadStoredCases(env);
+  cases.push({id:'review-case',guestName:'Jane Smith',pathType:'full',screeningRoute:'paper',
+    reviewHash:'abc123',ownerReviewReadyAt:'2026-09-04T00:00:00Z',adults:1,nights:30,
+    checkIn:'2026-10-01',checkOut:'2026-10-31',token:'private-not-for-review',notes:'unrelated private notes',
+    wizard:{adults:[{firstName:'Jane',idNumber:'test-id'}]},steps:[]});
+  await saveStoredCases(env,cases);
+  const call=(path,form)=>onRequest({env,request:new Request('https://portal.example.test'+path,{method:form?'POST':'GET',headers:{Authorization:'Basic '+btoa('review-test:test-only'),Origin:'https://portal.example.test','Content-Type':'application/json'},body:form?JSON.stringify(form):undefined})});
+  const res=await call('/admin/review/candidates');assert.equal(res.status,200);
+  const payload=await res.json();
+  assert.equal(payload.cases[0].wizard,undefined);assert.equal(payload.ownerSignature,undefined);
+  assert.equal(payload.cases[0].token,undefined);assert.equal(payload.cases[0].notes,undefined);
+  const report={status:'green',confidence:.9,findings:[],documents:[],summary:'Consistent',model:'test'};
+  let result=await call('/admin/review/result',{id:'review-case',reviewHash:'stale',reviewContextHash:payload.cases[0].reviewContextHash,report});
+  assert.equal(result.status,409);
+  result=await call('/admin/review/result',{id:'review-case',reviewHash:'abc123',reviewContextHash:payload.cases[0].reviewContextHash,report:{...report,status:'invented'}});
+  assert.equal(result.status,400);
+  // Incomplete paperwork must not become green just because a model says so.
+  result=await call('/admin/review/result',{id:'review-case',reviewHash:'abc123',reviewContextHash:payload.cases[0].reviewContextHash,report});
+  assert.equal(result.status,409);
+  result=await call('/admin/review/result',{id:'review-case',reviewHash:'abc123',reviewContextHash:payload.cases[0].reviewContextHash,report:{...report,status:'red',findings:['Missing fields']}});
+  assert.equal(result.status,200);
+  const [saved]=await loadStoredCases(env);assert.equal(saved.aiReview.status,'red');assert.equal(saved.submission,undefined);
+});
+
+async function reminderFixture() {
+  const {env}=setup();
+  Object.assign(env,{AUTO_GUEST_REMINDERS:'yes',REQUIRE_ATOMIC_CASES:'yes',PORTAL_ORIGIN:'https://example.com'});
+  const cases=await loadStoredCases(env);
+  cases.push({id:'remind',pathType:'full',screeningRoute:'paper',checkIn:'2026-11-01',checkOut:'2026-12-01',createdAt:'2026-09-01T00:00:00Z',adults:1,steps:[],token:'never-include-this-token',wizard:{adults:[{email:'synthetic@example.test',idNumber:'never-include-this-id'}]}});
+  await saveStoredCases(env,cases);
+  return env;
+}
+test('concurrent reminder workers send once directly to the guest, without private values',async()=>{
+  const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');
+  const sent=[];const send=async(_,message)=>{sent.push(message);return true;};
+  await Promise.all([runGuestReminders(env,now,send),runGuestReminders(env,now,send)]);
+  assert.equal(sent.length,1);assert.deepEqual(sent[0].to,['synthetic@example.test']);assert.deepEqual(sent[0].cc,[]);
+  assert.match(sent[0].text,/adult 1 lastName/);assert.match(sent[0].text,/https:\/\/example.com\//);
+  assert.doesNotMatch(JSON.stringify(sent),/never-include/);
+  await runGuestReminders(env,now,send);assert.equal(sent.length,1);
+  assert.equal((await loadStoredCases(env))[0].automation.reminderClaim.state,'sent');
+});
+test('uncertain reminder transport is not retried and does not mark delivery confirmed',async()=>{
+  const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');let attempts=0;
+  const send=async()=>{attempts++;throw new Error('synthetic ambiguous disconnect');};
+  await runGuestReminders(env,now,send);
+  await runGuestReminders(env,new Date('2026-09-10T12:00:00Z'),send);
+  assert.equal(attempts,1);
+  const [c]=await loadStoredCases(env);assert.equal(c.automation.lastGuestReminderAt,undefined);assert.equal(c.automation.reminderClaim.state,'uncertain');
+});
+test('disabled reminders and canceled bookings perform no outbound communication',async()=>{
+  const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');let sent=0;
+  env.AUTO_GUEST_REMINDERS='no';
+  assert.equal((await runGuestReminders(env,now,async()=>{sent++;})).disabled,true);
+  env.AUTO_GUEST_REMINDERS='yes';const cases=await loadStoredCases(env);cases[0].status='canceled';await saveStoredCases(env,cases);
+  await runGuestReminders(env,now,async()=>{sent++;});assert.equal(sent,0);
+});
+test('missing guest contact is explicitly reported, not silently replaced by owner email',async()=>{
+  const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');
+  const cases=await loadStoredCases(env);delete cases[0].wizard;await saveStoredCases(env,cases);
+  const result=await runGuestReminders(env,now,async()=>{assert.fail('no recipient was verified');});
+  assert.equal(result.waitingForContact,1);assert.equal(result.sent,0);
+});
+test('watchdog does not ask owner to chase guests when direct reminders are enabled',()=>{
+  const c={id:'test',checkIn:'2026-11-01',checkOut:'2026-12-01',createdAt:'2026-09-01',pathType:'full',screeningRoute:'paper',steps:[]};
+  assert.equal(computeAlerts([structuredClone(c)],new Date('2026-09-05')).some(a=>a.key==='wizardNudge'),true);
+  assert.equal(computeAlerts([structuredClone(c)],new Date('2026-09-05'),{directGuestReminders:true}).some(a=>a.key==='wizardNudge'),false);
+  assert.equal(computeAlerts([{...c,screeningRoute:'online'}],new Date('2026-09-05')).some(a=>a.key==='wizardNudge'),false);
+  assert.deepEqual(computeAlerts([{...c,status:'canceled'}],new Date('2026-09-05')),[]);
+});
+test('immutable package roundtrips encrypted bytes and rejects stale preparation',async()=>{
+  const {env,values}=setup();await seed(env);
+  const cases=await loadStoredCases(env);cases[0].reviewHash='review-v1';cases[0].pathType='full';await saveStoredCases(env,cases);
+  const files=[{filename:'synthetic-test.pdf',bytes:new TextEncoder().encode('%PDF synthetic test payload not an HOA template')}];
+  const manifest=await archivePackage(env,cases,cases[0],files,'context-v1');
+  const [current]=await loadStoredCases(env);
+  assert.equal(current.preparedPackage.id,manifest.id);
+  assert.doesNotMatch(JSON.stringify([...values]),/synthetic test payload/);
+  const restored=await loadArchivedPackage(env,current);assert.deepEqual(restored.attachments,files);
+  await assert.rejects(archivePackage(env,cases,cases[0],files,'context-v1'),{code:'CASE_CONFLICT'});
+});
+test('archive cannot be overwritten and disappears when its case is deleted',async()=>{
+  const {env,actor,values}=setup();await seed(env);
+  const cases=await loadStoredCases(env);cases[0].reviewHash='r';await saveStoredCases(env,cases);
+  await archivePackage(env,cases,cases[0],[{filename:'test.pdf',bytes:new Uint8Array([1,2,3])}],'context');
+  const current=await loadStoredCases(env),c=current[0];
+  const found=await actor.fetch(new Request(`https://case-store/packages?caseId=a&id=${c.preparedPackage.id}`));
+  const data=await found.json();
+  const overwrite=await actor.fetch(new Request('https://case-store/packages',{method:'POST',body:JSON.stringify({caseId:'a',expectedVersion:2,...data})}));
+  assert.equal(overwrite.status,409);
+  await saveStoredCases(env,inheritCaseSnapshot(current,current.filter(c=>c.id!=='a')));
+  await assert.rejects(loadArchivedPackage(env,c),{code:'CASE_ARCHIVE_MISSING'});
+  assert.equal([...values.keys()].some(k=>k.startsWith('package:a:')),false);
+});
+
+async function automaticFixture() {
+  const {env,legacy}=setup();
+  Object.assign(env,{AUTO_HOA_SUBMIT:'yes',REQUIRE_ATOMIC_CASES:'yes',OWNER_SIGNATURE_AUTHORIZATION:'hoa-paperwork-v1',OWNER_AUTHORIZATION_REFERENCE:'synthetic-test-authorization',AUDIT_HASH_SALT:'synthetic-audit-salt-only'});
+  const bytes=Buffer.alloc(120);Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes);Buffer.from('IHDR').copy(bytes,12);bytes.writeUInt32BE(640,16);bytes.writeUInt32BE(170,20);
+  const sig=bytes.toString('base64');
+  await putEncryptedSecret(env,'owner-signature-png',sig);
+  const compliance={policyVersion:'fl-2026.09.02',landlordNoticeAddress:'synthetic address',governingDocumentsVerifiedAt:'synthetic',approvalAuthorityCitation:'synthetic',rulesVersion:'synthetic',hoaESignAcceptedAt:'synthetic',privacySecurityReviewedAt:'synthetic',fairHousingReviewedAt:'synthetic',feeAuthorityCitation:'synthetic',airbnbFeeDisclosureVerifiedAt:'synthetic'};
+  legacy.set('compliance-config',JSON.stringify(compliance));legacy.set('submit-live','yes');
+  compliance.airbnbExternalFeeAuthorizationReference='synthetic authorization';legacy.set('compliance-config',JSON.stringify(compliance));
+  const cases=await loadStoredCases(env);
+  const c={id:'automatic',guestName:'Jane Smith',reservationCode:'SYNTHETIC123',checkIn:'2026-11-01',checkOut:'2026-12-01',nights:30,adults:1,pathType:'full',screeningRoute:'paper',ownerReviewReadyAt:'2026-09-05T00:00:00Z',
+    steps:['ids_provided','fee_sent','screening_complete'].map(id=>({id,done:true})),
+    wizard:{adults:[{firstName:'Jane',middleName:'None',lastName:'Smith',birthDate:'1980-01-01',gender:'F',phone:'555-0100',email:'synthetic@example.test',street:'synthetic',city:'synthetic',state:'FL',zip:'00000',idType:'drivers_license',idNumber:'synthetic',idState:'FL',employer:'Retired',employerPhone:'N/A',sigPng:sig,esignConsent:true,signatureAudit:{signedAt:'2026-09-05T00:00:00Z',contentHash:'synthetic'}}],references:[{name:'One',phone:'1',address:'test'},{name:'Two',phone:'2',address:'test'}],emergency:[{name:'One',phone:'1'},{name:'Two',phone:'2'}],esignConsent:true,esignConsentVersion:'fl-2026.09.02',rulesAcknowledged:true}};
+  c.reviewHash=await caseReviewDigest(c,c.wizard);cases.push(c);await saveStoredCases(env,cases);
+  const context=await reviewContextHash(c,sig,compliance);
+  await archivePackage(env,cases,c,[1,2,3,4].map(i=>({filename:`synthetic-${i}.pdf`,bytes:new TextEncoder().encode(`synthetic PDF fixture ${i}`)})),context);
+  const current=await loadStoredCases(env);
+  current[0].aiReview={status:'green',confidence:.9,findings:[],summary:'Synthetic validation',model:'test',reviewHash:c.reviewHash,reviewContextHash:context,packageId:current[0].preparedPackage.id,packageHash:current[0].preparedPackage.packageHash};
+  await saveStoredCases(env,current);
+  return {env,sig,compliance};
+}
+test('standing authorization releases a complete reviewed package once without owner interaction',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;
+  const submit=async(c,cases)=>{deliveries++;await persistDeliveryOutcome(env,cases,c,{submission:{sentAt:'2026-09-05T12:00:00Z',packageId:c.preparedPackage.id,docs:c.preparedPackage.documents.map(d=>d.filename)}});return true;};
+  await Promise.all([runAutomaticSubmissions(env,new Date('2026-09-05'),submit),runAutomaticSubmissions(env,new Date('2026-09-05'),submit)]);
+  assert.equal(deliveries,1);
+  const [c]=await loadStoredCases(env);assert.equal(c.autoRelease.scope,'hoa-paperwork-v1');assert.ok(c.submission);assert.equal(c.steps.some(s=>s.id==='board_approved'&&s.done),false);
+});
+test('automation rejects missing fee evidence, changed signatures, stale review and revoked authority',async()=>{
+  const {env,sig,compliance}=await automaticFixture();const [c]=await loadStoredCases(env);
+  assert.equal((await automaticReleaseState(c,env,sig,compliance)).ok,true);
+  const unpaid=structuredClone(c);unpaid.steps.find(s=>s.id==='fee_sent').done=false;
+  assert.ok((await automaticReleaseState(unpaid,env,sig,compliance)).missing.includes('fee_sent'));
+  assert.equal((await automaticReleaseState(c,env,sig+'changed',compliance)).ok,false);
+  const stale=structuredClone(c);stale.aiReview.packageHash='old';assert.equal((await automaticReleaseState(stale,env,sig,compliance)).ok,false);
+  delete env.OWNER_SIGNATURE_AUTHORIZATION;
+  assert.ok((await automaticReleaseState(c,env,sig,compliance)).missing.includes('standing_owner_authorization'));
+  let deliveries=0;await runAutomaticSubmissions(env,new Date('2026-09-05'),async()=>{deliveries++;});assert.equal(deliveries,0);
+});
+test('review-only token cannot access owner controls or send a package',async()=>{
+  const {env}=await automaticFixture();env.REVIEW_API_TOKEN='synthetic-review-token-at-least-32-chars';env.ADMIN_USER='owner';env.ADMIN_PASSWORD='test-only';
+  const call=path=>onRequest({env,request:new Request('https://example.com'+path,{headers:{Authorization:'Bearer '+env.REVIEW_API_TOKEN}})});
+  assert.equal((await call('/admin/review/candidates')).status,200);
+  assert.equal((await call('/admin/cases')).status,401);
+  assert.equal((await call('/admin/submit')).status,401);
+});
+test('executed document download uses archived bytes after owner signature changes',async()=>{
+  const {env}=await automaticFixture();const cases=await loadStoredCases(env),c=cases[0];
+  c.token='synthetic-executed-token';c.submission={sentAt:'2026-09-05',packageId:c.preparedPackage.id,packageHash:c.preparedPackage.packageHash,packageManifest:c.preparedPackage};
+  await saveStoredCases(env,cases);
+  await putEncryptedSecret(env,'owner-signature-png','changed-after-signing');
+  env.ASSETS={fetch:()=>assert.fail('an executed document must not be regenerated')};
+  const result=await onRequest({env,request:new Request('https://example.com/v/synthetic-executed-token/executed-lease.pdf')});
+  assert.equal(result.status,200);assert.equal(await result.text(),'synthetic PDF fixture 4');
+});

@@ -200,7 +200,7 @@ test('the returning guest status page says the forms are complete after a succes
   assert.doesNotMatch(body, /<h2>Complete your forms online<\/h2>/i);
 });
 
-test('fee payment instructions stay hidden until HOA authority and Airbnb disclosure are verified', async () => {
+test('fee instructions require HOA authority, Airbnb disclosure and external-payment authorization', async () => {
   const { env, store } = mockEnv();
   seedCase(store);
   let res = await onRequest({ request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }), env, waitUntil: () => {} });
@@ -209,6 +209,9 @@ test('fee payment instructions stay hidden until HOA authority and Airbnb disclo
   assert.doesNotMatch(body, /I've mailed the check/i);
 
   store.set('compliance-config', JSON.stringify({ feeAuthorityCitation: 'Declaration Article X', airbnbFeeDisclosureVerifiedAt: '2026-09-02' }));
+  res = await onRequest({ request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }), env, waitUntil: () => {} });
+  assert.doesNotMatch(await res.text(), /I've mailed the check/i);
+  store.set('compliance-config', JSON.stringify({ feeAuthorityCitation: 'Declaration Article X', airbnbFeeDisclosureVerifiedAt: '2026-09-02', airbnbExternalFeeAuthorizationReference:'synthetic documented exception' }));
   res = await onRequest({ request: guestRequest(`/v/${TOKEN}`, { method: 'GET', origin: null }), env, waitUntil: () => {} });
   body = await res.text();
   assert.match(body, /I've mailed the check/i);

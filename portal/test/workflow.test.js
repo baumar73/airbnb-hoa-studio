@@ -56,6 +56,11 @@ function completeCase() {
     },
   };
 }
+test('documented legal hold prevents automatic retention deletion',()=>{
+  const held={id:'held',checkOut:'2020-01-01',legalHold:{reason:'synthetic hold'}};
+  const result=purgeExpiredCases([held],new Date('2026-09-05'));
+  assert.deepEqual(result.kept,[held]);assert.deepEqual(result.purged,[]);
+});
 
 test('validates a sane future case input', () => {
   assert.deepEqual(validateCaseInput({
