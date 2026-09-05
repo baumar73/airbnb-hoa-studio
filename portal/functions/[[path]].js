@@ -14,6 +14,7 @@ import { bookingLastName } from './lib/parse.js';
 import { needsReview, reviewContextHash, validateReviewReport, reviewCaseData, caseReviewDigest } from './lib/review.js';
 import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib/package-archive.js';
 import {planGuestJourney} from './lib/journey.js';
+import {contactPreference,guestReminderEmail} from './lib/guest-contact.js';
 import {readAutomationStatus,automationHealth} from './lib/automation-health.js';
 import {readHoaReply,refreshHoaArchiveRetention} from './lib/hoa-mail.js';
 import {HOA_ITEMS,HOA_CONFIRMATIONS,hoaEvidenceState,hoaTaskText,reviewHoaEvidence,reportHoaTask} from './lib/hoa-evidence.js';
@@ -444,7 +445,14 @@ function hoaSourceReviewForm(c,cases,id,env) {
   return `<div class="card"><h2>Geprüften Beleg bearbeiten</h2><p>${esc(c.guestName)} · ${esc(c.checkIn)} – ${esc(c.checkOut)}</p><p>Keine automatische Bestätigung: Originalnachricht und gegebenenfalls Anhänge im Postfach prüfen. Tenant Evaluation darf nicht mit einer Board-Genehmigung verwechselt werden. Keine zusätzlichen Gebühren erfinden.</p><form method="post" action="/admin/hoa-mail/${id}/review"><input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="caseVersion" value="${caseSnapshotVersion(cases,c.id)}"><label>Buchungscode (bei Gastregistrierung vollständigen Gastnamen) zur Bestätigung eingeben<input name="reservation" required autocomplete="off"></label><label>Ergebnis<select name="kind"><option value="confirmed">Einzelne Fakten / Aufgaben anhand des Originals geprüft</option><option value="needs_review">Unklar oder widersprüchlich — Prüfung offenhalten</option><option value="adverse_response">Negative Rückmeldung — gesonderte Prüfung, keine Stornierung</option><option value="no_action">Keine fallbezogene Aktion erforderlich</option></select></label><h3>Nur ausdrücklich belegte Fakten</h3>${checks('confirmations',HOA_CONFIRMATIONS)}<h3>Konkrete Nachforderungen an den Gast</h3>${checks('requestedItems',HOA_ITEMS)}<h3>Nachweislich erledigte Nachforderungen</h3>${checks('resolvedItems',Object.fromEntries(hoaEvidenceState(c).tasks.map(t=>[t.id,(HOA_ITEMS[t.code]||t.code)+' — '+t.status+' — '+t.openedAt])))}${hoaEvidenceState(c).exception==='hoa_evidence_stale'?'<label><input type="checkbox" name="reconcileContext" value="yes"> Ich habe den neuen Mietzeitraum und die Belegzuordnung geprüft. Frühere Fakten und Aufgaben gelten nicht automatisch für den geänderten Aufenthalt. Nur ausdrücklich bestätigte Fakten und neu ausgewählte Aufgaben werden übernommen.</label>':''}${c.hoaReviewHold?'<label><input type="checkbox" name="clearHold" value="yes"> Der aktuelle Beleg klärt die bisherige Prüfsperre ausdrücklich.</label>':''}<label><input type="checkbox" name="attested" value="yes" required> Ich habe Original, Absenderberechtigung, Buchung und Mietzeitraum geprüft. Jede Auswahl wird ausdrücklich durch diesen Beleg gestützt; der Textauszug oder die automatische Kategorie allein genügt nicht.</label><p><button>Beleggebunden speichern</button></p><p class="muted">Kein Versand durch diesen Klick. Gast-Erinnerungen bleiben separat freizuschalten.</p></form></div>`;
 }
 
-function statusView(c, compliance) {
+function reminderContactForm(c,version,enabled) {
+  if(version===null) return '';
+  const hidden=`<input type="hidden" name="contactVersion" value="${version}">`;
+  const action=`/v/${c.token}/reminder-contact`;
+  return `<div class="card"><h2>Optional email reminders</h2><p>You can request emails about missing HOA paperwork for this booked stay. This is optional, separate from your application, and not a condition of approval. You can continue using Airbnb messages.</p>${!enabled?'<p class="pill warn">Reminder delivery is not active yet. You may save your preference for later.</p>':''}${c.guestContact?.requested?`<p>Requested address: <b>${esc(c.guestContact.email)}</b>. Please check the spelling; mailbox ownership has not been verified.</p>`:c.guestContact?'<p>Email reminders are turned off for this stay.</p>':''}<details><summary>Request or change email reminders</summary><form method="post" action="${action}">${hidden}<input type="hidden" name="preference" value="email"><label for="reminder-email">Your email address</label><input id="reminder-email" name="email" type="email" maxlength="254" autocomplete="email" required><label for="reminder-email-again">Enter it again to check for typing errors</label><input id="reminder-email-again" name="emailAgain" type="email" maxlength="254" autocomplete="off" required><label><input name="requested" type="checkbox" value="yes" required> I request HOA-paperwork reminders at my email address for this stay.</label><p><button>Save my email request</button></p></form></details><form method="post" action="${action}">${hidden}<input type="hidden" name="preference" value="airbnb"><p><button class="small ghost">Turn off email reminders</button></p></form><p class="muted">Used only for this stay's HOA reminders, never marketing. The address is stored encrypted and follows the case's retention policy. Saving sends no message, submits no paperwork and does not confirm payment or approval. Turning emails off does not start automatic Airbnb messages. A message already being sent may still arrive.</p></div>`;
+}
+
+function statusView(c, compliance, contactVersion=null, remindersEnabled=false) {
   const followUp=hoaEvidenceState(c);
   const followUpCard=hoaGuestFollowUp(c,compliance);
   const progressSteps = guestProgressSteps(c).map(s=>(followUp.exception||followUp.tasks.length)&&['board_approved','checkin_released'].includes(s.id)?{...s,done:false,date:null}:s);
@@ -519,7 +527,7 @@ St. Petersburg, FL 33716</div>
     `<h1>Hi ${esc(c.guestName.split(' ')[0])}, here's where your approval stands</h1>
      <p>Stay: <b>${esc(c.checkIn)} → ${esc(c.checkOut)}</b> (${c.nights} nights, ${c.adults} ${c.adults === 1 ? 'adult' : 'adults'} age 18+${Number(c.expectedMinors || 0) ? `, ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''})${c.reservationCode ? ' · Reservation ' + esc(c.reservationCode) : ''}</p>
      ${banner}`,
-    bookingApprovalNotice(c, compliance) + followUpCard + (followUp.exception||followUp.tasks.length?'':wizardCard) + `<div class="card">
+    bookingApprovalNotice(c, compliance) + followUpCard + (followUp.exception||followUp.tasks.length?'':wizardCard) + reminderContactForm(c,contactVersion,remindersEnabled) + `<div class="card">
        <h2>Progress</h2>
        <div class="bar"><div style="width:${pct}%"></div></div>
        <p class="muted">${done} of ${total} steps complete</p>
@@ -1358,9 +1366,10 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}${cc ? '&cc=' + encodeURIComponent(cc) : ''}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   const rows = cases.map(c => {
     const journey=planGuestJourney(c,new Date(),{feeRequestAuthorized:externalFeeRequestAuthorized(c,compliance)});
+    const contactLine=journey.guestTasks.length&&!guestReminderEmail(c)?'<p class="pill warn">No usable reminder email. Follow up through the existing Airbnb conversation. No automatic Airbnb delivery is configured.</p>':'';
     const hoaEvents=(c.hoaMailEvents||[]).filter(e=>/^[a-f0-9]{64}$/.test(e.id||'')).slice(-5).reverse();
     const hoaLine=hoaEvents.length?`<details><summary>HOA-E-Mail-Belege (${(c.hoaMailEvents||[]).length})</summary><p class="muted">Ungeprüfte Einordnungen, keine automatische Zahlungs- oder Board-Bestätigung.</p><ul>${hoaEvents.map(e=>`<li><a href="/admin/hoa-mail/${e.id}">${esc(e.mailDate||e.at)}: ${esc((e.categories||[]).join(', '))}</a></li>`).join('')}</ul></details>`:'';
-    const journeyLine=`<p class="muted">Workflow: <b>${esc(journey.state.replace(/_/g,' '))}</b>${c.automation?.lastGuestReminderAt?` · Last guest reminder: ${esc(c.automation.lastGuestReminderAt.slice(0,16).replace('T',' '))} UTC`:''}${journey.waitingForEvidence.length?`<br>Pending evidence: ${esc(journey.waitingForEvidence.join(', ').replace(/_/g,' '))}`:''}${c.autoRelease?'<br>Released automatically under standing owner authorization.':''}</p>${hoaLine}`;
+    const journeyLine=`<p class="muted">Workflow: <b>${esc(journey.state.replace(/_/g,' '))}</b>${c.automation?.lastGuestReminderAt?` · Last guest reminder: ${esc(c.automation.lastGuestReminderAt.slice(0,16).replace('T',' '))} UTC`:''}${journey.waitingForEvidence.length?`<br>Pending evidence: ${esc(journey.waitingForEvidence.join(', ').replace(/_/g,' '))}`:''}${c.autoRelease?'<br>Released automatically under standing owner authorization.':''}</p>${contactLine}${hoaLine}`;
     const visibleSteps = guestProgressSteps(c);
     const done = visibleSteps.filter(s => s.done).length;
     const stepBtns = visibleSteps.map(s => ['fee_sent','screening_complete','board_approved'].includes(s.id)
@@ -1566,12 +1575,21 @@ async function routeRequest(context) {
        <p><a href="/">← back</a></p></div>`), 404);
   }
 
-  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/hoa-task-reported|\/brief\.txt|\/executed-lease\.pdf|\/executed-flood-disclosure\.pdf)?$/);
+  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/hoa-task-reported|\/reminder-contact|\/brief\.txt|\/executed-lease\.pdf|\/executed-flood-disclosure\.pdf)?$/);
   if (mV) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mV[1]);
     if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
     if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
+    if(mV[2]==='/reminder-contact'&&request.method==='POST') {
+      if(!env.CASE_STORE) return new Response('Atomic storage is required',{status:503,headers:SEC_HEADERS});
+      const form=await request.formData();
+      if(String(caseSnapshotVersion(cases,c.id))!==form.get('contactVersion')) return new Response('Preference not saved. Reload your page and try again.',{status:409,headers:SEC_HEADERS});
+      const contact=contactPreference(form);
+      if(!contact) return new Response('Confirm your request and enter the same valid email address twice.',{status:400,headers:SEC_HEADERS});
+      c.guestContact=contact;await saveCases(env,cases);
+      return redirect('/v/'+c.token);
+    }
     if(mV[2]==='/hoa-task-reported'&&request.method==='POST') {
       if(!env.CASE_STORE) return new Response('Atomic storage is required',{status:503,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
       const form=await request.formData();
@@ -1616,7 +1634,7 @@ async function routeRequest(context) {
         'Content-Disposition': `attachment; filename="${mV[2].slice(1)}"`, 'Cache-Control': 'private, no-store, max-age=0',
         'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex', ...SEC_HEADERS } });
     }
-    if (!mV[2] && request.method === 'GET') return html(statusView(c, await loadComplianceConfig(env)));
+    if (!mV[2] && request.method === 'GET') return html(statusView(c, await loadComplianceConfig(env),env.CASE_STORE?caseSnapshotVersion(cases,c.id):null,env.AUTO_GUEST_REMINDERS==='yes'));
   }
 
   const mRoute = p.match(/^\/w\/([A-Za-z0-9_-]{6,})\/route$/);

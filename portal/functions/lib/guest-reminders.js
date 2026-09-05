@@ -1,5 +1,5 @@
 import {loadStoredCases,saveStoredCases} from './storage.js';
-import {validateEmailAddress} from './workflow.js';
+import {guestReminderEmail} from './guest-contact.js';
 import {planGuestJourney,guestReminderMessage} from './journey.js';
 import {sendViaGmail} from './email.js';
 import {externalFeeRequestAuthorized} from './compliance.js';
@@ -30,18 +30,18 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     const plan=planGuestJourney(c,now,{feeRequestAuthorized:externalFeeRequestAuthorized(c,compliance)}),claim=c.automation?.reminderClaim;
     if(!plan.guestTasks.length||!plan.nextReminderAt||new Date(plan.nextReminderAt)>now) continue;
     if(claim && ['claimed','uncertain'].includes(claim.state)) {result.uncertain++;continue;}
-    const email=String(c.wizard?.adults?.[0]?.email||'').trim();
+    const email=guestReminderEmail(c);
     // Before the guest supplies a contact address, the configured Airbnb
     // onboarding channel is required. Never invent a recipient or message owner
     // as a substitute for actually contacting the guest.
-    if(!validateEmailAddress(email)) {result.waitingForContact++;continue;}
+    if(!email) {result.waitingForContact++;continue;}
     const claimId=crypto.randomUUID();
     c.automation={...c.automation,reminderClaim:{id:claimId,state:'claimed',claimedAt:now.toISOString(),tasks:plan.guestTasks.map(t=>t.id)}};
     try {await saveStoredCases(env,cases);}
     catch(error) {if(error.code==='CASE_CONFLICT'){result.conflicts++;continue;}throw error;}
     const latest=(await loadStoredCases(env)).find(c=>c.id===id);
     const current=latest && planGuestJourney(latest,now,{feeRequestAuthorized:externalFeeRequestAuthorized(latest,JSON.parse(await env.CASES.get('compliance-config')||'{}'))});
-    if(!current?.guestTasks.length || String(latest.wizard?.adults?.[0]?.email||'').trim()!==email) {
+    if(!current?.guestTasks.length || guestReminderEmail(latest)!==email) {
       await recordResult(env,id,claimId,'suppressed',now);result.suppressed++;continue;
     }
     try {

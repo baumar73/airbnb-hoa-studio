@@ -38,6 +38,8 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 **Priority:** P1
 **Depends on:** Eindeutige offene Aufgaben und belastbare Statusänderungen.
 
+**Lokaler Fortschritt 2026-09-05:** Freiwilliger, verschlüsselt gespeicherter E-Mail-Erinnerungswunsch auch ohne Papierformular; Abmeldung verhindert den Rückfall auf eine alte Formularadresse. Fehlende Erreichbarkeit erscheint im Verwaltungsbereich und bei fälligen Erinnerungen als überwachte Ausnahme. Parallelität, späte Erledigung/Stornierung und Abmeldung unmittelbar vor Versand sind getestet. Details: [Gast-Erinnerungen](GUEST_REMINDERS.md). Noch kein automatischer Airbnb-Nachrichtenkanal; dessen Anbindung und Live-Abnahme bleiben offen. Der Gesamtpunkt ist daher nicht abgeschlossen.
+
 - [ ] E-Mail-Erreichbarkeit und den zulässigen Airbnb-Nachfassweg klären und testen.
 - [ ] Erinnerungen konkret auf fehlende Angaben, Unterlagen, Zahlung oder Nachforderungen beziehen.
 - [ ] Versandfehler, doppelte Ausführung und verspätete Antworten testen; erledigte und stornierte Fälle nicht weiter erinnern.
@@ -91,7 +93,7 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 - [ ] Fehlende Betriebsfreigaben, sichere Rückkehr zum vorherigen Stand und Ende-zu-Ende-Abnahme dokumentieren.
 - [ ] Ausstehende Programmänderungen separat prüfen, auf GitHub sichern und nach Freigabe veröffentlichen.
 
-### Lokal vorbereitete, noch nicht veröffentlichte Änderungen
+### GitHub-Sicherung und Live-Veröffentlichung
 
 Zum Zeitpunkt dieser Bestandsaufnahme lag GitHub `main` bei `1a151ac`; lokal waren drei weitere Commits vorhanden:
 
@@ -99,7 +101,7 @@ Zum Zeitpunkt dieser Bestandsaufnahme lag GitHub `main` bei `1a151ac`; lokal war
 - `d5f6e01` — Clarify booking notice and prepare scoped guest knowledge access
 - `f88beef` — Highlight Tenant Evaluation for new guest applications
 
-Die Sicherung dieser To-do-Datei veröffentlicht diese Programmänderungen nicht. Daneben vorhandene lokale Oberflächenänderungen bleiben ebenfalls getrennt.
+Diese drei Commits und der Beleg-/Nachforderungsablauf wurden am 2026-09-05 bis einschließlich `6c23084` auf GitHub `main` gesichert. Die zusätzliche atomare E-Mail-Belegzuordnung verhindert, dass zwei parallele Prüfungen denselben Beleg für verschiedene Buchungen verwenden. Das ist kein Live-Deployment. Daneben vorhandene lokale Oberflächenänderungen bleiben weiterhin getrennt.
 
 ## gbrain / Hermes
 
@@ -117,7 +119,7 @@ Die Sicherung dieser To-do-Datei veröffentlicht diese Programmänderungen nicht
 
 ## Prüfstand und Abnahmeregeln
 
-Nach der lokalen Ergänzung des Beleg-/Nachforderungsablaufs bestanden 177 JavaScript- und 34 Python-Tests (2026-09-05). Der frühere Prüfstand lag bei 156/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
+Nach der lokalen Ergänzung der Belegzuordnung und Gast-Erreichbarkeit bestanden 189 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34 und 179/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
 
 - Neue Abläufe brauchen Tests für vollständige, unvollständige, verspätete, geänderte und stornierte Buchungen sowie technische Ausfälle.
 - Eine Buchung kann vor HOA-Zustimmung bestehen; Bezug erst nach erforderlicher Zustimmung. Ablehnungen und mögliche Stornierungen bleiben gesondert zu prüfende Ausnahmen, keine automatische Schuldzuweisung an den Gast.

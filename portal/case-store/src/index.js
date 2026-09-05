@@ -3,7 +3,8 @@
 const response = (data, status = 200) => Response.json(data, {status, headers:{'Cache-Control':'no-store'}});
 const validId = id => typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/.test(id);
 const versionOf = (versions,id) => Object.hasOwn(versions,id) ? versions[id] : 0;
-const validRecord = c => c && validId(c.id) && !Object.hasOwn(c,'wizard') &&
+const validRecord = c => c && validId(c.id) && !Object.hasOwn(c,'wizard') && !Object.hasOwn(c,'guestContact') &&
+  (!c.guestContactEncrypted || (c.guestContactEncrypted.version==='aes-256-gcm-v1' && typeof c.guestContactEncrypted.iv==='string' && typeof c.guestContactEncrypted.ciphertext==='string')) &&
   (!c.wizardCiphertext || (c.wizardCipherVersion === 'aes-256-gcm-v1' && typeof c.wizardIv === 'string'));
 
 export class CaseStore {

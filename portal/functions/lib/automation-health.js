@@ -30,6 +30,7 @@ export function automationHealth(status,now=new Date()) {
   if(status.state==='running'&&age(status.startedAt,now)>15*MINUTE) return {ok:false,reason:'stalled'};
   if(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery) return {ok:false,reason:'delivery_reconciliation'};
   if(status.reviewer?.unhealthy) return {ok:false,reason:'reviewer_unavailable'};
+  if(status.enabled?.guestReminders&&status.results?.reminders?.waitingForContact>0) return {ok:false,reason:'guest_contact_unavailable'};
   return {ok:true,reason:'ok'};
 }
 
@@ -38,12 +39,13 @@ export async function notifyAutomationFailure(env,status,now,notify) {
   const health=automationHealth(status,now);
   // One transient failure stays quiet. Persistent failure, a stale successful
   // heartbeat or uncertain delivery is a genuine exception, not a guest to-do.
-  const actionable=Boolean(status.reviewer?.unhealthy)||(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
+  const missingContact=status.enabled?.guestReminders&&status.results?.reminders?.waitingForContact>0;
+  const actionable=missingContact||Boolean(status.reviewer?.unhealthy)||(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
     (status.lastSuccessAt&&age(status.lastSuccessAt,now)>90*MINUTE)||
     (status.state==='running'&&age(status.startedAt,now)>15*MINUTE);
   if(!actionable||health.ok||age(status.lastAlertAt,now)<24*60*MINUTE) return;
   try {
-    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf oder der lokale Prüfdienst braucht Aufmerksamkeit. Technischen Status unter /admin/automation-health prüfen.'+(status.reviewer?.urgent?' Offene Prüfungen betreffen Anreisen innerhalb von sieben Tagen.':'')+' Unklare Sendungen werden nicht automatisch erneut versendet.')) {
+    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf oder der lokale Prüfdienst braucht Aufmerksamkeit. Technischen Status unter /admin/automation-health prüfen.'+(missingContact?' Mindestens ein Gast mit fälligen Aufgaben ist per E-Mail nicht erreichbar. Unter /admin/cases prüfen und über die bestehende Airbnb-Unterhaltung nachfassen; kein automatischer Airbnb-Versand ist eingerichtet.':'')+(status.reviewer?.urgent?' Offene Prüfungen betreffen Anreisen innerhalb von sieben Tagen.':'')+' Unklare Sendungen werden nicht automatisch erneut versendet.')) {
       status.lastAlertAt=now.toISOString();await save(env,status);
     }
   } catch { /* Leave cooldown open; the public health endpoint remains unhealthy. */ }

@@ -63,6 +63,11 @@ export async function decryptPrivateJson(env,purpose,record) {
 }
 
 async function sealWizard(c, env) {
+  c={...c};
+  if(c.guestContact) {
+    c.guestContactEncrypted=await encryptPrivateJson(env,'guest-contact:'+c.id,c.guestContact);
+    delete c.guestContact;
+  }
   if (!c.wizard) return { ...c };
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aad = new TextEncoder().encode(`hoa-case:${c.id}:${CIPHER_VERSION}`);
@@ -74,6 +79,11 @@ async function sealWizard(c, env) {
 }
 
 async function openWizard(c, env) {
+  c={...c};
+  if(c.guestContactEncrypted) {
+    c.guestContact=await decryptPrivateJson(env,'guest-contact:'+c.id,c.guestContactEncrypted);
+    delete c.guestContactEncrypted;
+  }
   if (!c.wizardCiphertext) return { ...c };
   if (c.wizardCipherVersion !== CIPHER_VERSION) throw new Error(`unsupported wizard encryption version: ${c.wizardCipherVersion}`);
   const iv = b64urlToBytes(c.wizardIv);

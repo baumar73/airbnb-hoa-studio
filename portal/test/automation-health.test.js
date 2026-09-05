@@ -75,3 +75,17 @@ test('opt-in cloud health flags an absent local reviewer even when other stages 
   assert.equal(automationHealth(status,new Date(at)).reason,'reviewer_unavailable');
   assert.equal(notifications.length,1);
 });
+test('enabled reminders without a recipient make health actionable until the next successful check',async()=>{
+  const {env,jobs,notifications}=fixture();env.AUTO_GUEST_REMINDERS='yes';
+  jobs.reminders=async()=>({waitingForContact:1});
+  const status=await runAutomationCycle(env,jobs,new Date(at));
+  assert.equal(automationHealth(status,new Date(at)).reason,'guest_contact_unavailable');
+  assert.equal(notifications.length,1);assert.match(notifications[0],/Airbnb/);
+  await runAutomationCycle(env,jobs,new Date('2026-09-05T12:30:00Z'));assert.equal(notifications.length,1);
+  jobs.reminders=async()=>({waitingForContact:0});
+  const recovered=await runAutomationCycle(env,jobs,new Date('2026-09-05T13:00:00Z'));
+  assert.equal(automationHealth(recovered,new Date('2026-09-05T13:00:00Z')).ok,true);
+  env.AUTO_GUEST_REMINDERS='no';jobs.reminders=async()=>({waitingForContact:1});
+  const disabled=await runAutomationCycle(env,jobs,new Date('2026-09-05T13:30:00Z'));
+  assert.equal(automationHealth(disabled,new Date('2026-09-05T13:30:00Z')).ok,true);
+});
