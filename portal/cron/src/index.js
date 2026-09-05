@@ -75,14 +75,18 @@ export function buildDigest(cases, now) {
   return `🌴 Demo Unit Wochen-Digest (${active.length} offen):\n` + lines.join('\n') + `\n${PORTAL}/admin`;
 }
 
-async function sendTelegram(env, text) {
-  const resp = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
-  });
-  if (!resp.ok) console.log('telegram error', resp.status, await resp.text());
-  return resp.ok;
+export async function sendTelegram(env, text) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return false;
+  try {
+    const resp = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
 }
 
 import { purgeExpiredCases, applicationFeeState } from '../../functions/lib/workflow.js';
