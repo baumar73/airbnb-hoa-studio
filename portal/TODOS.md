@@ -65,6 +65,16 @@ Es erfolgt keine automatische
 Stornierung oder Freigabe; der Abgleich bleibt mit echten Airbnb-Formaten und
 einem kontrollierten Testfall abzunehmen.
 
+**Zusätzliche lokale Absicherung 2026-09-05:** Änderungen während eines
+ungeklärten Paketversands erhalten die dauerhafte Versandsperre und die Referenz
+auf das bisherige Paket. Auch das Bestätigen der neuen Buchungsdaten hebt diese
+Sperre nicht auf. Ein später Versandbeleg darf keine Schritte der neuen Buchung
+als erledigt markieren; dazu werden Prüfversion und Paket-ID/-Hash beim
+Speichern erneut abgeglichen. Vier neue Tests einschließlich eines simulierten
+Buchungswechsels während SMTP bestätigen dieses Verhalten. 245 JavaScript-Tests
+und Syntaxprüfungen bestanden; der reale Abgleich einer unklaren Sendung bleibt
+eine gesonderte Betreiberprüfung.
+
 - [x] Änderungen und Stornierungen mit synthetischen Airbnb-Nachrichten zuverlässig zuordnen und wiederholte Verarbeitung ohne doppelte Nebenwirkungen testen; echte Airbnb-Formate bleiben abzunehmen.
 - [x] Veraltete Dokumentenpakete und Prüfungen bei relevanten Änderungen als überholt markieren; die tatsächliche End-to-End-Abnahme bleibt offen.
 - [x] Sieben Tage Buchungsvorlauf und erforderliche HOA-Zustimmung vor Bezug im Inserat und Portal konsistent halten; nicht als garantierte Bearbeitungsfrist darstellen.

@@ -61,6 +61,13 @@ claim for reconciliation. A claimed automatic release must not silently become
 a test email. This final recheck cannot recall mail already handed to SMTP, and
 the existing KV switch is not a transactionally consistent emergency stop.
 
+Also change the booking dates while a package transport is in flight, then
+acknowledge the new dates. The unresolved release lock and prior package
+reference must remain visible for reconciliation. An old receipt must not mark
+the new stay's paperwork complete. The local tests cover this race, repeated
+booking updates, and attempts to persist a receipt against replaced review or
+package hashes. A booking-change acknowledgement is never a resend permission.
+
 ## Staged enablement
 
 Only after the synthetic sequence is recorded may the owner enable one function

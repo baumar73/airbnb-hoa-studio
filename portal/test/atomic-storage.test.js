@@ -4,6 +4,7 @@ import {runInNewContext} from 'node:vm';
 import { CaseStore } from '../case-store/src/index.js';
 import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret } from '../functions/lib/storage.js';
 import {caseReviewDigest,reviewContextHash} from '../functions/lib/review.js';
+import {reconcileBookingUpdate,acknowledgeBookingChange} from '../functions/lib/booking-reconcile.js';
 import { register } from 'node:module';
 register('./loaders/cloudflare-sockets-loader.mjs', import.meta.url);
 const {onRequest}=await import('../functions/[[path]].js');
@@ -135,6 +136,18 @@ test('delivery receipt refuses deleted or replaced delivery claims', async()=>{
   await saveStoredCases(env,inheritCaseSnapshot(changed,changed.filter(c=>c.id!=='a')));
   await assert.rejects(persistDeliveryOutcome(env,claimed,claimed[0],{submission:{sentAt:'now'}}),{code:'CASE_DELIVERY_CHANGED'});
   assert.equal((await loadStoredCases(env)).some(c=>c.id==='a'),false);
+});
+test('matching release timestamp cannot attach an old receipt to replaced review or package bytes',async()=>{
+  for(const change of [c=>{c.reviewHash='new-review';},c=>{c.preparedPackage.id='new-package';},c=>{c.preparedPackage.packageHash='new-bytes';}]) {
+    const {env}=setup();await seed(env);
+    const claimed=await loadStoredCases(env);
+    Object.assign(claimed[0],{reviewLockedAt:'same-claim',reviewHash:'old-review',preparedPackage:{id:'old-package',packageHash:'old-bytes'},steps:[{id:'submitted_hoa',done:false}]});
+    await saveStoredCases(env,claimed);
+    const updated=await loadStoredCases(env);change(updated[0]);await saveStoredCases(env,updated);
+    await assert.rejects(persistDeliveryOutcome(env,claimed,claimed[0],{submission:{sentAt:'2026-09-05T12:00:00Z'}}),{code:'CASE_DELIVERY_CHANGED'});
+    const [saved]=await loadStoredCases(env);
+    assert.equal(saved.submission,undefined);assert.equal(saved.steps[0].done,false);assert.equal(saved.reviewLockedAt,'same-claim');
+  }
 });
 test('snapshot metadata is required and missing backend never falls back when required', async()=>{
   const {env}=setup();await seed(env);
@@ -483,6 +496,25 @@ test('revoked standing authorization or review blocks a previously claimed packa
     const [saved]=await loadStoredCases(env);
     assert.equal(saved.submission,undefined);assert.ok(saved.reviewLockedAt);
   }
+});
+
+test('booking change during accepted SMTP preserves an unresolved delivery without completing the new stay',async()=>{
+  const {env}=await automaticFixture();let deliveries=0,originalPackage;
+  const submit=(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async()=>{
+    deliveries++;originalPackage=c.preparedPackage.id;
+    const fresh=await loadStoredCases(env),current=fresh[0];
+    reconcileBookingUpdate(current,{code:current.reservationCode,guestName:current.guestName,adults:current.adults,checkIn:'2026-11-08',checkOut:'2026-12-08'});
+    acknowledgeBookingChange(current);
+    await saveStoredCases(env,fresh);
+  },sendNotice:async()=>true});
+  const result=await runAutomaticSubmissions(env,new Date('2026-09-05'),submit);
+  assert.equal(result.sent,0);assert.equal(result.failed,1);
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.checkIn,'2026-11-08');assert.ok(saved.reviewLockedAt);
+  assert.equal(saved.submission,undefined);assert.equal(saved.steps.every(s=>!s.done),true);
+  assert.equal(saved.submissionError.phase,'delivery_uncertain');
+  assert.equal(saved.submissionError.packageId,originalPackage);
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);assert.equal(deliveries,1);
 });
 test('review-only token cannot access owner controls or send a package',async()=>{
   const {env}=await automaticFixture();env.REVIEW_API_TOKEN='synthetic-review-token-at-least-32-chars';env.ADMIN_USER='owner';env.ADMIN_PASSWORD='test-only';

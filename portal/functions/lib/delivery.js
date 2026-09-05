@@ -20,7 +20,10 @@ export async function persistDeliveryOutcome(env, originalCases, claimed, outcom
   for (let attempt=0;attempt<4;attempt++) {
     const cases=env.CASE_STORE ? await loadStoredCases(env) : originalCases;
     const current=cases.find(c=>c.id===claimed.id);
-    if (!current || current.reviewLockedAt!==claimed.reviewLockedAt) throw new CaseStoreError('CASE_DELIVERY_CHANGED','Delivery claim changed; reconcile the sent-mail record manually');
+    if (!current || current.reviewLockedAt!==claimed.reviewLockedAt || current.reviewHash!==claimed.reviewHash ||
+      (claimed.preparedPackage && (current.preparedPackage?.id!==claimed.preparedPackage.id || current.preparedPackage?.packageHash!==claimed.preparedPackage.packageHash))) {
+      throw new CaseStoreError('CASE_DELIVERY_CHANGED','Delivery claim or package context changed; reconcile the sent-mail record manually');
+    }
     applyOutcome(current,outcome);
     try {
       await saveStoredCases(env,cases);
