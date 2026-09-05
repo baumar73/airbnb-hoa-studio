@@ -4,9 +4,13 @@ const MONTHS = { jan:1, feb:2, mar:3, mär:3, apr:4, may:5, mai:5, jun:6, jul:7,
 export function parseCancellation(msg) {
   const subject = String(msg && msg.subject || '');
   const text = String(msg && msg.text || '');
-  const all = `${subject}\n${text}`;
+  // Quoted history is evidence of an earlier message, not a new cancellation.
+  const body = text.split(/\r?\n/).filter(line => !/^\s*>/.test(line)).join('\n');
+  const all = `${subject}\n${body}`;
   const code = (all.match(/\b(HM[A-Z0-9]{8,12})\b/i) || [])[1];
-  const canceled = /\b(?:canceled|cancelled|storniert|annulliert)\b/i.test(all) && /\b(?:reservation|buchung)\b/i.test(all);
+  const canceledWord = /\b(?:canceled|cancelled|storniert|annulliert)\b/i;
+  const negated = /\b(?:not|nicht|never|kein(?:e|er|en|em|es)?)\s+(?:be\s+|been\s+|ist\s+|wurde\s+)?(?:canceled|cancelled|storniert|annulliert)\b/i;
+  const canceled = canceledWord.test(all) && !negated.test(all) && /\b(?:reservation|buchung)\b/i.test(all);
   return {
     code: code ? code.toUpperCase() : null,
     canceledAt: msg && msg.date || null,

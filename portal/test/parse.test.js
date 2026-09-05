@@ -51,6 +51,17 @@ test('parses an Airbnb cancellation only when a reservation code is present', ()
   assert.equal(parseCancellation({ subject: 'Cancellation policy update', text: 'No reservation code' }).complete, false);
 });
 
+test('ignores quoted or explicitly negated cancellation wording', () => {
+  assert.equal(parseCancellation({
+    subject: 'Reservation confirmed HMDEMO0002',
+    text: 'Your reservation is confirmed.\n> RESERVATION CANCELED',
+  }).complete, false);
+  assert.equal(parseCancellation({
+    subject: 'Reservation update HMDEMO0002',
+    text: 'Your reservation was not canceled.',
+  }).complete, false);
+});
+
 test('prioritizes the labelled Airbnb stay range over unrelated dates in the message', () => {
   const mail = {
     ...demoGuestMail,
