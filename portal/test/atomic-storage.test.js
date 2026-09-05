@@ -34,6 +34,27 @@ async function seed(env) {
   cases.push({id:'a',guestName:'Jane Smith',wizard:{adults:[{firstName:'Jane',idNumber:'private-test-id'}]}},{id:'b',guestName:'John Doe'});
   await saveStoredCases(env,cases);
 }
+test('one HOA source cannot be assigned to different cases by concurrent snapshots',async()=>{
+  const {env}=setup();await seed(env);
+  const left=await loadStoredCases(env),right=await loadStoredCases(env);
+  const event={id:'synthetic-source-hash',review:{kind:'confirmed'}};
+  left[0].hoaMailEvents=[event];right[1].hoaMailEvents=[event];
+  const results=await Promise.allSettled([saveStoredCases(env,left),saveStoredCases(env,right)]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal(results.find(r=>r.status==='rejected').reason.code,'CASE_CONFLICT');
+  const current=await loadStoredCases(env);
+  assert.equal(current.filter(c=>c.hoaMailEvents?.some(e=>e.id===event.id)).length,1);
+  // Updating the reservation that already owns the source remains possible.
+  current.find(c=>c.hoaMailEvents?.length).hoaMailEvents[0].review.by='Synthetic owner';
+  await saveStoredCases(env,current);
+});
+test('a batch cannot attach the same HOA source to two reservations',async()=>{
+  const {env,values}=setup();await seed(env);
+  const cases=await loadStoredCases(env),before=structuredClone([...values]);
+  for(const c of cases)c.hoaMailEvents=[{id:'same-source'}];
+  await assert.rejects(saveStoredCases(env,cases),{code:'CASE_CONFLICT'});
+  assert.deepEqual([...values],before);
+});
 test('an old browser draft cannot overwrite a newer saved form or changed booking',async()=>{
   const {env}=setup();
   const cases=await loadStoredCases(env);

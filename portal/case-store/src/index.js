@@ -53,6 +53,15 @@ export class CaseStore {
       }
       const codes=[...records.values()].map(c=>String(c.reservationCode||'').toUpperCase()).filter(Boolean);
       if (new Set(codes).size!==codes.length) return response({error:'reservation code already exists'},409);
+      // Source ownership spans cases, so per-case versions alone cannot guard
+      // two owner forms assigning the same unassigned email concurrently.
+      const sourceOwners=new Map();
+      for(const c of records.values()) for(const event of c.hoaMailEvents||[]) {
+        if(!event.id) continue;
+        if(sourceOwners.has(event.id)&&sourceOwners.get(event.id)!==c.id)
+          return response({error:'HOA source already belongs to another reservation'},409);
+        sourceOwners.set(event.id,c.id);
+      }
       const revision=current.revision+1;
       for (const change of changes) {
         // Retain a version tombstone after deletion to reject stale resurrection.
