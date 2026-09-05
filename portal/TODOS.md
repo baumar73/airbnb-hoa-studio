@@ -96,6 +96,11 @@ einem kontrollierten Testfall abzunehmen.
 **Effort:** L
 **Priority:** P0 — vor Aktivierung des unbeaufsichtigten Betriebs; blockiert reine Dokumentationsänderungen nicht.
 
+**Lokaler Fortschritt 2026-09-05:** Eine getrennte
+[Aktivierungs-Checkliste](ACTIVATION_CHECKLIST.md) beschreibt die aktuelle
+Reihenfolge der Schalter, synthetische Abnahmeschritte, Stromausfall-/Claim-
+Wiederaufnahme und den Rückfall. Sie ersetzt keine reale Betriebsfreigabe.
+
 - [ ] Atomaren Fallspeicher kontrolliert aktivieren und gleichzeitige Änderungen testen.
 - [ ] Wiederanlauf und ausstehende Aufgaben nach Prozessabbruch, Stromausfall und Neustart praktisch nachweisen.
 - [ ] Unabhängige Ausfallüberwachung mit wirksamem Alarmweg einrichten und einen Probealarm testen.

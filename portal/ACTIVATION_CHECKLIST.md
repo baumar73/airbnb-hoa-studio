@@ -1,0 +1,72 @@
+# Controlled activation checklist
+
+This is a runbook for the existing deployment. It authorizes no deployment,
+service move, mailbox change or real message by itself. Use synthetic records and
+preview bindings until every gate below has an owner and evidence.
+
+## Required configuration gates
+
+Keep all new transport flags disabled while preparing:
+
+```text
+AIRBNB_RELAY_CAPTURE=no
+AIRBNB_RELAY_REMINDERS=no
+REMINDER_DELIVERY_MONITOR=no
+AUTO_GUEST_REMINDERS=no
+AUTO_HOA_SUBMIT=no
+```
+
+Before enabling any flag, verify the existing canonical HTTPS `.com` origin,
+atomic case store, encryption key, Gmail sender and exact mailbox names through
+the approved private secrets/inventory locations. Never copy values into this
+repository. `AIRBNB_RELAY_MAILBOX` and `REMINDER_DELIVERY_MAILBOX` are exact
+folder names; no folder is created or guessed by the worker.
+
+## Synthetic acceptance sequence
+
+1. Create a synthetic reservation with incomplete paperwork and a seven-day-plus
+   future check-in. Run the mail poll and confirm that only a draft case appears.
+2. Capture a synthetic Airbnb reply candidate. Confirm it is encrypted, remains
+   unusable until the owner verifies the original conversation, and never enters
+   the public guest page or gbrain projection.
+3. Verify the candidate in the owner portal with the current reservation code.
+   Run two reminder workers concurrently; confirm one claim and one outbound
+   message only. A second run must not resend it.
+4. Return a synthetic structured delivery report. Confirm only a review hold is
+   recorded. No retry, channel switch, cancellation, payment status or HOA
+   approval may change. Acknowledging the notice must not queue a resend.
+5. Replay a booking confirmation with changed dates or adult count. Confirm old
+   steps/packages become stale, the booking remains active, reminders pause and
+   the owner must confirm the new context.
+6. Interrupt a worker after claiming and restart it. Confirm the durable claim
+   remains blocked until reconciliation; interrupting an SMTP connection after
+   `DATA` acceptance must not cause a blind resend.
+7. Simulate a canceled reservation during each step. Confirm guest access closes
+   and no new delivery or HOA action starts.
+
+## Staged enablement
+
+Only after the synthetic sequence is recorded may the owner enable one function
+at a time, in this order: reminder worker with direct email, candidate capture,
+owner-verified Airbnb relay fallback, then structured delivery monitoring. Keep
+HOA submission separately disabled until the actual association packet,
+recipient list, secure ID handoff and payment evidence are accepted.
+
+For the first controlled real case, use an explicitly authorized recipient and
+the existing Airbnb conversation. Check the outbound Message-ID in Gmail and the
+Airbnb conversation before considering delivery successful. A Gmail `250` means
+transport acceptance only; it does not prove Airbnb delivery or guest reading.
+
+## Abort and rollback
+
+If any check is ambiguous, set the relevant flag to `no`, leave the durable claim
+blocked, and record the case for owner reconciliation. Do not delete claims,
+change reservation status, resend manually from another channel, or infer HOA
+approval. Restore the previously verified configuration and rerun the synthetic
+sequence before another attempt. Keep the independent external heartbeat and
+power/reboot drill separate; this checklist does not install either one.
+
+Evidence to retain outside GitHub: configuration review date, synthetic run IDs,
+worker/cron logs with private data removed, outbound Message-ID reconciliation,
+mailbox-folder verification and the owner who approved each gate. Never retain
+guest bearer links, IDs, screening data, passwords or raw message bodies here.
