@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.isla.hoa-reviewer</string>
+  <key>UserName</key><string>__EXISTING_SERVICE_USER__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__ABSOLUTE_VENV_PYTHON__</string>
+    <string>__EXISTING_PORTAL_DIRECTORY__/scripts/reviewer_service.py</string>
+    <string>--config</string><string>__PRIVATE_CONFIG_FILE__</string>
+    <string>--state-dir</string><string>__PRIVATE_PARENT__/isla-reviewer</string>
+  </array>
+  <key>WorkingDirectory</key><string>__EXISTING_PORTAL_DIRECTORY__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+</dict>
+</plist>

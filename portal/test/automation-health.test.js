@@ -68,3 +68,10 @@ test('public health exposes no details and detailed status requires owner creden
   const admin=await request('/admin/automation-health','Basic '+btoa('owner:synthetic-only'));assert.equal(admin.status,200);
   assert.equal((await admin.json()).status.state,'completed');
 });
+test('opt-in cloud health flags an absent local reviewer even when other stages succeed',async()=>{
+  const {env,jobs,notifications}=fixture();env.REVIEW_RELIABILITY='yes';
+  const status=await runAutomationCycle(env,jobs,new Date(at));
+  assert.equal(status.reviewer.offline,true);
+  assert.equal(automationHealth(status,new Date(at)).reason,'reviewer_unavailable');
+  assert.equal(notifications.length,1);
+});

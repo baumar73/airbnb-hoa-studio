@@ -16,6 +16,7 @@ import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib
 import {planGuestJourney} from './lib/journey.js';
 import {readAutomationStatus,automationHealth} from './lib/automation-health.js';
 import {readHoaReply} from './lib/hoa-mail.js';
+import {completedReview,reviewAvailable,claimReview,ownsReview,failReview,recordReviewerHeartbeat} from './lib/review-jobs.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -1735,7 +1736,7 @@ async function routeRequest(context) {
   }
 
   if (p.startsWith('/admin')) {
-    const reviewRoute=['/admin/review/candidates','/admin/review/package','/admin/review/result'].includes(p);
+    const reviewRoute=['/admin/review/candidates','/admin/review/package','/admin/review/result','/admin/review/claim','/admin/review/failure','/admin/review/heartbeat'].includes(p);
     const reviewToken=String(env.REVIEW_API_TOKEN||'');
     const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
     const denied = reviewer ? null : await checkAdmin(request, env);
@@ -1760,6 +1761,13 @@ async function routeRequest(context) {
     if (p.startsWith('/admin/review/')) {
       if (!env.CASE_STORE) return new Response('atomic storage must be activated before the new reviewer',{status:503,headers:SEC_HEADERS});
       const json=(data,status=200)=>Response.json(data,{status,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store','X-Robots-Tag':'noindex'}});
+      const reliable=env.REVIEW_RELIABILITY==='yes';
+      if(p==='/admin/review/heartbeat' && request.method==='POST') {
+        let data;try {data=await request.json();} catch {return json({error:'invalid JSON'},400);}
+        if(!reliable) return json({error:'hybrid review disabled'},409);
+        if(!['started','completed','failed'].includes(data?.state)) return json({error:'invalid state'},400);
+        await recordReviewerHeartbeat(env,data.state);return json({ok:true});
+      }
       const ownerSignature=await getEncryptedSecret(env,'owner-signature-png');
       const compliance=await loadComplianceConfig(env);
       if (p==='/admin/review/candidates' && request.method==='GET') {
@@ -1767,14 +1775,29 @@ async function routeRequest(context) {
         for (const c of await loadCases(env)) {
           if (!needsReview(c)) continue;
           const contextHash=await reviewContextHash(c,ownerSignature,compliance);
-          if (c.aiReview?.reviewHash===c.reviewHash && c.aiReview?.reviewContextHash===contextHash && c.preparedPackage && c.aiReview?.packageId===c.preparedPackage.id) continue;
+          if (completedReview(c,contextHash) || (reliable&&!reviewAvailable(c,contextHash))) continue;
           candidates.push({...reviewCaseData(c),reviewContextHash:contextHash});
         }
-        return json({cases:candidates});
+        candidates.sort((a,b)=>String(a.checkIn||'9999').localeCompare(String(b.checkIn||'9999')));
+        return json({cases:candidates,protocol:reliable?2:1});
+      }
+      if(['/admin/review/claim','/admin/review/failure'].includes(p)&&request.method==='POST') {
+        if(!reliable) return json({error:'hybrid review disabled'},409);
+        let data;try {data=await request.json();} catch {return json({error:'invalid JSON'},400);}
+        const cases=await loadCases(env),c=cases.find(c=>c.id===data?.id);
+        if(!c||c.reviewHash!==data.reviewHash||await reviewContextHash(c,ownerSignature,compliance)!==data.reviewContextHash) return json({error:'review inputs changed'},409);
+        if(p.endsWith('/claim')) {
+          const claim=claimReview(c,data.reviewContextHash);
+          if(!claim) return json({error:'review unavailable'},409);
+          await saveCases(env,cases);return json({token:claim.token,leaseUntil:claim.leaseUntil});
+        }
+        if(!ownsReview(c,data.reviewContextHash,data.claimToken)) return json({error:'review lease changed'},409);
+        failReview(c);await saveCases(env,cases);return json({ok:true});
       }
       if(p==='/admin/review/package' && request.method==='POST') {
         let data;try {data=await request.json();} catch {return json({error:'invalid JSON'},400);}
         const cases=await loadCases(env),c=cases.find(c=>c.id===data.id);
+        if(reliable&&(!c||!ownsReview(c,data.reviewContextHash,data.claimToken))) return json({error:'review lease changed'},409);
         if(!c || !needsReview(c) || c.reviewHash!==data.reviewHash || await reviewContextHash(c,ownerSignature,compliance)!==data.reviewContextHash || !isReadyForOwnerReview(c,validateSignaturePng(ownerSignature)) || await reviewDigest(c,c.wizard,true)!==c.reviewHash) return json({error:'paperwork changed or is incomplete'},409);
         if(!c.preparedPackage || c.preparedPackage.reviewHash!==c.reviewHash || c.preparedPackage.contextHash!==data.reviewContextHash) {
           c.preparedPackage=await archivePackage(env,cases,c,await generatePackage(c,env,{ownerSignature,compliance}),data.reviewContextHash);
@@ -1786,10 +1809,17 @@ async function routeRequest(context) {
         if (!validateReviewReport(data.report)) return json({error:'invalid structured review report'},400);
         const cases=await loadCases(env),c=cases.find(c=>c.id===data.id);
         if (!c || !needsReview(c) || c.reviewHash!==data.reviewHash || await reviewContextHash(c,ownerSignature,compliance)!==data.reviewContextHash) return json({error:'review inputs changed'},409);
+        if(reliable) {
+          // A retry after a lost acknowledgement reports success but never
+          // overwrites the accepted report. Changed inputs still fail above.
+          if(c.reviewJob?.state==='completed'&&c.reviewJob.token===data.claimToken&&c.reviewJob.contextHash===data.reviewContextHash&&c.aiReview?.reviewHash===data.reviewHash&&c.aiReview?.reviewContextHash===data.reviewContextHash&&c.aiReview?.packageId===data.packageId&&c.aiReview?.packageHash===data.packageHash) return json({ok:true,alreadyRecorded:true});
+          if(!ownsReview(c,data.reviewContextHash,data.claimToken)) return json({error:'review lease changed'},409);
+        }
         if (data.report.status==='green' && (!isReadyForOwnerReview(c,validateSignaturePng(ownerSignature)) || await reviewDigest(c,c.wizard,true)!==c.reviewHash)) return json({error:'paperwork does not pass server validation'},409);
         if((data.report.status==='green'||c.preparedPackage) && (!c.preparedPackage || data.packageId!==c.preparedPackage.id || data.packageHash!==c.preparedPackage.packageHash || c.preparedPackage.reviewHash!==c.reviewHash || c.preparedPackage.contextHash!==data.reviewContextHash)) return json({error:'reviewed package version changed'},409);
         const {status,summary,findings,confidence,model}=data.report;
         c.aiReview={status,summary,findings,confidence,model,reviewHash:c.reviewHash,reviewContextHash:data.reviewContextHash,packageId:c.preparedPackage?.id,packageHash:c.preparedPackage?.packageHash,reviewedAt:new Date().toISOString()};
+        if(reliable) c.reviewJob={...c.reviewJob,state:'completed',completedAt:new Date().toISOString()};
         await saveCases(env,cases);
         return json({ok:true});
       }

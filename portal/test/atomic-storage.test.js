@@ -170,6 +170,38 @@ async function reminderFixture() {
   await saveStoredCases(env,cases);
   return env;
 }
+
+test('hybrid review API atomically claims, retries after failure and fences duplicate workers',async()=>{
+  const {env}=setup();env.REVIEW_RELIABILITY='yes';env.REVIEW_API_TOKEN='r'.repeat(40);
+  const cases=await loadStoredCases(env);
+  cases.push({id:'retry',wizard:{},reviewHash:'hash',ownerReviewReadyAt:'2026-09-05',pathType:'guest-registration',steps:[]});
+  await saveStoredCases(env,cases);
+  const call=(path,data,origin='https://portal.example.test')=>onRequest({env,request:new Request('https://portal.example.test/admin/review/'+path,{method:data?'POST':'GET',headers:{Authorization:'Bearer '+env.REVIEW_API_TOKEN,Origin:origin},body:data?JSON.stringify(data):undefined})});
+  const queue=await (await call('candidates')).json();assert.equal(queue.protocol,2);
+  const input={id:'retry',reviewHash:'hash',reviewContextHash:queue.cases[0].reviewContextHash};
+  assert.equal((await call('claim',input,'https://evil.example.test')).status,403);
+  const concurrent=await Promise.all([call('claim',input),call('claim',input)]);
+  assert.deepEqual(concurrent.map(r=>r.status).sort(),[200,409]);
+  const claim=await concurrent.find(r=>r.status===200).json();assert.ok(claim.token);
+  assert.equal((await (await call('candidates')).json()).cases.length,0);
+  const report={status:'red',confidence:.9,summary:'synthetic',findings:['synthetic'],model:'test'};
+  assert.equal((await call('result',{...input,report})).status,409);
+  const submission={...input,claimToken:claim.token,report};
+  assert.equal((await call('result',submission)).status,200);
+  // A lost HTTP acknowledgement must not overwrite the first accepted result.
+  assert.equal((await call('result',{...submission,report:{...report,summary:'overwrite'}})).status,200);
+  assert.equal((await loadStoredCases(env))[0].aiReview.summary,'synthetic');
+  // This synthetic case has no real PDF; real completed packets leave the queue.
+  const changed=await loadStoredCases(env);changed[0].reviewHash='new';await saveStoredCases(env,changed);
+  assert.equal((await call('result',submission)).status,409);
+  const next=(await (await call('candidates')).json()).cases[0];
+  const nextClaim=await (await call('claim',next)).json();
+  assert.equal((await call('failure',{...next,claimToken:nextClaim.token,error:'secret must not be stored'})).status,200);
+  const saved=(await loadStoredCases(env))[0];assert.equal(saved.reviewJob.state,'waiting');
+  assert.doesNotMatch(JSON.stringify(saved),/secret must/);assert.equal(saved.submission,undefined);
+  assert.equal((await call('heartbeat',{state:'completed'})).status,200);
+  assert.equal((await call('heartbeat',{state:'arbitrary'})).status,400);
+});
 test('concurrent reminder workers send once directly to the guest, without private values',async()=>{
   const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');
   const sent=[];const send=async(_,message)=>{sent.push(message);return true;};

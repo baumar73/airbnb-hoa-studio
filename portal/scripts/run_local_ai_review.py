@@ -154,46 +154,70 @@ def write_review_package(package: dict, output: pathlib.Path) -> list[pathlib.Pa
 
 def main() -> int:
     payload = api_request("/admin/review/candidates")
+    reliable = payload.get('protocol') == 2
+    if os.environ.get('ISLA_REVIEW_RELIABILITY') == 'yes' and not reliable:
+        raise RuntimeError('Hybrid reviewer protocol is not enabled on the portal')
     candidates = payload["cases"]
+    if reliable:
+        api_request('/admin/review/heartbeat', {'state': 'started'})
     if not candidates:
+        if reliable:
+            api_request('/admin/review/heartbeat', {'state': 'completed'})
         return 0
     notices: list[str] = []
+    failures = 0
     for original in candidates:
-        with tempfile.TemporaryDirectory(prefix="isla-ai-", dir="/tmp") as temp:
-            temp_path = pathlib.Path(temp)
-            out_dir = temp_path / "bundle"
-            try:
-                package = api_request("/admin/review/package", {"id": original["id"], "reviewHash": original["reviewHash"], "reviewContextHash": original["reviewContextHash"]})
-            except urllib.error.HTTPError as error:
-                if error.code != 409:
-                    raise
-                notices.append("KI-Prüfung verworfen: Vorgang ist inzwischen geändert oder unvollständig.")
-                continue
-            pdf_paths = write_review_package(package, out_dir)
-            report = local_ai_review(original, pdf_paths)
-            report.update({
-                "reviewHash": original["reviewHash"],
-                "reviewedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-                "model": MODEL,
-                "localOnly": True,
-            })
-            try:
-                api_request("/admin/review/result", {"id": original["id"], "reviewHash": original["reviewHash"],
-                    "reviewContextHash": original["reviewContextHash"], "packageId": package["packageId"], "packageHash": package["packageHash"], "report": report})
-            except urllib.error.HTTPError as error:
-                if error.code != 409:
-                    raise
-                notices.append(f"KI-Prüfung verworfen: Vorgang {original.get('guestName','')} wurde während der Prüfung geändert.")
-                continue
-            if report["status"] == "green":
-                notices.append(f"✅ KI-Prüfung grün: {original.get('guestName','')} – der Versandprozess prüft jetzt die übrigen Voraussetzungen.")
+        identity = {key: original[key] for key in ('id', 'reviewHash', 'reviewContextHash')}
+        claimed = False
+        try:
+            if reliable:
+                claim = api_request('/admin/review/claim', identity)
+                identity['claimToken'] = claim['token']
+                claimed = True
+            with tempfile.TemporaryDirectory(prefix="isla-ai-", dir=os.environ.get('ISLA_REVIEW_SCRATCH', '/tmp')) as temp:
+                package = api_request('/admin/review/package', identity)
+                pdf_paths = write_review_package(package, pathlib.Path(temp) / 'bundle')
+                report = local_ai_review(original, pdf_paths)
+                report.update({'reviewHash': original['reviewHash'], 'reviewedAt': dt.datetime.now(dt.timezone.utc).isoformat(), 'model': MODEL, 'localOnly': True})
+                result = {**identity, 'packageId': package['packageId'], 'packageHash': package['packageHash'], 'report': report}
+                try:
+                    api_request('/admin/review/result', result)
+                except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+                    # Only the fenced protocol makes replay safe. Reuse EXACTLY
+                    # the same report; never re-run the model on a lost reply.
+                    if not reliable or (isinstance(error, urllib.error.HTTPError) and error.code < 500):
+                        raise
+                    api_request('/admin/review/result', result)
+                notices.append('KI-Prüfung gespeichert: ' + report['status'])
+        except Exception as error:
+            conflict = isinstance(error, urllib.error.HTTPError) and error.code == 409
+            if conflict:
+                notices.append('KI-Prüfung verworfen: Auftrag oder Reservierung inzwischen geändert.')
             else:
-                details = "; ".join(report["findings"][:3]) or report["summary"]
-                notices.append(f"⚠️ Lokale KI-Prüfung {report['status']}: {original.get('guestName','')} – {details}")
+                failures += 1
+                notices.append('KI-Prüfung unterbrochen; Auftrag bleibt zur Wiederaufnahme gespeichert.')
+            # This is a review-only retry, never an email resend/unlock. If the
+            # result was already saved the failure endpoint refuses to reset it.
+            if claimed:
+                try:
+                    api_request('/admin/review/failure', identity)
+                except Exception:
+                    pass  # The persisted lease expires even if the network is down.
+        if reliable:
+            try:
+                api_request('/admin/review/heartbeat', {'state': 'started'})
+            except Exception:
+                failures += 1
     if notices:
         print("\n".join(notices))
-    return 0
+    if reliable:
+        api_request('/admin/review/heartbeat', {'state': 'failed' if failures else 'completed'})
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception:
+        print('Reviewer unavailable; check protected configuration and service status.')
+        raise SystemExit(1)

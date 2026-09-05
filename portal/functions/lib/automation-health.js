@@ -1,3 +1,4 @@
+import {reviewBacklog} from './review-jobs.js';
 // Diagnostic metadata only. This eventually consistent KV record must NEVER
 // authorize a send, unlock a claim or replace atomic per-case delivery state.
 const KEY='automation-health-v1';
@@ -28,6 +29,7 @@ export function automationHealth(status,now=new Date()) {
   if(status.state==='failed') return {ok:false,reason:'stage_failed'};
   if(status.state==='running'&&age(status.startedAt,now)>15*MINUTE) return {ok:false,reason:'stalled'};
   if(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery) return {ok:false,reason:'delivery_reconciliation'};
+  if(status.reviewer?.unhealthy) return {ok:false,reason:'reviewer_unavailable'};
   return {ok:true,reason:'ok'};
 }
 
@@ -36,12 +38,12 @@ export async function notifyAutomationFailure(env,status,now,notify) {
   const health=automationHealth(status,now);
   // One transient failure stays quiet. Persistent failure, a stale successful
   // heartbeat or uncertain delivery is a genuine exception, not a guest to-do.
-  const actionable=(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
+  const actionable=Boolean(status.reviewer?.unhealthy)||(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
     (status.lastSuccessAt&&age(status.lastSuccessAt,now)>90*MINUTE)||
     (status.state==='running'&&age(status.startedAt,now)>15*MINUTE);
   if(!actionable||health.ok||age(status.lastAlertAt,now)<24*60*MINUTE) return;
   try {
-    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf ist ausgefallen oder ein Versand muss abgeglichen werden. Technischen Status unter /admin/automation-health prüfen. Unklare Sendungen werden nicht automatisch erneut versendet.')) {
+    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf oder der lokale Prüfdienst braucht Aufmerksamkeit. Technischen Status unter /admin/automation-health prüfen.'+(status.reviewer?.urgent?' Offene Prüfungen betreffen Anreisen innerhalb von sieben Tagen.':'')+' Unklare Sendungen werden nicht automatisch erneut versendet.')) {
       status.lastAlertAt=now.toISOString();await save(env,status);
     }
   } catch { /* Leave cooldown open; the public health endpoint remains unhealthy. */ }
@@ -52,14 +54,17 @@ export async function runAutomationCycle(env,jobs,now=new Date()) {
   const status={state:'running',stage:'mail',startedAt:now.toISOString(),
     enabled:{guestReminders:env.AUTO_GUEST_REMINDERS==='yes',hoaSubmission:env.AUTO_HOA_SUBMIT==='yes'},results:{},
     consecutiveFailures:previous?.consecutiveFailures||0,lastSuccessAt:previous?.lastSuccessAt,
-    lastAlertAt:previous?.lastAlertAt,stalled:previous?.stalled};
+    lastAlertAt:previous?.lastAlertAt,stalled:previous?.stalled,reviewer:env.REVIEW_RELIABILITY==='yes'?previous?.reviewer:undefined};
   // Persist before work so abrupt termination is observable by the next check.
   await save(env,status);
   try {
     for(const stage of ['mail','reminders','submissions','inspect']) {
       status.stage=stage;await save(env,status);
       const result=await jobs[stage]();
-      if(stage==='inspect') status.stalled=findStalledWork(result,now);
+      if(stage==='inspect') {
+        status.stalled=findStalledWork(result,now);
+        if(env.REVIEW_RELIABILITY==='yes') status.reviewer=await reviewBacklog(env,result,now);
+      }
       else status.results[stage]=safeCounts(result);
     }
     status.state='completed';status.consecutiveFailures=0;status.lastSuccessAt=now.toISOString();

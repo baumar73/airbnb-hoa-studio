@@ -19,6 +19,25 @@ It must be represented in the activation audit; it does not assert HOA approval.
 
 ## Implemented locally
 
+- Hybrid restart safety: `functions/lib/review-jobs.js` adds persisted per-case
+  review claims, 15-minute expiring leases, fenced results, retry backoff and
+  diagnostic reviewer/backlog health. Protocol 2 is opt-in through
+  `REVIEW_RELIABILITY=yes` on Pages and cron, after atomic storage activation.
+  The updated runner claims before fetching a package, continues after one
+  case fails and retries a lost result acknowledgement without another model
+  call or overwriting a saved report. No guest/HOA delivery lock is cleared.
+- `scripts/reviewer_service.py` prepares existing-host restart supervision,
+  private configuration, single-instance OS locking, bounded retry intervals and
+  cleanup of its own private scratch after restart. The launchd example is NOT
+  installed. Actual before-login startup, power restoration and authentication
+  still need a separately approved real-host drill. See `HYBRID_OPERATIONS.md`.
+- User additionally requests gbrain/Hermes integration INCLUDING searchable
+  guest data. Existing gbrain MCP and Hermes services were verified active by
+  read-only SSH. No callable gbrain MCP tool is exposed in this Codex session.
+  No brain was installed, initialized, connected, imported into or restarted.
+  `HYBRID_OPERATIONS.md` records protected guest-source synchronization and
+  scoped operations/repair boundaries. These are plans, not implemented sync.
+
 - `functions/lib/parse.js`: retain complete guest names; normalize lookup names,
   including apostrophes, accents and suffixes, without truncating middle names.
 - `case-store/src/index.js`, `functions/lib/storage.js`: encrypted per-reservation
@@ -123,7 +142,7 @@ the parser fix does not reconstruct missing names from nothing.
 
 ## Verification
 
-- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 125 tests pass.
+- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 132 tests pass.
   Seven new regressions cover stale browser revisions/changed booking dates,
   retained form inputs on conflict and connection loss, stage-specific failure,
   recovery, alert cooldown, stranded claims, safe counters and authenticated
@@ -133,7 +152,11 @@ the parser fix does not reconstruct missing names from nothing.
   history, repeat guests, ambiguous/suspicious senders, duplicate replay,
   same-day replies, failed persistence, encrypted retention/holds, owner-only
   safe display, archive-folder ordering and IMAP deadline/error redaction.
-- `python3 -m unittest discover -s test -p 'test_*.py'`: 7 tests pass.
+- `python3 -m unittest discover -s test -p 'test_*.py'`: 16 tests pass.
+  New hybrid tests cover claim exclusivity, expiry/reclaim and fencing, failure
+  backoff, result replay, heartbeat failure, continued work after one case fails,
+  private configuration, scratch cleanup, sanitized logs and OS lock recovery
+  after an actual synthetic child-process kill. No hardware reboot was performed.
 - `node scripts/test_atomic_runtime.mjs`: passes in local Miniflare/workerd with
   SQLite Durable Objects, synthetic encrypted records and no cloud account.
   Verified explicit import, independent concurrent writes, same-case conflict,
