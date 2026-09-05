@@ -19,6 +19,8 @@ export async function reviewContextHash(c, ownerSignature, compliance) {
 }
 
 export function validateReviewReport(report) {
+  if (typeof report!=='object'||Array.isArray(report)||!report) return false;
+  if (![report.summary,report.model].every(s=>typeof s==='string'&&s.trim().length>0) || !Array.isArray(report.findings) || !report.findings.every(s=>typeof s==='string'&&s.trim().length>0)) return false;
   if (!report || !['green','yellow','red'].includes(report.status) || !Number.isFinite(report.confidence) || report.confidence<0 || report.confidence>1 || !Array.isArray(report.findings) || report.findings.length>20 || !report.findings.every(s=>typeof s==='string' && s.length<=1000) || typeof report.summary!=='string' || report.summary.length>2000 || typeof report.model!=='string' || report.model.length>160) return false;
   if (report.status==='green' && (report.confidence<.75 || report.findings.length)) return false;
   return true;
