@@ -23,7 +23,7 @@ gesonderte Arbeit.
 - [x] 14. gbrain-Zustandsgrenze vor neuen Schreibvorgängen durchsetzen
 - [x] 15. Abgelaufene HOA-E-Mail-Belege nicht mehr ausliefern
 - [x] 16. Dokumentenarchiv: ungültige Eingaben vor dem Speichern abweisen
-- [ ] 17. Explizit fehlgeschlagene Versandantworten nicht als Erfolg behandeln
+- [x] 17. Explizit fehlgeschlagene Versandantworten nicht als Erfolg behandeln
 - [ ] 18. Tenant-Evaluation-Ablauf mit Nachforderung durchgängig lokal prüfen
 - [ ] 19. Fehlgeschlagene Paketvorbereitung im Betriebsstatus sichtbar machen
 - [ ] 20. Verschlüsselte lokale Sicherung in getrennten Speicher zurückspielen und prüfen

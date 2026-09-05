@@ -56,7 +56,7 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     try {
       const message=guestReminderMessage(current,origin.origin);
       if(target.channel==='airbnb_relay')Object.assign(message,{subject:target.subject,inReplyTo:target.inReplyTo,references:target.references});
-      await send(env,{to:[target.to],cc:[],...message,messageId});
+      if(await send(env,{to:[target.to],cc:[],...message,messageId})===false) throw new Error('Reminder delivery not confirmed');
     } catch {
       // SMTP can accept DATA before a connection fails. Do not blindly resend.
       try {await recordResult(env,id,claimId,'uncertain',now);} catch { /* persistent claim still prevents a duplicate */ }

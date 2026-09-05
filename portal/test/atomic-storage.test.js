@@ -248,6 +248,13 @@ test('concurrent reminder workers send once directly to the guest, without priva
   await runGuestReminders(env,now,send);assert.equal(sent.length,1);
   assert.equal((await loadStoredCases(env))[0].automation.reminderClaim.state,'sent');
 });
+test('explicit false reminder delivery remains uncertain and cannot trigger another send',async()=>{
+  const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');
+  const result=await runGuestReminders(env,now,async()=>false);
+  assert.equal(result.sent,0);assert.equal(result.uncertain,1);
+  const [c]=await loadStoredCases(env);assert.equal(c.automation.lastGuestReminderAt,undefined);
+  await runGuestReminders(env,new Date('2026-09-10'),()=>assert.fail('must not resend'));
+});
 test('uncertain reminder transport is not retried and does not mark delivery confirmed',async()=>{
   const env=await reminderFixture(),now=new Date('2026-09-05T12:00:00Z');let attempts=0;
   const send=async()=>{attempts++;throw new Error('synthetic ambiguous disconnect');};
@@ -323,6 +330,13 @@ async function automaticFixture() {
   await saveStoredCases(env,current);
   return {env,sig,compliance};
 }
+test('explicit false package delivery does not create a submitted record',async()=>{
+  const {env}=await automaticFixture();
+  await runAutomaticSubmissions(env,new Date('2026-09-05'),(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async()=>false,sendNotice:async()=>true}));
+  const [c]=await loadStoredCases(env);
+  assert.equal(c.submission,undefined);assert.equal(c.submissionError.phase,'delivery_uncertain');assert.ok(c.reviewLockedAt);
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),()=>assert.fail('must not resend'));
+});
 test('standing authorization releases a complete reviewed package once without owner interaction',async()=>{
   const {env}=await automaticFixture();let deliveries=0;
   const submit=async(c,cases)=>{deliveries++;await persistDeliveryOutcome(env,cases,c,{submission:{sentAt:'2026-09-05T12:00:00Z',packageId:c.preparedPackage.id,docs:c.preparedPackage.documents.map(d=>d.filename)}});return true;};

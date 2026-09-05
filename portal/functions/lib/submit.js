@@ -109,11 +109,12 @@ export async function submitApprovedPackage(c, cases, env, {sendMail=sendViaGmai
       env.OWNER_SIGNATURE_AUTHORIZATION!=='hoa-paperwork-v1'||
       !env.OWNER_AUTHORIZATION_REFERENCE||env.OWNER_AUTHORIZATION_REFERENCE!==c.autoRelease.authorization)) throw new Error('Standing authorization changed before delivery');
     mailAttempted=true;
-    await sendMail(env, {
+    const accepted=await sendMail(env, {
       to: live ? recipients.to : [OWNER],
       cc: live ? recipients.cc : [],
       subject, text, attachments,
     });
+    if(accepted===false) throw new Error('Package delivery not confirmed');
     mailSent=true;
     if (live) {
       c.submission = { sentAt: new Date().toISOString(), live: true, docs: attachments.map(a => a.filename), reviewHash: c.ownerApprovedReviewHash || null };
