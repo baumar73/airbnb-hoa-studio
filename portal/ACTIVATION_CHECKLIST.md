@@ -1,5 +1,27 @@
 # Controlled activation checklist
 
+## Repeatable local runtime recovery drill
+
+Run `npm run test:runtime` from `portal/`. This executes the existing atomic-store
+integration test and `scripts/test_restart_runtime.mjs` against local workerd.
+The restart test creates a unique temporary directory, explicitly enables disk
+persistence, disposes the runtime and starts a new runtime twice against that
+same directory. It removes only its generated temporary storage on completion.
+
+Verified with synthetic records on 2026-09-05:
+
+- Encrypted drafts, cancellation status and a 150-KB immutable archive survive.
+- Unresolved HOA and reminder claims survive and remain visible to monitoring;
+  the reminder worker performs no resend after restart.
+- Review leases remain exclusive, expire with their existing backoff and can be
+  reclaimed with a new token. A stale pre-restart writer receives a conflict.
+- Knowledge-export epoch/cursor and deletions survive the next restart.
+- A wrong encryption key is rejected; the actor has no public case endpoint.
+
+The drill uses orderly local runtime shutdown, not abrupt host power loss. It
+does not exercise a production host, send real mail, change production bindings
+or restore a backup. Keep those real operational acceptance gates open below.
+
 This is a runbook for the existing deployment. It authorizes no deployment,
 service move, mailbox change or real message by itself. Use synthetic records and
 preview bindings until every gate below has an owner and evidence.

@@ -24,7 +24,12 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
   liegende Heartbeats gelten als fehlend/ungesund und können vom nächsten Lauf
   ersetzt werden. Ungeprüfte Statuswerte werden nicht veröffentlicht; echte
   Speicherfehler bleiben sichtbar. Vier neue Tests, insgesamt 264 JS-Tests.
-- [ ] Wiederanlauf: dauerhafte Speicherung mit einem lokalen Runtime-Neustart prüfen.
+- [x] Wiederanlauf: `npm run test:runtime` prüft die reale lokale workerd-Runtime
+  und zwei Neustarts mit persistentem temporärem Speicher. Verschlüsselte
+  Entwürfe, 150-KB-Dokumentenarchiv, Versandsperren, Prüfauftrag-Neuübernahme,
+  alte Schreibversuche, Export-Cursor und Löschungen sind geprüft. Falsche
+  Entschlüsselungsschlüssel werden abgewiesen. Kein physischer Stromausfalltest,
+  kein Produktionsneustart und kein Backup-Wiederherstellungsnachweis.
 
 Diese Teilaufgaben belegen lokale Technik, keine Live-Abnahme.
 
