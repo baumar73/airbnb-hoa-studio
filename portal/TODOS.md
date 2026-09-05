@@ -41,8 +41,8 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 **Lokaler Fortschritt 2026-09-05:** Freiwilliger, verschlüsselt gespeicherter E-Mail-Erinnerungswunsch auch ohne Papierformular; Abmeldung verhindert den Rückfall auf eine alte Formularadresse. Fehlende Erreichbarkeit erscheint im Verwaltungsbereich und bei fälligen Erinnerungen als überwachte Ausnahme. Parallelität, späte Erledigung/Stornierung und Abmeldung unmittelbar vor Versand sind getestet. Details: [Gast-Erinnerungen](GUEST_REMINDERS.md). Zusätzlich ist der bereits von Hermes genutzte Airbnb-Antwortweg per Gmail als standardmäßig deaktivierter Fallback implementiert: verschlüsselte Kandidaten, Originalprüfung durch Eigentümer, buchungsgebundene Freigabe, Antwort-Header und gemeinsamer Schutz vor doppeltem Versand. Strukturierte Zustellberichte werden nun optional anhand der stabilen Versand-ID und eines Empfänger-Hashs als Prüfhinweis erfasst; sie lösen weder Wiederholung noch Statusfreigabe aus. Details: [Airbnb-Antwortweg](AIRBNB_RELAY.md). Automatische Erstzuordnung ohne Eigentümerprüfung, Rückläuferabgleich im realen Postfach und kontrollierte Live-Abnahme bleiben offen. Der Gesamtpunkt ist daher nicht abgeschlossen.
 
 - [ ] E-Mail-Erreichbarkeit und den zulässigen Airbnb-Nachfassweg klären und testen.
-- [ ] Erinnerungen konkret auf fehlende Angaben, Unterlagen, Zahlung oder Nachforderungen beziehen.
-- [ ] Versandfehler, doppelte Ausführung und verspätete Antworten testen; erledigte und stornierte Fälle nicht weiter erinnern.
+- [x] Erinnerungen konkret auf fehlende Angaben, Unterlagen, Zahlung oder Nachforderungen beziehen.
+- [x] Versandfehler, doppelte Ausführung und verspätete Antworten mit synthetischen Fällen testen; erledigte, stornierte und gelöschte Fälle nicht weiter erinnern.
 - [ ] Erinnerungen erst nach kontrolliertem Test und ausdrücklicher Betriebsfreigabe aktivieren.
 
 ## Airbnb-Buchungsabgleich
