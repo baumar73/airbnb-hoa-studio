@@ -1,4 +1,5 @@
 import {applicationFeeState,isValidISODate,validatePaperwork} from './workflow.js';
+import {hoaEvidenceState,hoaTaskText} from './hoa-evidence.js';
 
 const DAY=86400000;
 const done=(c,id)=>(c.steps||[]).some(s=>s.id===id && s.done);
@@ -10,6 +11,17 @@ export function planGuestJourney(c,now=new Date(),{feeRequestAuthorized=true}={}
   if (!isValidISODate(c.checkIn)||!isValidISODate(c.checkOut)) return {...plan,state:'exception',exception:'invalid_stay_dates'};
   if (new Date(c.checkOut+'T23:59:59Z')<now) return {...plan,state:'closed'};
   if (c.submissionError?.phase==='delivery_uncertain' || c.automation?.reminderClaim?.state==='uncertain') return {...plan,state:'exception',exception:'delivery_reconciliation'};
+  const followUp=hoaEvidenceState(c);
+  if(followUp.exception) return {...plan,state:'exception',exception:followUp.exception};
+  if(followUp.tasks.length) {
+    for(const task of followUp.tasks) {
+      if(task.status==='reported') plan.waitingForEvidence.push('hoa_task:'+task.id);
+      else if(task.code==='payment'&&!feeRequestAuthorized) plan.waitingForEvidence.push('authorized_payment_instructions');
+      else plan.guestTasks.push({id:'hoa_task:'+task.id,text:hoaTaskText(c,task.code),includesPayment:task.code==='payment'});
+    }
+    if(!plan.guestTasks.length) return {...plan,state:'waiting_for_evidence'};
+    return withReminder(plan,c,now);
+  }
   if (done(c,'board_approved')) return {...plan,state:'approved'};
   if (c.submission||done(c,'submitted_hoa')) return {...plan,state:'waiting_for_hoa'};
   if (c.reviewLockedAt) return {...plan,state:'delivery_in_progress'};
@@ -40,6 +52,10 @@ export function planGuestJourney(c,now=new Date(),{feeRequestAuthorized=true}={}
     if (plan.state==='waiting_for_guest') plan.state=plan.waitingForEvidence.length?'waiting_for_evidence':'ready_for_package_check';
     return plan;
   }
+  return withReminder(plan,c,now);
+}
+
+function withReminder(plan,c,now) {
   const previous=Date.parse(c.automation?.lastGuestReminderAt||'');
   const created=Date.parse(c.createdAt||'');
   const due=Number.isFinite(previous)?previous+3*DAY:Number.isFinite(created)?created+DAY:now.getTime();

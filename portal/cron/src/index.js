@@ -23,12 +23,17 @@ export function computeAlerts(cases, now, {directGuestReminders=false}={}) {
     c.notify = c.notify || {};
     const n = c.notify;
     const days = daysUntil(c.checkIn, now);
-    const approved = stepDone(c, 'board_approved');
+    const followUp=hoaEvidenceState(c);
+    const approved = !followUp.exception&&!followUp.tasks.length&&stepDone(c, 'board_approved');
     const released = stepDone(c, 'checkin_released');
     if (days < -1 || (approved && released)) continue; // done or past
 
     const link = `${PORTAL}/admin`;
     const who = `${c.guestName} (${c.checkIn} → ${c.checkOut})`;
+
+    if(followUp.exception&&ageDays(n.hoaEvidenceReview,now)>=1) {
+      alerts.push({c,key:'hoaEvidenceReview',text:`🏛️ ${who}: HOA-Beleg oder geänderter Mietzeitraum braucht Prüfung (${followUp.exception}). Keine automatische Genehmigung, Zahlung oder Stornierung. ${link}`});
+    }
 
     if (!directGuestReminders && c.screeningRoute!=='online' && !c.wizard && ageDays(c.createdAt, now) >= 3 && ageDays(n.wizardNudge, now) >= 3) {
       alerts.push({ c, key: 'wizardNudge', text: `📝 ${who}: Gast hat den Formular-Wizard noch nicht ausgefüllt. Erinnerung über den Airbnb-Chat senden? Magic-Link: ${PORTAL}/v/${c.token}` });
@@ -86,6 +91,7 @@ import { loadStoredCases, saveStoredCases, inheritCaseSnapshot } from '../../fun
 import { runGuestReminders } from '../../functions/lib/guest-reminders.js';
 import { runAutomaticSubmissions } from '../../functions/lib/auto-submit.js';
 import {runAutomationCycle,readAutomationStatus,notifyAutomationFailure} from '../../functions/lib/automation-health.js';
+import {hoaEvidenceState} from '../../functions/lib/hoa-evidence.js';
 
 export default {
   async scheduled(event, env, ctx) {

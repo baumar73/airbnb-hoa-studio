@@ -121,6 +121,14 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
       const msg = decodeMessage(await imap.fetchMessage(uid));
       const analysis=analyseHoaReply(msg,cases,senders);
       const {processed,...event}=await archiveHoaReply(env,msg,analysis,cases);
+      // A source explicitly reviewed by the owner keeps that assignment on
+      // later polls; automatic matching must not undo a manual reconciliation.
+      const verified=cases.filter(c=>(c.hoaMailEvents||[]).some(e=>e.id===event.id&&e.review));
+      if(verified.length===1) {
+        const reviewed=verified[0].hoaMailEvents.find(e=>e.id===event.id);
+        event.caseId=verified[0].id;event.matchReason=reviewed.matchReason||'owner_verified';
+        event.reviewRequired=reviewed.reviewRequired;
+      }
       const hit=cases.find(c=>c.id===event.caseId);
       const existing=news.find(n=>n.id===event.id);
       if(hit && !(hit.hoaMailEvents||[]).some(e=>e.id===event.id)) {
@@ -132,7 +140,7 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
         if(!hit) summary.hoaUnassigned++;
         // No private body, guest name or sender-provided instructions in alerts.
         hoaNotifications.push('🏛️ Neue HOA-E-Mail erfasst. '+(hit?'Dem Mietvorgang zugeordnet.':'Zuordnung unklar.')+' Zahlungs- und Freigabestatus wurden nicht verändert. Quelle unter '+PORTAL+'/admin/hoa-mail/'+event.id+' prüfen.');
-      } else if(existing && existing.caseId!==event.caseId) {
+      } else if(existing && (existing.caseId!==event.caseId||existing.reviewRequired!==event.reviewRequired)) {
         Object.assign(existing,event);newsDirty=true;
       }
       if(!processed) hoaProcessed.push(event.id);

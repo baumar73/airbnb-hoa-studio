@@ -20,6 +20,8 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 **Effort:** L
 **Priority:** P1
 
+**Lokaler Fortschritt 2026-09-05:** Beleggebundene Eigentümerprüfung, getrennte Bestätigungen, konkrete Gastaufgaben, Teil-Erledigungen, erneutes Öffnen nach Einreichung, Versionsprüfung und Versandsperren sind implementiert. Details und Grenzen: [HOA-Evidence-Ablauf](HOA_EVIDENCE.md). Kein Live-Rollout; keine automatische positive Entscheidung aus Mailtext. Die folgenden Abnahmepunkte bleiben offen, soweit sie echte Nachrichten oder den Live-Betrieb voraussetzen.
+
 - [ ] Festlegen und anhand tatsächlicher Rückmeldungen prüfen, welche Nachweise Tenant Evaluation und HOA für die einzelnen Schritte liefern.
 - [ ] HOA-Nachforderungen nach sicherer Zuordnung als konkrete offene Gastaufgaben abbilden; erledigte Vorgänge bei neuen Anforderungen kontrolliert wieder öffnen.
 - [ ] Mehrdeutige, widersprüchliche oder nicht sicher zuordenbare Nachrichten zur Prüfung vorlegen, ohne einen positiven Status zu erfinden.
@@ -115,7 +117,7 @@ Die Sicherung dieser To-do-Datei veröffentlicht diese Programmänderungen nicht
 
 ## Prüfstand und Abnahmeregeln
 
-Bei der vorangegangenen lokalen Prüfung bestanden 156 JavaScript- und 34 Python-Tests. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
+Nach der lokalen Ergänzung des Beleg-/Nachforderungsablaufs bestanden 177 JavaScript- und 34 Python-Tests (2026-09-05). Der frühere Prüfstand lag bei 156/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
 
 - Neue Abläufe brauchen Tests für vollständige, unvollständige, verspätete, geänderte und stornierte Buchungen sowie technische Ausfälle.
 - Eine Buchung kann vor HOA-Zustimmung bestehen; Bezug erst nach erforderlicher Zustimmung. Ablehnungen und mögliche Stornierungen bleiben gesondert zu prüfende Ausnahmen, keine automatische Schuldzuweisung an den Gast.

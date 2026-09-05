@@ -15,7 +15,8 @@ import { needsReview, reviewContextHash, validateReviewReport, reviewCaseData, c
 import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib/package-archive.js';
 import {planGuestJourney} from './lib/journey.js';
 import {readAutomationStatus,automationHealth} from './lib/automation-health.js';
-import {readHoaReply} from './lib/hoa-mail.js';
+import {readHoaReply,refreshHoaArchiveRetention} from './lib/hoa-mail.js';
+import {HOA_ITEMS,HOA_CONFIRMATIONS,hoaEvidenceState,hoaTaskText,reviewHoaEvidence,reportHoaTask} from './lib/hoa-evidence.js';
 import {completedReview,reviewAvailable,claimReview,ownsReview,failReview,recordReviewerHeartbeat} from './lib/review-jobs.js';
 import {knowledgeExportResponse} from './lib/knowledge-export.js';
 import {bookingApprovalNotice} from './lib/booking-notice.js';
@@ -425,12 +426,32 @@ function feeRequestReleased(c, compliance) {
   return applicationFeeState(c) !== 'required' || externalFeeRequestAuthorized(c,compliance);
 }
 
+function hoaGuestFollowUp(c,compliance) {
+  const state=hoaEvidenceState(c),proofs=Object.entries(c.hoaEvidence||{}).filter(([,e])=>!e.disputedAt&&!e.supersededAt);
+  const evidence=proofs.length?`<div class="card"><h2>Verified association updates</h2><ul>${proofs.map(([key,e])=>`<li>${esc(HOA_CONFIRMATIONS[key]||'Association update')}${state.exception?' — under review':''} (${esc(e.at.slice(0,10))})</li>`).join('')}</ul><p class="muted">Receipt, payment, application completion and approval are separate confirmations.</p></div>`:'';
+  if(state.exception) return `<div class="card"><h2>Association response under review</h2><p>The latest correspondence or changed reservation details need to be checked. This is not a cancellation or a new payment request. Do not pay again or make new travel assumptions based on an earlier status.</p></div>`+evidence;
+  if(!state.tasks.length) return evidence;
+  const paymentAllowed=externalFeeRequestAuthorized(c,compliance);
+  return `<div class="card"><h2>Additional items requested</h2><p>The association needs these items for your existing application. Reporting them done here does not confirm their acceptance.</p>${c.screeningRoute==='online'?'<p><a class="btn" href="https://tenantev.com/" target="_blank" rel="noopener">Open your existing Tenant Evaluation application</a></p>':`<p><a class="btn ghost" href="/w/${c.token}">Review your saved forms</a></p>`}<ul>${state.tasks.map(t=>`<li><b>${esc(HOA_ITEMS[t.code]||'Association item')}</b><p>${esc(t.code==='payment'&&!paymentAllowed?'Payment instructions are being verified. Do not make another payment.':hoaTaskText(c,t.code))}</p>${t.status==='reported'?'<p class="pill warn">Reported complete — waiting for source verification</p>':t.code==='payment'&&!paymentAllowed?'':`<form method="post" action="/v/${c.token}/hoa-task-reported"><input type="hidden" name="taskId" value="${esc(t.id)}"><input type="hidden" name="taskVersion" value="${t.version}"><label><input type="checkbox" name="confirmed" value="yes" required> I have completed this requested item through the official process.</label><button class="small">Report this item complete</button></form>`}</li>`).join('')}</ul></div>`+evidence;
+}
+
+function hoaSourceReviewForm(c,cases,id,env) {
+  if(!env.CASE_STORE) return '<div class="card"><p>Beleggebundene Bearbeitung ist vorbereitet, aber erst mit aktiviertem atomarem Fallspeicher verfügbar. Es wurde kein Status geändert.</p></div>';
+  if(!c) return `<div class="card"><h2>Quelle einem Vorgang zuordnen</h2><p>Nur nach Prüfung des Originals zuordnen. Name und Mietzeitraum müssen eindeutig passen.</p><ul>${cases.filter(c=>c.status!=='canceled').map(c=>`<li><a href="/admin/hoa-mail/${id}?case=${encodeURIComponent(c.id)}">${esc(c.guestName)} · ${esc(c.checkIn)} – ${esc(c.checkOut)}</a></li>`).join('')}</ul></div>`;
+  const event=(c.hoaMailEvents||[]).find(e=>e.id===id);
+  if(event?.review) return `<div class="card"><h2>Quelle bereits bearbeitet</h2><p>${esc(event.review.kind)} · ${esc(event.review.at)} · ${esc(event.review.by)}</p><p>Bestätigt: ${esc(event.review.confirmations.join(', ')||'keine Fakten bestätigt')}<br>Nachgefordert: ${esc(event.review.requestedItems.join(', ')||'keine')}<br>Erledigte Aufgaben: ${event.review.resolvedItems.length}</p><p>Ein neuer Beleg ist für eine weitere Entscheidung erforderlich.</p></div>`;
+  const checks=(name,options)=>Object.entries(options).map(([value,label])=>`<label style="display:block"><input type="checkbox" name="${name}" value="${esc(value)}"> ${esc(label)}</label>`).join('');
+  return `<div class="card"><h2>Geprüften Beleg bearbeiten</h2><p>${esc(c.guestName)} · ${esc(c.checkIn)} – ${esc(c.checkOut)}</p><p>Keine automatische Bestätigung: Originalnachricht und gegebenenfalls Anhänge im Postfach prüfen. Tenant Evaluation darf nicht mit einer Board-Genehmigung verwechselt werden. Keine zusätzlichen Gebühren erfinden.</p><form method="post" action="/admin/hoa-mail/${id}/review"><input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="caseVersion" value="${caseSnapshotVersion(cases,c.id)}"><label>Buchungscode (bei Gastregistrierung vollständigen Gastnamen) zur Bestätigung eingeben<input name="reservation" required autocomplete="off"></label><label>Ergebnis<select name="kind"><option value="confirmed">Einzelne Fakten / Aufgaben anhand des Originals geprüft</option><option value="needs_review">Unklar oder widersprüchlich — Prüfung offenhalten</option><option value="adverse_response">Negative Rückmeldung — gesonderte Prüfung, keine Stornierung</option><option value="no_action">Keine fallbezogene Aktion erforderlich</option></select></label><h3>Nur ausdrücklich belegte Fakten</h3>${checks('confirmations',HOA_CONFIRMATIONS)}<h3>Konkrete Nachforderungen an den Gast</h3>${checks('requestedItems',HOA_ITEMS)}<h3>Nachweislich erledigte Nachforderungen</h3>${checks('resolvedItems',Object.fromEntries(hoaEvidenceState(c).tasks.map(t=>[t.id,(HOA_ITEMS[t.code]||t.code)+' — '+t.status+' — '+t.openedAt])))}${hoaEvidenceState(c).exception==='hoa_evidence_stale'?'<label><input type="checkbox" name="reconcileContext" value="yes"> Ich habe den neuen Mietzeitraum und die Belegzuordnung geprüft. Frühere Fakten und Aufgaben gelten nicht automatisch für den geänderten Aufenthalt. Nur ausdrücklich bestätigte Fakten und neu ausgewählte Aufgaben werden übernommen.</label>':''}${c.hoaReviewHold?'<label><input type="checkbox" name="clearHold" value="yes"> Der aktuelle Beleg klärt die bisherige Prüfsperre ausdrücklich.</label>':''}<label><input type="checkbox" name="attested" value="yes" required> Ich habe Original, Absenderberechtigung, Buchung und Mietzeitraum geprüft. Jede Auswahl wird ausdrücklich durch diesen Beleg gestützt; der Textauszug oder die automatische Kategorie allein genügt nicht.</label><p><button>Beleggebunden speichern</button></p><p class="muted">Kein Versand durch diesen Klick. Gast-Erinnerungen bleiben separat freizuschalten.</p></form></div>`;
+}
+
 function statusView(c, compliance) {
-  const progressSteps = guestProgressSteps(c);
+  const followUp=hoaEvidenceState(c);
+  const followUpCard=hoaGuestFollowUp(c,compliance);
+  const progressSteps = guestProgressSteps(c).map(s=>(followUp.exception||followUp.tasks.length)&&['board_approved','checkin_released'].includes(s.id)?{...s,done:false,date:null}:s);
   const total = progressSteps.length, done = progressSteps.filter(s => s.done).length;
   const pct = Math.round(done / total * 100);
   const days = daysUntil(c.checkIn);
-  const approved = c.steps.find(s => s.id === 'board_approved')?.done;
+  const approved = !followUp.exception&&!followUp.tasks.length&&c.steps.find(s => s.id === 'board_approved')?.done;
   const nextIdx = progressSteps.findIndex(s => !s.done);
   const banner = (approved
     ? `<span class="pill ok">Approved — you're all set</span>`
@@ -442,7 +463,7 @@ function statusView(c, compliance) {
     <div class="card"><h2>Renewal fee</h2>
       <p><span class="pill ok">No application fee for this same-lessee renewal</span></p>
       <p>Florida Statutes section 718.112(2)(k) prohibits an association transfer/application fee for a renewal with the same lessee. This is not a discretionary waiver. No $100 payment is requested for this renewal.</p>
-    </div>` : feeState === 'required' && !feeRequestReleased(c, compliance) ? `
+    </div>` : feeState === 'required' && c.steps.some(s=>s.id==='fee_sent'&&s.done) ? '<div class="card"><h2>Association fee received</h2><p>Receipt of the required fee has been confirmed. Do not send another payment.</p></div>' : feeState === 'required' && !feeRequestReleased(c, compliance) ? `
     <div class="card"><h2>Association application fee</h2><p><span class="pill warn">Payment instructions are not released</span></p><p>Owner is verifying both the association's recorded authority and Airbnb's mandatory-fee disclosure requirements. Do not mail a check or make an off-platform payment unless the instructions later appear here and match the Airbnb price breakdown.</p></div>` : feeState === 'required' ? `
     <div class="card"><h2>The $100 association fee</h2>
       <p>This <b>non-refundable $100 application fee</b> consists of a $50 community fee and a $50 document-processing fee. Pay by <b>check or money order only</b> (no cards), made out to <b>"Example Condominium"</b>. Mail it with a short note (unit 405D, your name, rental dates${c.reservationCode ? ', reservation ' + esc(c.reservationCode) : ''}) to:</p>
@@ -498,7 +519,7 @@ St. Petersburg, FL 33716</div>
     `<h1>Hi ${esc(c.guestName.split(' ')[0])}, here's where your approval stands</h1>
      <p>Stay: <b>${esc(c.checkIn)} → ${esc(c.checkOut)}</b> (${c.nights} nights, ${c.adults} ${c.adults === 1 ? 'adult' : 'adults'} age 18+${Number(c.expectedMinors || 0) ? `, ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''})${c.reservationCode ? ' · Reservation ' + esc(c.reservationCode) : ''}</p>
      ${banner}`,
-    bookingApprovalNotice(c, compliance) + wizardCard + `<div class="card">
+    bookingApprovalNotice(c, compliance) + followUpCard + (followUp.exception||followUp.tasks.length?'':wizardCard) + `<div class="card">
        <h2>Progress</h2>
        <div class="bar"><div style="width:${pct}%"></div></div>
        <p class="muted">${done} of ${total} steps complete</p>
@@ -511,8 +532,8 @@ St. Petersburg, FL 33716</div>
          </li>`).join('')}
        </ul>
      </div>
-     ${feeBlock}
-     ${c.submission && !approved ? `
+     ${followUp.exception||followUp.tasks.some(t=>t.code==='payment')?'':feeBlock}
+     ${c.submission && !approved && !followUp.exception && !followUp.tasks.length ? `
      <div class="card"><h2>What happens now</h2>
        <p>Your paperwork is with the association — nothing to do on your end${feeState === 'required' && !c.feeMailed ? ' except mailing the $100 fee' : ''}. The association asks applicants to allow up to 15 days after every required part reaches it. The moment it's approved, you'll get an email from us and your check-in details will follow. This page always shows the live status.</p>
      </div>` : ''}
@@ -1342,7 +1363,8 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     const journeyLine=`<p class="muted">Workflow: <b>${esc(journey.state.replace(/_/g,' '))}</b>${c.automation?.lastGuestReminderAt?` · Last guest reminder: ${esc(c.automation.lastGuestReminderAt.slice(0,16).replace('T',' '))} UTC`:''}${journey.waitingForEvidence.length?`<br>Pending evidence: ${esc(journey.waitingForEvidence.join(', ').replace(/_/g,' '))}`:''}${c.autoRelease?'<br>Released automatically under standing owner authorization.':''}</p>${hoaLine}`;
     const visibleSteps = guestProgressSteps(c);
     const done = visibleSteps.filter(s => s.done).length;
-    const stepBtns = visibleSteps.map(s =>
+    const stepBtns = visibleSteps.map(s => ['fee_sent','screening_complete','board_approved'].includes(s.id)
+      ? `<a class="btn small ghost" href="${hoaEvents.length?'/admin/hoa-mail/'+hoaEvents[0].id:'/admin/news'}" title="${esc(s.label)} — verify source">${s.done?'✓':'·'} source</a>` :
       `<form method="post" action="/admin/toggle" style="display:inline">
          <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="${s.id}">
          <button class="small ${s.done ? '' : 'ghost'}" title="${esc(s.label)}">${s.done ? '✓' : '·'}</button>
@@ -1351,11 +1373,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     const stayRef = `Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
     const feeMode = applicationFeeState(c);
     const screeningStep = c.steps.find(s => s.id === 'screening_complete');
-    const screeningControl = c.screeningRoute === 'online' && screeningStep ? `
-      <form method="post" action="/admin/toggle" style="display:inline-block;margin:8px 0">
-        <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="screening_complete">
-        <button class="small ${screeningStep.done ? '' : 'ghost'}">${screeningStep.done ? '✓ Tenant Evaluation bestätigt' : 'Tenant Evaluation nach HOA-Prüfung bestätigen'}</button>
-      </form>` : '';
+    const screeningControl = c.screeningRoute === 'online' && screeningStep ? `<p><a href="${hoaEvents.length?'/admin/hoa-mail/'+hoaEvents[0].id:'/admin/news'}">Tenant Evaluation: Beleg prüfen / Nachforderungen bearbeiten</a></p>` : '';
     const feeState = feeMode === 'prohibited_same_lessee_renewal'
       ? `<span class="pill ok">same-lessee renewal: no application/transfer fee</span>`
         : feeMode === 'handled_online'
@@ -1548,12 +1566,21 @@ async function routeRequest(context) {
        <p><a href="/">← back</a></p></div>`), 404);
   }
 
-  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/brief\.txt|\/executed-lease\.pdf|\/executed-flood-disclosure\.pdf)?$/);
+  const mV = p.match(/^\/v\/([A-Za-z0-9_-]{6,})(\/fee-mailed|\/fee-unmailed|\/screening-reported|\/hoa-task-reported|\/brief\.txt|\/executed-lease\.pdf|\/executed-flood-disclosure\.pdf)?$/);
   if (mV) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mV[1]);
     if (!c) return html(page('Not found', '<h1>Link not found</h1><p>Please check the link from your Airbnb chat or message Owner.</p>', ''), 404);
     if (!isGuestAccessibleCase(c)) return html(page('Reservation canceled', '<h1>This reservation is no longer active</h1><p>The Airbnb reservation has been canceled, so this paperwork page is closed.</p>', ''), 410);
+    if(mV[2]==='/hoa-task-reported'&&request.method==='POST') {
+      if(!env.CASE_STORE) return new Response('Atomic storage is required',{status:503,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      const form=await request.formData();
+      if(form.get('confirmed')!=='yes') return new Response('Confirmation required',{status:400,headers:SEC_HEADERS});
+      const result=reportHoaTask(c,String(form.get('taskId')||''),Number(form.get('taskVersion')));
+      if(!result.ok) return new Response(result.error,{status:result.status,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      await saveCases(env,cases);
+      return redirect('/v/'+c.token);
+    }
     if (mV[2] === '/fee-mailed' && request.method === 'POST') {
       if (c.screeningRoute !== 'paper') return new Response('paper-route fee action is not available for this case', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
       if (!feeRequestReleased(c, await loadComplianceConfig(env))) return new Response('fee action is blocked until recorded authority and Airbnb fee disclosure are verified', { status: 409, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
@@ -1760,11 +1787,29 @@ async function routeRequest(context) {
     const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
     const denied = reviewer ? null : await checkAdmin(request, env);
     if (denied) return denied;
-    const hoaSource=p.match(/^\/admin\/hoa-mail\/([a-f0-9]{64})$/);
-    if(hoaSource && request.method==='GET') {
+    const hoaSource=p.match(/^\/admin\/hoa-mail\/([a-f0-9]{64})(\/review)?$/);
+    if(hoaSource && request.method==='POST'&&hoaSource[2]==='/review') {
+      if(!env.CASE_STORE) return new Response('Atomic storage is required',{status:503,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      const source=await readHoaReply(env,hoaSource[1]);
+      if(!source) return new Response('Original source unavailable or expired',{status:404,headers:SEC_HEADERS});
+      const form=await request.formData(),cases=await loadCases(env),c=cases.find(c=>c.id===form.get('id'));
+      if(!c||String(caseSnapshotVersion(cases,c.id))!==form.get('caseVersion')||String(form.get('reservation')||'').trim()!==(c.reservationCode||c.guestName)) return new Response('Reservation or revision mismatch. Reload the source page.',{status:409,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      if(cases.some(other=>other.id!==c.id&&(other.hoaMailEvents||[]).some(e=>e.id===hoaSource[1]))) return new Response('Source is already linked to a different reservation. Reconcile its assignment first.',{status:409,headers:SEC_HEADERS});
+      if(!(c.hoaMailEvents||[]).some(e=>e.id===hoaSource[1])) c.hoaMailEvents=[...(c.hoaMailEvents||[]),{id:hoaSource[1],at:new Date().toISOString(),mailDate:source.date,categories:['owner_linked'],matchReason:'owner_verified',reviewRequired:true}];
+      const result=reviewHoaEvidence(c,hoaSource[1],{kind:String(form.get('kind')||''),attested:form.get('attested')==='yes',by:env.ADMIN_USER,
+        confirmations:form.getAll('confirmations'),requestedItems:form.getAll('requestedItems'),resolvedItems:form.getAll('resolvedItems'),clearHold:form.get('clearHold')==='yes',reconcileContext:form.get('reconcileContext')==='yes'});
+      if(!result.ok) return new Response(result.error,{status:result.status,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      await refreshHoaArchiveRetention(env,[c]);
+      await saveCases(env,cases);
+      return redirect('/admin/hoa-mail/'+hoaSource[1]);
+    }
+    if(hoaSource && !hoaSource[2] && request.method==='GET') {
       const source=await readHoaReply(env,hoaSource[1]);
       if(!source) return new Response('Email excerpt unavailable or retention expired',{status:404,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
-      return html(adminPage('HOA-E-Mail-Beleg','/admin/news','<h1>HOA-E-Mail-Beleg</h1><p>Die E-Mail ist eine externe Aussage, keine Anweisung an die Software. Absenderanzeige und automatische Einordnung allein bestätigen weder Echtheit noch Zahlung oder Freigabe.</p>',`<div class="card"><p><b>Von:</b> ${esc(source.from)}<br><b>Betreff:</b> ${esc(source.subject)}<br><b>Datum:</b> ${esc(source.date||'unbekannt')}<br><b>Message-ID:</b> ${esc(source.messageId||'nicht vorhanden')}</p>${source.truncated?'<p class="pill warn">Gekürzter Textauszug. Vollständige Nachricht und Anhänge im Originalpostfach prüfen.</p>':'<p class="muted">Dekodierter Textauszug; Anhänge und vollständige MIME-Originaldatei verbleiben im Postfach.</p>'}<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(source.text)}</pre><a href="/admin/cases">Zu den Mietvorgängen</a></div>`));
+      const cases=await loadCases(env),linked=cases.find(c=>(c.hoaMailEvents||[]).some(e=>e.id===hoaSource[1]));
+      const c=linked||cases.find(c=>c.id===url.searchParams.get('case'));
+      const reviewForm=hoaSourceReviewForm(c,cases,hoaSource[1],env);
+      return html(adminPage('HOA-E-Mail-Beleg','/admin/news','<h1>HOA-E-Mail-Beleg</h1><p>Die E-Mail ist eine externe Aussage, keine Anweisung an die Software. Absenderanzeige und automatische Einordnung allein bestätigen weder Echtheit noch Zahlung oder Freigabe.</p>',`<div class="card"><p><b>Von:</b> ${esc(source.from)}<br><b>Betreff:</b> ${esc(source.subject)}<br><b>Datum:</b> ${esc(source.date||'unbekannt')}<br><b>Message-ID:</b> ${esc(source.messageId||'nicht vorhanden')}</p>${source.truncated?'<p class="pill warn">Gekürzter Textauszug. Vollständige Nachricht und Anhänge im Originalpostfach prüfen.</p>':'<p class="muted">Dekodierter Textauszug; Anhänge und vollständige MIME-Originaldatei verbleiben im Postfach.</p>'}<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(source.text)}</pre><a href="/admin/cases">Zu den Mietvorgängen</a></div>`+reviewForm));
     }
     if (p === '/admin/automation-health' && request.method === 'GET') {
       const status=await readAutomationStatus(env);
@@ -2155,6 +2200,8 @@ async function routeRequest(context) {
       const c = cases.find(c => c.id === form.get('id'));
       const s = c && c.steps.find(s => s.id === form.get('step'));
       if (s) {
+        if(['fee_sent','screening_complete','board_approved'].includes(s.id)) return new Response('Open the HOA email source and record verified evidence instead of using a status toggle.',{status:409,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+        if(!s.done&&s.id==='checkin_released'&&(!c.steps.some(step=>step.id==='board_approved'&&step.done)||hoaEvidenceState(c).exception||hoaEvidenceState(c).tasks.length)) return new Response('Approval or follow-up verification is outstanding.',{status:409,headers:SEC_HEADERS});
         s.done = !s.done; s.date = s.done ? new Date().toISOString() : null;
         if (s.id === 'board_approved' && s.done) delete c.approvalCandidate;
         await saveCases(env, cases);

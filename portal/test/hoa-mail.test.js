@@ -122,3 +122,256 @@ test('IMAP failures redact login commands and transport deadlines close a stalle
   let closed=false;imap.sock={close:async()=>{closed=true;}};imap.readUntil=async()=>new Promise(()=>{});
   await assert.rejects(imap.cmd('NOOP'),/timeout/);assert.equal(closed,true);
 });
+
+// Synthetic evidence only: no actual inbox, payment or HOA decision is used.
+const evidenceModule=await import('../functions/lib/hoa-mail.js');
+const {planGuestJourney,guestReminderMessage}=await import('../functions/lib/journey.js');
+const {validateLiveSubmissionPrerequisites}=await import('../functions/lib/workflow.js');
+const evidenceNow=new Date('2026-09-05T12:00:00Z');
+const sourceId='a'.repeat(64),laterId='b'.repeat(64);
+function evidenceCase() {
+  return {...structuredClone(cases[0]),token:'evidencetoken123',pathType:'full',screeningRoute:'online',adults:1,nights:31,
+    createdAt:'2026-09-01T00:00:00Z',screeningReportedAt:'2026-09-04T00:00:00Z',
+    hoaMailEvents:[{id:sourceId,reviewRequired:true},{id:laterId,reviewRequired:true}],
+    steps:[{id:'screening_complete',done:true},{id:'fee_sent',done:false},{id:'board_approved',done:false}]};
+}
+const review=(c,id,input)=>evidenceModule.reviewHoaEvidence(c,id,{attested:true,by:'test-owner',kind:'confirmed',...input},evidenceNow);
+test('verified missing items reopen a submitted or externally completed application without losing the submission',()=>{
+  const c=evidenceCase();c.submission={sentAt:'2026-09-03',packageId:'keep-original'};c.reviewLockedAt='2026-09-03T00:00:00Z';
+  assert.equal(typeof evidenceModule.reviewHoaEvidence,'function');
+  assert.equal(review(c,sourceId,{requestedItems:['signatures']}).ok,true);
+  const p=planGuestJourney(c,evidenceNow);
+  assert.equal(p.state,'waiting_for_guest');assert.equal(p.guestTasks.length,1);
+  assert.match(p.guestTasks[0].text,/signature/i);assert.match(p.guestTasks[0].text,/Tenant Evaluation/);
+  assert.ok(p.nextReminderAt);assert.equal(c.submission.packageId,'keep-original');
+  assert.equal(c.steps.find(s=>s.id==='screening_complete').done,false);
+  assert.equal(c.steps.find(s=>s.id==='board_approved').done,false);
+  assert.equal(validateLiveSubmissionPrerequisites(c).ok,false);
+});
+test('payment, receipt, documents and completion are independent evidence, never inferred from each other',()=>{
+  const c=evidenceCase();c.steps.forEach(s=>s.done=false);
+  assert.equal(review(c,sourceId,{confirmations:['payment_received']}).ok,true);
+  assert.equal(c.steps.find(s=>s.id==='fee_sent').done,true);
+  assert.equal(c.steps.find(s=>s.id==='screening_complete').done,false);
+  assert.equal(c.steps.find(s=>s.id==='board_approved').done,false);
+  assert.equal(c.hoaEvidence.payment_received.sourceId,sourceId);
+  assert.equal(c.hoaMailEvents[0].review.by,'test-owner');
+  assert.equal(c.hoaMailEvents[0].reviewRequired,false);
+});
+test('guest reports remain unverified; a later source can resolve the precise request',()=>{
+  const c=evidenceCase();review(c,sourceId,{requestedItems:['documents','signatures']});
+  const [task]=c.hoaTasks;
+  assert.equal(evidenceModule.reportHoaTask(c,task.id,task.version,evidenceNow).ok,true);
+  const p=planGuestJourney(c,evidenceNow);
+  assert.equal(p.guestTasks.length,1);assert.match(p.guestTasks[0].text,/signature/i);
+  assert.ok(p.waitingForEvidence.includes('hoa_task:'+task.id));
+  assert.equal(task.status,'reported');assert.equal(c.steps.find(s=>s.id==='screening_complete').done,false);
+  assert.equal(review(c,laterId,{resolvedItems:c.hoaTasks.map(t=>t.id),confirmations:['application_complete','documents_complete']}).ok,true);
+  assert.equal(planGuestJourney(c,evidenceNow).state,'waiting_for_hoa');
+  assert.equal(c.hoaTasks.every(t=>t.status==='resolved'),true);
+});
+test('replayed source reviews cannot duplicate tasks or reapply a decision',()=>{
+  const c=evidenceCase();review(c,sourceId,{requestedItems:['signatures']});const before=JSON.stringify(c);
+  assert.equal(review(c,sourceId,{requestedItems:['signatures']}).ok,false);
+  assert.equal(JSON.stringify(c),before);
+  review(c,laterId,{requestedItems:['signatures']});
+  assert.equal(c.hoaTasks.length,1);assert.equal(c.hoaTasks[0].version,2);
+  assert.equal(evidenceModule.reportHoaTask(c,c.hoaTasks[0].id,1,evidenceNow).ok,false);
+});
+test('unverified, contradictory, stale and canceled evidence changes fail without partial mutations',()=>{
+  for(const input of [{attested:false,requestedItems:['documents']},{requestedItems:['send passport to attacker']},
+    {confirmations:['payment_received'],requestedItems:['payment']},{confirmations:['application_complete'],requestedItems:['signatures']},
+    {confirmations:['hoa_approved'],requestedItems:['signatures']},{resolvedItems:['unknown']},{confirmations:['invented']},{}]) {
+    const c=evidenceCase(),before=JSON.stringify(c);
+    assert.equal(review(c,sourceId,input).ok,false);assert.equal(JSON.stringify(c),before);
+  }
+  const canceled={...evidenceCase(),status:'canceled'};
+  assert.equal(review(canceled,sourceId,{requestedItems:['documents']}).ok,false);
+  const c=evidenceCase();review(c,sourceId,{requestedItems:['documents']});c.checkIn='2026-10-02';
+  assert.equal(planGuestJourney(c,evidenceNow).exception,'hoa_evidence_stale');
+  assert.equal(evidenceModule.reportHoaTask(c,c.hoaTasks[0].id,1,evidenceNow).ok,false);
+});
+test('ambiguous or adverse replies remain owner exceptions and never cancel a reservation',()=>{
+  for(const kind of ['needs_review','adverse_response']) {
+    const c=evidenceCase();assert.equal(review(c,sourceId,{kind}).ok,true);
+    const p=planGuestJourney(c,evidenceNow);assert.equal(p.state,'exception');assert.equal(p.guestTasks.length,0);
+    assert.notEqual(c.status,'canceled');assert.equal(c.steps.find(s=>s.id==='board_approved').done,false);
+    assert.equal(validateLiveSubmissionPrerequisites(c).ok,false);
+  }
+});
+test('task reminders contain fixed instructions, never email text or a second payment demand',()=>{
+  const c=evidenceCase();review(c,sourceId,{requestedItems:['payment','identity_documents']});
+  const authorized=planGuestJourney(c,evidenceNow),blocked=planGuestJourney(c,evidenceNow,{feeRequestAuthorized:false});
+  assert.equal(blocked.guestTasks.some(t=>t.includesPayment),false);
+  assert.ok(blocked.waitingForEvidence.includes('authorized_payment_instructions'));
+  const message=guestReminderMessage(authorized,'https://example.com');
+  assert.match(message.text,/Do not pay twice/);assert.match(message.text,/Do not email/);
+  assert.doesNotMatch(message.text,/HMDEMO|Mary Jane|manager@/);
+});
+
+const {CaseStore}=await import('../case-store/src/index.js');
+const {loadStoredCases,saveStoredCases}=await import('../functions/lib/storage.js');
+const {socketAttempts,resetSocketAttempts}=await import('cloudflare:sockets');
+async function evidenceEnvironment() {
+  const {env,values:legacy}=environment(),atomic=new Map([['snapshot',{revision:0,ids:[],versions:{}}]]);
+  let queue=Promise.resolve();
+  const storage={get:async k=>structuredClone(atomic.get(k)),put:async(k,v)=>atomic.set(k,structuredClone(v)),delete:async k=>atomic.delete(k),
+    transaction(fn){const task=queue.then(()=>fn(storage));queue=task.catch(()=>{});return task;}};
+  const actor=new CaseStore({storage},{});
+  Object.assign(env,{ADMIN_USER:'owner',ADMIN_PASSWORD:'test-only',CASE_STORE:{idFromName:n=>n,get:()=>({fetch:(url,options)=>actor.fetch(new Request(url,options))})}});
+  const c=evidenceCase();c.hoaMailEvents=[];c.steps.forEach(s=>s.done=false);
+  const source=await archiveHoaReply(env,mail(),analyseHoaReply(mail(),[c],allow),[c]);
+  c.hoaMailEvents.push({...source,reviewRequired:true});
+  const loaded=await loadStoredCases(env);loaded.push(c);await saveStoredCases(env,loaded);
+  const call=(path,form,auth='Basic '+btoa('owner:test-only'),origin='https://portal.example.test')=>onRequest({env,request:new Request('https://portal.example.test'+path,{method:form?'POST':'GET',headers:{Authorization:auth,Origin:origin},body:form?new URLSearchParams(form):undefined})});
+  const sourcePath='/admin/hoa-mail/'+source.id;
+  const version=async()=>((await (await call(sourcePath)).text()).match(/name="caseVersion" value="(\d+)"/)||[])[1];
+  const form=async extra=>({id:c.id,reservation:c.reservationCode,caseVersion:await version(),attested:'yes',kind:'confirmed',...extra});
+  return {env,legacy,call,source,sourcePath,version,form,c};
+}
+test('owner source review creates a guest task end to end without outbound delivery or approval',async()=>{
+  resetSocketAttempts();const {env,call,sourcePath,form}=await evidenceEnvironment();
+  assert.equal((await call(sourcePath+'/review',await form({requestedItems:'signatures'}))).status,303);
+  const [saved]=await loadStoredCases(env);assert.equal(saved.hoaTasks.length,1);
+  const response=await call('/v/'+saved.token,null,'');assert.equal(response.status,200);
+  const html=await response.text();assert.match(html,/Additional items requested/);assert.match(html,/missing signatures/i);
+  assert.doesNotMatch(html,/nothing to do on your end/);assert.doesNotMatch(html,/We received the application package/);
+  const task=saved.hoaTasks[0];
+  const report=await call('/v/'+saved.token+'/hoa-task-reported',{taskId:task.id,taskVersion:String(task.version),confirmed:'yes'},'');
+  assert.equal(report.status,303);assert.equal((await loadStoredCases(env))[0].hoaTasks[0].status,'reported');
+  assert.equal((await loadStoredCases(env))[0].submission,undefined);assert.equal(socketAttempts(),0);
+});
+test('source review requires owner auth, same origin, original verification, current reservation and atomic storage',async()=>{
+  const {env,call,sourcePath,form}=await evidenceEnvironment(),input=await form({requestedItems:'documents'});
+  assert.equal((await call(sourcePath+'/review',input,'')).status,401);
+  assert.equal((await call(sourcePath+'/review',input,'Bearer '+'x'.repeat(40))).status,401);
+  assert.equal((await call(sourcePath+'/review',input,undefined,'https://attacker.test')).status,403);
+  assert.equal((await call(sourcePath+'/review',{...input,attested:''})).status,400);
+  assert.equal((await call(sourcePath+'/review',{...input,reservation:'HMOTHER0002'})).status,409);
+  delete env.CASE_STORE;
+  assert.equal((await call(sourcePath+'/review',input)).status,503);
+});
+test('stale or repeated owner forms cannot overwrite subsequent evidence or booking changes',async()=>{
+  const {env,call,sourcePath,form}=await evidenceEnvironment(),input=await form({requestedItems:'documents'});
+  const changed=await loadStoredCases(env);changed[0].notes='keep';await saveStoredCases(env,changed);
+  assert.equal((await call(sourcePath+'/review',input)).status,409);
+  const current=await form({requestedItems:'documents'});
+  assert.equal((await call(sourcePath+'/review',current)).status,303);
+  assert.equal((await call(sourcePath+'/review',current)).status,409);
+  const [saved]=await loadStoredCases(env);assert.equal(saved.notes,'keep');assert.equal(saved.hoaTasks.length,1);
+});
+test('guest reports reject wrong task, stale version, cross-origin writes and canceled reservations',async()=>{
+  const {env,call,sourcePath,form,c}=await evidenceEnvironment();
+  await call(sourcePath+'/review',await form({requestedItems:'documents'}));
+  const [saved]=await loadStoredCases(env),task=saved.hoaTasks[0],path='/v/'+c.token+'/hoa-task-reported';
+  const input={taskId:task.id,taskVersion:'1',confirmed:'yes'};
+  assert.equal((await call(path,{...input,taskId:'wrong'},'')).status,409);
+  assert.equal((await call(path,{...input,taskVersion:'0'},'')).status,409);
+  assert.equal((await call(path,input,'','https://attacker.test')).status,403);
+  const changed=await loadStoredCases(env);changed[0].status='canceled';await saveStoredCases(env,changed);
+  assert.equal((await call(path,input,'')).status,410);
+});
+test('generic toggles cannot bypass source-backed payment, screening or approval verification',async()=>{
+  const {call,c}=await evidenceEnvironment();
+  for(const step of ['fee_sent','screening_complete','board_approved']) {
+    assert.equal((await call('/admin/toggle',{id:c.id,step})).status,409);
+  }
+});
+test('unreviewed adverse or missing-item mail blocks follow-up and delivery without changing official steps',()=>{
+  const c=evidenceCase();c.hoaMailEvents[0].categories=['missing_items'];
+  assert.equal(planGuestJourney(c,evidenceNow).exception,'hoa_source_review');
+  assert.equal(validateLiveSubmissionPrerequisites(c).ok,false);
+  assert.equal(c.steps.find(s=>s.id==='screening_complete').done,true);
+  assert.equal(review(c,sourceId,{requestedItems:['signatures']}).ok,true);
+  assert.equal(planGuestJourney(c,evidenceNow).state,'waiting_for_guest');
+});
+test('changed stay evidence can only be superseded with explicit re-verification and keeps its audit history',()=>{
+  const c=evidenceCase();review(c,sourceId,{confirmations:['payment_received'],requestedItems:['documents']});
+  c.steps.find(s=>s.id==='board_approved').done=true; // Legacy confirmation must not carry across changed dates.
+  c.checkIn='2026-10-02';
+  assert.equal(review(c,laterId,{confirmations:['payment_received']}).ok,false);
+  assert.equal(review(c,laterId,{reconcileContext:true,confirmations:['payment_received'],requestedItems:['signatures']}).ok,true);
+  assert.equal(c.hoaTasks[0].status,'superseded');assert.equal(c.hoaTasks[1].status,'open');
+  assert.equal(c.hoaMailEvents[0].review.confirmations[0],'payment_received');
+  assert.equal(c.steps.find(s=>s.id==='board_approved').done,false);
+  assert.equal(planGuestJourney(c,evidenceNow).state,'waiting_for_guest');
+});
+test('only explicit owner source verification grants HOA approval and does not imply payment',()=>{
+  const c=evidenceCase();
+  assert.equal(review(c,sourceId,{confirmations:['hoa_approved']}).ok,true);
+  assert.equal(c.steps.find(s=>s.id==='board_approved').done,true);
+  assert.equal(c.steps.find(s=>s.id==='fee_sent').done,false);
+  assert.equal(planGuestJourney(c,evidenceNow).state,'approved');
+});
+test('new adverse evidence invalidates approval but preserves delivery history and does not cancel',()=>{
+  const c=evidenceCase();review(c,sourceId,{confirmations:['hoa_approved']});
+  assert.equal(review(c,laterId,{kind:'adverse_response'}).ok,true);
+  assert.equal(c.steps.find(s=>s.id==='board_approved').done,false);
+  assert.equal(planGuestJourney(c,evidenceNow).exception,'hoa_adverse_response');
+  assert.equal(c.hoaEvidence.hoa_approved.sourceId,sourceId);assert.ok(c.hoaEvidence.hoa_approved.disputedAt);
+  assert.notEqual(c.status,'canceled');
+});
+test('explicit Tenant Evaluation sender configuration joins the existing inbox search without a wildcard',()=>{
+  assert.deepEqual(configuredHoaSenders({HOA_MAIL_SENDERS:allow[0],TENANT_EVALUATION_MAIL_SENDERS:'evaluation@example.test, invalid'}),[allow[0],'evaluation@example.test']);
+});
+test('verified manual source assignment survives subsequent mailbox polls',async()=>{
+  const {env,call,form,c,legacy}=await evidenceEnvironment();
+  const msg=decodeMessage(rawMessage('Application update','We received the application package.','manual-source'));
+  const source=await archiveHoaReply(env,msg,analyseHoaReply(msg,[c],allow),[c]);
+  const page='/admin/hoa-mail/'+source.id+'?case='+c.id;
+  const html=await (await call(page)).text();
+  const input=await form({confirmations:'application_received'});
+  input.caseVersion=html.match(/name="caseVersion" value="(\d+)"/)[1];
+  assert.equal((await call('/admin/hoa-mail/'+source.id+'/review',input)).status,303);
+  const imap={open:async()=>{},close:async()=>{},searchRaw:async q=>q.includes('airbnb.com')?[]:[1],
+    fetchMessage:async()=>rawMessage(msg.subject,msg.text,'manual-source')};
+  await pollMail(env,{imap,notify:async()=>true});
+  const news=JSON.parse(legacy.get('hoa-news'));
+  assert.equal(news[0].caseId,c.id);assert.equal(news[0].reviewRequired,false);
+});
+test('reminder worker uses verified tasks, respects reported completion and never sends to HOA',async()=>{
+  const {env,call,sourcePath,form}=await evidenceEnvironment();
+  env.REQUIRE_ATOMIC_CASES='yes';env.AUTO_GUEST_REMINDERS='yes';env.PORTAL_ORIGIN='https://example.com';
+  await call(sourcePath+'/review',await form({requestedItems:'signatures'}));
+  const cases=await loadStoredCases(env);cases[0].wizard={adults:[{email:'guest@example.test'}]};await saveStoredCases(env,cases);
+  const {runGuestReminders}=await import('../functions/lib/guest-reminders.js');
+  const sent=[];
+  assert.equal((await runGuestReminders(env,evidenceNow,async(_env,msg)=>sent.push(msg))).sent,1);
+  assert.deepEqual(sent[0].to,['guest@example.test']);assert.deepEqual(sent[0].cc,[]);assert.match(sent[0].text,/missing signatures/);
+  const [c]=await loadStoredCases(env),task=c.hoaTasks[0];
+  await call('/v/'+c.token+'/hoa-task-reported',{taskId:task.id,taskVersion:String(task.version),confirmed:'yes'},'');
+  assert.equal((await runGuestReminders(env,new Date('2026-09-10'),async(_env,msg)=>sent.push(msg))).sent,0);
+  assert.equal(sent.length,1);
+});
+test('owner watchdog cannot silently skip an approved case with a new unreviewed HOA problem',async()=>{
+  const {computeAlerts}=await import('../cron/src/index.js');
+  const c=evidenceCase();c.checkIn='2026-09-12';c.steps.push({id:'checkin_released',done:true});c.steps.find(s=>s.id==='board_approved').done=true;
+  c.hoaMailEvents[0].categories=['missing_items'];
+  const alerts=computeAlerts([c],evidenceNow);
+  assert.ok(alerts.some(a=>a.key==='hoaEvidenceReview'));
+});
+test('synthetic source-to-approval lifecycle keeps each confirmation separate and performs no real delivery',async()=>{
+  resetSocketAttempts();const {env,call,sourcePath,form,c}=await evidenceEnvironment();
+  await call(sourcePath+'/review',await form({requestedItems:'signatures'}));
+  const follow=async(text,input)=>{
+    const all=await loadStoredCases(env),current=all[0],msg=mail({text,messageId:'<'+crypto.randomUUID()+'@hoa.example.test>'});
+    const source=await archiveHoaReply(env,msg,analyseHoaReply(msg,all,allow),all);
+    current.hoaMailEvents.push({...source});await saveStoredCases(env,all);
+    const path='/admin/hoa-mail/'+source.id;
+    const page=await (await call(path)).text(),version=page.match(/name="caseVersion" value="(\d+)"/)[1];
+    const response=await call(path+'/review',{id:c.id,reservation:c.reservationCode,caseVersion:version,attested:'yes',kind:'confirmed',...input});
+    assert.equal(response.status,303);return (await loadStoredCases(env))[0];
+  };
+  let [saved]=await loadStoredCases(env);const task=saved.hoaTasks[0];
+  await call('/v/'+c.token+'/hoa-task-reported',{taskId:task.id,taskVersion:'1',confirmed:'yes'},'');
+  saved=await follow('Requested signature accepted. Official application complete.',{resolvedItems:task.id,confirmations:'application_complete'});
+  assert.equal(saved.steps.find(s=>s.id==='screening_complete').done,true);
+  assert.equal(saved.steps.find(s=>s.id==='fee_sent').done,false);
+  assert.equal(saved.steps.find(s=>s.id==='board_approved').done,false);
+  saved=await follow('Required fee received.',{confirmations:'payment_received'});
+  assert.equal(saved.steps.find(s=>s.id==='board_approved').done,false);
+  saved=await follow('Board approval granted for the identified stay.',{confirmations:'hoa_approved'});
+  assert.equal(planGuestJourney(saved,evidenceNow).state,'approved');
+  assert.match(await (await call('/v/'+c.token,null,'')).text(),/Approved — you&#39;re all set|Approved — you're all set/);
+  assert.equal(saved.submission,undefined);assert.equal(socketAttempts(),0);
+});

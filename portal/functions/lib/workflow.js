@@ -2,6 +2,7 @@
 // Guest actions may prepare a package, but only an authenticated owner action
 // may submit it or confirm an approval.
 import { isAnnualRental, isSameLesseeRenewal } from './compliance.js';
+import {hoaEvidenceState} from './hoa-evidence.js';
 
 export function validateSignaturePng(value) {
   try {
@@ -108,6 +109,9 @@ export function validateLiveSubmissionPrerequisites(c) {
   }
   const steps = (c && c.steps) || [];
   const missing = required.filter(id => !steps.some(step => step.id === id && step.done));
+  const followUp=hoaEvidenceState(c||{});
+  if(followUp.exception) missing.push(followUp.exception);
+  if(followUp.tasks.length) missing.push('hoa_follow_up');
   return { ok: missing.length === 0, missing };
 }
 

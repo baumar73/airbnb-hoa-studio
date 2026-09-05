@@ -1,5 +1,6 @@
 import {parseDates} from './parse.js';
 import {encryptPrivateJson,decryptPrivateJson} from './storage.js';
+export {reviewHoaEvidence,reportHoaTask} from './hoa-evidence.js';
 
 const DAY=86400000;
 const clean=value=>String(value||'').normalize('NFKC').replace(/\s+/g,' ').trim().toLowerCase();
@@ -10,7 +11,7 @@ function senderAddress(from) {
   return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(address)?address:'';
 }
 export function configuredHoaSenders(env) {
-  return [...new Set(String(env.HOA_MAIL_SENDERS||'').split(',').map(s=>s.trim().toLowerCase()).filter(s=>s&&s===senderAddress(s)))];
+  return [...new Set([env.HOA_MAIL_SENDERS,env.TENANT_EVALUATION_MAIL_SENDERS].filter(Boolean).join(',').split(',').map(s=>s.trim().toLowerCase()).filter(s=>s&&s===senderAddress(s)))];
 }
 export function currentReply(text) {
   // Classify only the new prose, never quoted approvals or forwarded history.
