@@ -44,3 +44,40 @@ test('a reachable reviewer is not healthy if it never completes a scan',async()=
   assert.equal((await reviewBacklog(env,[],new Date('2026-09-05T14:00Z'))).unhealthy,true);
   await assert.rejects(()=>recordReviewerHeartbeat(env,'private data',now));
 });
+test('corrupt or invalid reviewer heartbeat remains unhealthy and recovers on a completed scan',async()=>{
+  for(const corrupt of ['{','[]','true','null',JSON.stringify({state:'unknown',seenAt:now.toISOString()}),JSON.stringify({state:'completed',seenAt:'2999-01-01T00:00:00Z',lastCompletedAt:'2999-01-01T00:00:00Z'}),JSON.stringify({state:'completed',seenAt:{secret:'private'}})]) {
+    const values=new Map([['reviewer-heartbeat-v1',corrupt]]);
+    const env={CASES:{get:async k=>values.get(k)||null,put:async(k,v)=>values.set(k,v)}};
+    const before=await reviewBacklog(env,[],now);
+    assert.equal(before.offline,true);assert.equal(before.unhealthy,true);
+    await recordReviewerHeartbeat(env,'started',now);
+    assert.equal((await reviewBacklog(env,[],now)).noProgress,true);
+    await recordReviewerHeartbeat(env,'completed',now);
+    assert.equal((await reviewBacklog(env,[],now)).unhealthy,false);
+    assert.doesNotMatch(values.get('reviewer-heartbeat-v1'),/private|secret|2999/);
+  }
+});
+test('malformed completion times cannot confer progress or escape into status diagnostics',async()=>{
+  for(const completed of [{private:'never-publish'},'not-a-date','2999-01-01T00:00:00Z','2026-09-05T12:01:00Z']) {
+    const values=new Map([['reviewer-heartbeat-v1',JSON.stringify({state:'completed',seenAt:now.toISOString(),lastCompletedAt:completed,extra:'never-publish'})]]);
+    const env={CASES:{get:async k=>values.get(k)||null,put:async(k,v)=>values.set(k,v)}};
+    const status=await reviewBacklog(env,[],now);
+    assert.equal(status.offline,false);assert.equal(status.noProgress,true);assert.equal(status.unhealthy,true);
+    assert.doesNotMatch(JSON.stringify(status),/never-publish|2999/);
+    await recordReviewerHeartbeat(env,'failed',now);
+    assert.equal(JSON.parse(values.get('reviewer-heartbeat-v1')).lastCompletedAt,undefined);
+  }
+});
+test('reviewer storage failure stays observable rather than becoming a healthy heartbeat',async()=>{
+  const env={CASES:{get:async()=>{throw Error('synthetic store outage');},put:async()=>assert.fail('must not write through a failed read')}};
+  await assert.rejects(reviewBacklog(env,[],now),/synthetic store outage/);
+  await assert.rejects(recordReviewerHeartbeat(env,'completed',now),/synthetic store outage/);
+});
+test('valid last completion survives start/failure updates without extending its timestamp',async()=>{
+  const values=new Map();const env={CASES:{get:async k=>values.get(k)||null,put:async(k,v)=>values.set(k,v)}};
+  await recordReviewerHeartbeat(env,'completed',now);
+  await recordReviewerHeartbeat(env,'started',new Date(+now+30*60000));
+  await recordReviewerHeartbeat(env,'failed',new Date(+now+60*60000));
+  assert.equal(JSON.parse(values.get('reviewer-heartbeat-v1')).lastCompletedAt,now.toISOString());
+  assert.equal((await reviewBacklog(env,[],new Date(+now+91*60000))).noProgress,true);
+});

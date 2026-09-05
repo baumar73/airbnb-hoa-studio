@@ -154,3 +154,13 @@ project knowledge through revisioned synchronization. Do
 not bulk-import real guest records during connection diagnostics. Never
 initialize a second brain because a local CLI is absent.
 Any Codex/client restart or consequential live scope change must be confirmed.
+# Reviewer heartbeat recovery (local verification, 2026-09-05)
+
+Malformed diagnostic JSON or an invalid heartbeat shape is treated as missing,
+not as a healthy reviewer and not as a permanent blocker for subsequent scans.
+Only known states and valid timestamps enter the status response. Timestamps
+more than five minutes ahead of the inspecting clock are rejected; a completion
+later than its heartbeat is not credited as progress. The next completed scan
+repairs the record. Started/failed scans preserve the last genuine completion
+without advancing it. Actual storage failures still fail visibly. Review leases,
+case data, package release flags and live services are not altered by this repair.

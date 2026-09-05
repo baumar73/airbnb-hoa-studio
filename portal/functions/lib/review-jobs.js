@@ -7,6 +7,20 @@ const time=value=>Date.parse(value||'')||0;
 const delay=attempt=>Math.min(360,5*2**Math.min(7,Math.max(0,attempt-1)))*MINUTE;
 const same=(c,context)=>c.reviewJob?.reviewHash===c.reviewHash&&c.reviewJob?.contextHash===context;
 
+async function readReviewerHeartbeat(env,now) {
+  // Diagnostic data must not prevent the reviewer from reporting recovery.
+  // Storage/network failures still propagate; only malformed contents become
+  // absent. Keep an explicit allowlist so arbitrary persisted text stays private.
+  const raw=await env.CASES.get(HEARTBEAT);
+  let value;
+  try {value=JSON.parse(raw||'null');} catch {return null;}
+  if(!value||Array.isArray(value)||typeof value!=='object'||!['started','completed','failed'].includes(value.state))return null;
+  const stamp=s=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(s)&&Number.isFinite(Date.parse(s))&&Date.parse(s)<=now.getTime()+5*MINUTE?new Date(s).toISOString():undefined;
+  const seenAt=stamp(value.seenAt),completed=stamp(value.lastCompletedAt);
+  if(!seenAt)return null;
+  return {state:value.state,seenAt,lastCompletedAt:completed&&Date.parse(completed)<=Date.parse(seenAt)?completed:undefined};
+}
+
 export function completedReview(c,context) {
   return !!c.preparedPackage && c.aiReview?.reviewHash===c.reviewHash &&
     c.aiReview?.reviewContextHash===context && c.aiReview?.packageId===c.preparedPackage.id &&
@@ -33,14 +47,14 @@ export function failReview(c,now=new Date()) {
 }
 export async function recordReviewerHeartbeat(env,state,now=new Date()) {
   if(!['started','completed','failed'].includes(state)) throw new Error('invalid reviewer state');
-  const previous=JSON.parse(await env.CASES.get(HEARTBEAT)||'null');
+  const previous=await readReviewerHeartbeat(env,now);
   const status={state,seenAt:now.toISOString(),lastCompletedAt:state==='completed'?now.toISOString():previous?.lastCompletedAt};
   // Diagnostics only, never a lease or delivery authorization.
   await env.CASES.put(HEARTBEAT,JSON.stringify(status));
   return status;
 }
 export async function reviewBacklog(env,cases,now=new Date()) {
-  const heartbeat=JSON.parse(await env.CASES.get(HEARTBEAT)||'null');
+  const heartbeat=await readReviewerHeartbeat(env,now);
   const owner=await getEncryptedSecret(env,'owner-signature-png');
   const compliance=JSON.parse(await env.CASES.get('compliance-config')||'{}');
   let pending=0,urgent=0,stalled=0;

@@ -20,7 +20,10 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
   deaktivierte Automatik und neue Wartefristen werden vor SMTP erneut geprüft.
   Gelöschte Fälle oder verlorene Versandreservierungen gelten nach SMTP nicht als
   gespeicherter Erfolg. Zwei neue Tests mit acht Ausfallvarianten; 260 JS-Tests.
-- [ ] Prüfdienst: beschädigte diagnostische Statusdaten sicher ersetzen.
+- [x] Prüfdienst: beschädigte, strukturell ungültige oder weit in der Zukunft
+  liegende Heartbeats gelten als fehlend/ungesund und können vom nächsten Lauf
+  ersetzt werden. Ungeprüfte Statuswerte werden nicht veröffentlicht; echte
+  Speicherfehler bleiben sichtbar. Vier neue Tests, insgesamt 264 JS-Tests.
 - [ ] Wiederanlauf: dauerhafte Speicherung mit einem lokalen Runtime-Neustart prüfen.
 
 Diese Teilaufgaben belegen lokale Technik, keine Live-Abnahme.
