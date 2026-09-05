@@ -37,10 +37,25 @@ It must be represented in the activation audit; it does not assert HOA approval.
   and a read-only identity call. `scripts/gbrain_mcp_bridge.py`, the credential-free
   configuration example and `GBRAIN_MCP.md` make this setup reproducible. No
   server restart, database initialization or brain-content write occurred. A fresh
-  native Codex app-server discovered all 24 tools; the already-running conversation
-  still needs its tool inventory refreshed.
-  Protected guest-source sync and scoped operations/repair boundaries in
-  `HYBRID_OPERATIONS.md` remain plans, not implemented synchronization.
+  native Codex app-server discovered all 24 tools. Following client refresh this
+  active conversation now exposes the tools and direct MCP authentication passed.
+- `functions/lib/knowledge-export.js`, the dedicated `/api/knowledge/changes`
+  route and the atomic store's private feed prepare a versioned guest-knowledge
+  export with independent bearer access, stable adult slots, metadata-only HOA
+  references, persisted stream identity, bounded pagination and durable deletion
+  markers. Guest saves never wait for gbrain or send mail. Signatures, identity
+  details and guest bearer links are excluded; guest identities and useful status
+  ARE included. Held/expired records are withheld from the search projection.
+  This is a local, disabled-by-default source interface, NOT a deployed sync.
+  `GBRAIN_SYNC.md` records the remaining protected-source permissions, destination
+  version fencing, expiry/deletion and live activation prerequisites.
+- User clarification: keep Instant Book, collect HOA approval after booking,
+  distinguish a verified refusal/cancellation exception from merely pending
+  approval. The user subsequently replaced the 14-day notice proposal with
+  SEVEN days for NEW bookings, supported by Airbnb's native settings. Authenticated
+  listing inspection confirmed it was already at least seven days, with shorter-
+  notice requests OFF. No live setting, price, reservation or Instant Book change
+  was performed. Approval remains separately required.
 
 - `functions/lib/parse.js`: retain complete guest names; normalize lookup names,
   including apostrophes, accents and suffixes, without truncating middle names.
@@ -146,7 +161,7 @@ the parser fix does not reconstruct missing names from nothing.
 
 ## Verification
 
-- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 132 tests pass.
+- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 148 tests pass.
   Seven new regressions cover stale browser revisions/changed booking dates,
   retained form inputs on conflict and connection loss, stage-specific failure,
   recovery, alert cooldown, stranded claims, safe counters and authenticated
@@ -167,10 +182,17 @@ the parser fix does not reconstruct missing names from nothing.
   credential interpolation and uncertain-write/no-replay/error-redaction behavior.
   Both direct stdio and native Codex discovery connected to existing gbrain;
   only authenticated read checks ran, with no brain-content writes.
+- Sixteen new knowledge-export regressions cover allowlisted guest data, original
+  adult slots, evidence distinctions, opt-in/dedicated authentication, no delivery
+  side effects, cursor pagination and replay, concurrent updates, deletion markers,
+  corrupt ciphertext, no KV fallback, retention and controlled failures.
+  Booking-active, HOA-pending/approved and actual cancellation are separate facts;
+  an adverse HOA email is a review flag and never cancels an Airbnb booking.
 - `node scripts/test_atomic_runtime.mjs`: passes in local Miniflare/workerd with
   SQLite Durable Objects, synthetic encrypted records and no cloud account.
   Verified explicit import, independent concurrent writes, same-case conflict,
-  encryption at rest, multi-chunk immutable archive roundtrip and no public API.
+  encryption at rest, multi-chunk immutable archive roundtrip, knowledge-feed
+  pagination/deletion checkpoints and no public API.
 - `npm run check`: passes.
 - `WRANGLER_LOG_PATH=/private/tmp/isla-studio-build.log npm run build`: passes.
 - Wrangler dry-run builds for cron and case-store: pass; nothing deployed.

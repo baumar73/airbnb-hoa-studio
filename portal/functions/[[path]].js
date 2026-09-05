@@ -17,6 +17,7 @@ import {planGuestJourney} from './lib/journey.js';
 import {readAutomationStatus,automationHealth} from './lib/automation-health.js';
 import {readHoaReply} from './lib/hoa-mail.js';
 import {completedReview,reviewAvailable,claimReview,ownsReview,failReview,recordReviewerHeartbeat} from './lib/review-jobs.js';
+import {knowledgeExportResponse} from './lib/knowledge-export.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -1464,6 +1465,9 @@ async function routeRequest(context) {
     return new Response(ok?'ok':'unavailable',{status:ok?200:503,headers:{'Content-Type':'text/plain',...SEC_HEADERS,'Cache-Control':'no-store'}});
   }
   if (p.startsWith('/forms/') || p === '/robots.txt' || p === '/llms.txt' || p === '/sitemap.xml' || p === '/manifest.webmanifest' || p === '/favicon.svg') return env.ASSETS.fetch(request);
+
+  // Dedicated replica feed: no admin, reviewer or legacy read-token fallback.
+  if(p.startsWith('/api/knowledge/'))return knowledgeExportResponse(request,env,SEC_HEADERS);
 
   // Read-only API for Hermes/GBrain — GET only, token-gated, no mutations possible.
   if (p.startsWith('/api/ro/')) {

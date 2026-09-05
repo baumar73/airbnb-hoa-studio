@@ -60,17 +60,19 @@ On 2026-09-05, authenticated initialization, the 24-tool allowlist, blocked admi
 calls and read-only `whoami` worked end-to-end through SSH against the existing
 gbrain 0.46.35.0. Local Codex MCP configuration was registered and parsed by the
 installed Codex CLI. A fresh native Codex app-server diagnostic also connected
-and discovered all 24 tools. The active conversation's already-loaded inventory
-is not represented as refreshed by these checks. No brain content was written.
+and discovered all 24 tools. After client refresh the active conversation also
+exposed all 24 tools and a direct MCP `whoami` call succeeded. No brain content
+was written.
 
 `test/test_gbrain_mcp_bridge.py` runs offline with synthetic credentials, mocked
 HTTP and no SSH. It covers alias/quoting safety, parameter validation, tool and
 method filtering, session forwarding, JSON/SSE handling, size limits, response
 IDs, redirect/proxy refusal and uncertain-write/no-replay/error-redaction behavior.
 
-Guest-source isolation, revisioned portal→gbrain synchronization, deletion and
-retention, scoped portal operations and audited repair/deployment authority
-remain separate follow-up work described in `HYBRID_OPERATIONS.md`.
+The portal's revisioned export is now prepared locally; `GBRAIN_SYNC.md` describes
+the tested interface and the still-unimplemented destination contract. Guest-source
+isolation, live synchronization, destination deletion/retention, scoped operations
+and audited repair/deployment authority remain follow-up work.
 
 Rollback: disable/remove ONLY the new `[mcp_servers.gbrain]` configuration and
 its tool subsections, then refresh the client. Do not remove existing Hermes

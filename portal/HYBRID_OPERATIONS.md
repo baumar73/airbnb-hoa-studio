@@ -108,11 +108,14 @@ Verified on 2026-09-05: the existing Hermes VM has active gbrain HTTP MCP and
 Hermes gateway services. Direct Codex MCP access is now registered locally through
 the existing SSH connection; authenticated initialization, the filtered 24-tool
 inventory and `whoami` succeeded end-to-end. A fresh native Codex app-server also
-connected and discovered all 24 tools. The active conversation's tool
-inventory has not yet been observed refreshed. No server installation, token/scope
+connected and discovered all 24 tools. After client refresh, this active Codex
+session also exposed all 24 tools and authenticated `whoami` succeeded directly.
+No server installation, token/scope
 change, content import or service restart occurred. Actual host details and
 credentials stay outside this sanitized repository. `GBRAIN_MCP.md` documents the
-reusable bridge and its client-side limits; guest-source sync is NOT implemented.
+reusable bridge and its client-side limits. The protected revisioned portal export
+is now implemented locally (`GBRAIN_SYNC.md`); the destination writer, isolated
+source, expiry/deletion enforcement and live guest synchronization are NOT active.
 
 Proposed split, not yet integrated:
 
@@ -145,8 +148,7 @@ Proposed split, not yet integrated:
   must not grant production deploy, shell-on-server, signature or sending authority.
   Preserve unrelated user edits. Production activation remains separately approved.
 
-Next integration work: verify native client tool availability after refresh,
-establish dedicated source permissions, test scoped access with synthetic guest
+Next integration work: establish dedicated source permissions, test scoped access with synthetic guest
 records and deletion replay, then connect the user-requested guest source and
 project knowledge through revisioned synchronization. Do
 not bulk-import real guest records during connection diagnostics. Never

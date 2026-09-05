@@ -11,6 +11,7 @@ export class CaseStore {
 
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    if(path==='/knowledge-changes') return this.knowledgeChanges(request);
     if(path==='/packages') return this.packages(request);
     if (path === '/initialize' && request.method === 'POST') {
       // Explicit one-time import, usable only during a confirmed writer pause.
@@ -64,6 +65,43 @@ export class CaseStore {
       }
       await tx.put('snapshot',{revision,versions:current.versions,ids:[...records.keys()]});
       return response({revision});
+    });
+  }
+
+  async knowledgeChanges(request) {
+    if(request.method!=='GET') return response({error:'read-only'},405);
+    const url=new URL(request.url),rawLimit=url.searchParams.get('limit')??'50';
+    if(!/^\d+$/.test(rawLimit)||Number(rawLimit)<1||Number(rawLimit)>100) return response({error:'invalid limit'},400);
+    let cursor=null;
+    const raw=url.searchParams.get('cursor');
+    if(raw!==null) {
+      try {
+        if(raw.length>512||!/^[A-Za-z0-9_-]+$/.test(raw)) throw new Error();
+        cursor=JSON.parse(atob(raw.replace(/-/g,'+').replace(/_/g,'/')));
+        if(!Array.isArray(cursor)||cursor.length!==3||typeof cursor[0]!=='string'||! /^[a-f0-9-]{36}$/.test(cursor[0])||!Number.isSafeInteger(cursor[1])||cursor[1]<0||!(cursor[2]===''||cursor[2]==='~'||validId(cursor[2]))) throw new Error();
+      } catch {return response({error:'invalid cursor'},400);}
+    }
+    return this.storage.transaction(async tx=>{
+      const snapshot=await tx.get('snapshot');
+      if(!snapshot) return response({error:'atomic store not initialized'},503);
+      // Persist only a non-personal stream identity, never a second guest queue.
+      // The existing version tombstones are the durable source of deletions.
+      let epoch=await tx.get('knowledge-epoch');
+      if(!epoch) {epoch=crypto.randomUUID();await tx.put('knowledge-epoch',epoch);}
+      if(cursor&&(cursor[0]!==epoch||cursor[1]>snapshot.revision)) return response({error:'checkpoint requires reconciliation'},409);
+      const after=cursor||[epoch,0,''];
+      const entries=Object.entries(snapshot.versions).filter(([id,version])=>version>after[1]||(version===after[1]&&id>after[2]))
+        .sort(([a,av],[b,bv])=>av-bv||(a<b?-1:a>b?1:0));
+      const selected=entries.slice(0,Number(rawLimit)),active=new Set(snapshot.ids),changes=[];
+      for(const [id,revision] of selected) {
+        const value=active.has(id)?await tx.get('case:'+id):null;
+        if(active.has(id)&&!value) return response({error:'incomplete case snapshot'},503);
+        changes.push({id,revision,value});
+      }
+      const hasMore=entries.length>selected.length,last=selected.at(-1);
+      const next=hasMore?[epoch,last[1],last[0]]:[epoch,snapshot.revision,'~'];
+      const nextCursor=btoa(JSON.stringify(next)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      return response({protocol:1,epoch,throughRevision:snapshot.revision,changes,hasMore,nextCursor});
     });
   }
 

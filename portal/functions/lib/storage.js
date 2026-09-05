@@ -97,6 +97,21 @@ export async function loadStoredCases(env) {
   return Promise.all(stored.map(c => openWizard(c, env)));
 }
 
+export async function loadKnowledgeChanges(env,{cursor,limit}={}) {
+  // This interface must NEVER fall back to unversioned KV snapshots.
+  if(!env.CASE_STORE) throw new CaseStoreError('CASE_STORE_UNAVAILABLE','Atomic case storage is required');
+  const url=new URL('https://case-store/knowledge-changes');
+  if(cursor!==null&&cursor!==undefined)url.searchParams.set('cursor',cursor);
+  if(limit!==null&&limit!==undefined)url.searchParams.set('limit',limit);
+  const res=await caseStore(env).fetch(url.toString(),{method:'GET'});
+  if(res.status===400)throw new CaseStoreError('CASE_EXPORT_INPUT','Invalid export checkpoint');
+  if(res.status===409)throw new CaseStoreError('CASE_EXPORT_RESET','Export requires reconciliation');
+  if(!res.ok)throw new CaseStoreError('CASE_STORE_UNAVAILABLE','Export unavailable');
+  const page=await res.json();
+  page.changes=await Promise.all(page.changes.map(async c=>({...c,value:c.value?await openWizard(c.value,env):null})));
+  return page;
+}
+
 export async function saveStoredCases(env, cases) {
   const store=caseStore(env);
   if (store) {
