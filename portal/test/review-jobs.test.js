@@ -21,6 +21,16 @@ test('failures back off but a changed revision can proceed; cancellation cannot'
   assert.equal(claimReview(c,'new',now).attempt,1);
   c.status='canceled';assert.equal(reviewAvailable(c,'new',new Date('2027-01-01')),false);
 });
+test('invalid retry counters cannot concatenate, overflow or poison retry dates',()=>{
+  for(const attempt of ['2',-1,1.5,null,{},NaN,Infinity,Number.MAX_VALUE]) {
+    const c=fixture();c.reviewJob={reviewHash:c.reviewHash,contextHash:'context',attempt};
+    assert.equal(claimReview(c,'context',now).attempt,1);
+    c.reviewJob.attempt=attempt;failReview(c,now);
+    assert.equal(c.reviewJob.nextAttemptAt,'2026-09-05T12:05:00.000Z');
+  }
+  const c=fixture();c.reviewJob={reviewHash:c.reviewHash,contextHash:'context',attempt:100000};
+  assert.equal(claimReview(c,'context',now).attempt,100000);
+});
 test('completed reviews include exact package hash and are not queued again',()=>{
   const c=fixture();c.preparedPackage={id:'p',packageHash:'bytes'};
   c.aiReview={reviewHash:'content',reviewContextHash:'context',packageId:'p',packageHash:'bytes'};

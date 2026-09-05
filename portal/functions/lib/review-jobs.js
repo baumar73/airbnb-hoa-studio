@@ -5,7 +5,8 @@ import {isValidISODate} from './workflow.js';
 const MINUTE=60000;
 const HEARTBEAT='reviewer-heartbeat-v1';
 const time=value=>Date.parse(value||'')||0;
-const delay=attempt=>Math.min(360,5*2**Math.min(7,Math.max(0,attempt-1)))*MINUTE;
+const attempts=value=>Number.isSafeInteger(value)&&value>=0?Math.min(100000,value):0;
+const delay=attempt=>Math.min(360,5*2**Math.min(7,Math.max(0,attempts(attempt)-1)))*MINUTE;
 const same=(c,context)=>c.reviewJob?.reviewHash===c.reviewHash&&c.reviewJob?.contextHash===context;
 
 async function readReviewerHeartbeat(env,now) {
@@ -33,7 +34,7 @@ export function reviewAvailable(c,context,now=new Date()) {
 }
 export function claimReview(c,context,now=new Date()) {
   if(!reviewAvailable(c,context,now)) return null;
-  const attempt=same(c,context)?Math.min(100000,(c.reviewJob.attempt||0)+1):1;
+  const attempt=same(c,context)?Math.min(100000,attempts(c.reviewJob.attempt)+1):1;
   const leaseUntil=new Date(now.getTime()+15*MINUTE).toISOString();
   c.reviewJob={state:'claimed',token:crypto.randomUUID(),reviewHash:c.reviewHash,contextHash:context,attempt,
     claimedAt:now.toISOString(),leaseUntil,nextAttemptAt:new Date(time(leaseUntil)+delay(attempt)).toISOString()};
