@@ -33,7 +33,11 @@ function setup() {
 }
 async function seed(env,count=1) {
   const cases=await loadStoredCases(env);
-  for(let i=0;i<count;i++)cases.push({...fixture(String.fromCharCode(97+i)),reservationCode:'HMTEST00000'+i});
+  for(let i=0;i<count;i++) {
+    const c={...fixture(String.fromCharCode(97+i)),reservationCode:'HMTEST00000'+i};
+    c.hoaMailEvents[0].id=i.toString(16).padStart(64,'0');
+    cases.push(c);
+  }
   await saveStoredCases(env,cases);
 }
 function call(env,query='',options={}) {
