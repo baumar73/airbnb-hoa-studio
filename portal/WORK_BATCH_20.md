@@ -18,7 +18,7 @@ gesonderte Arbeit.
 - [x] 9. Abgereiste Buchungen aus dem Prüfrückstand nehmen
 - [x] 10. Beschädigte Prüfwiederholungszähler begrenzen
 - [x] 11. gbrain-Schreibergebnis anhand des tatsächlichen Inhalts prüfen
-- [ ] 12. gbrain-Ablaufbereinigung vor überholten Löschständen schützen
+- [x] 12. gbrain-Ablaufbereinigung vor überholten Löschständen schützen
 - [ ] 13. gbrain-Importe ohne gültige Aufbewahrungsfrist abweisen
 - [ ] 14. gbrain-Zustandsgrenze vor neuen Schreibvorgängen durchsetzen
 - [ ] 15. Abgelaufene HOA-E-Mail-Belege nicht mehr ausliefern

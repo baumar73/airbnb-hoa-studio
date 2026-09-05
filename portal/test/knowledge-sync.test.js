@@ -97,6 +97,17 @@ test('a replay repairs changed content instead of trusting only the revision fen
   const result=await syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage});
   assert.equal(result.applied,1);assert.equal(d.values.get('a').record.booking.guestName,'Synthetic');
 });
+test('expiry cannot record an old delete over a newer destination or local revision',async()=>{
+  const old=upsert('a',1,'2026-09-01T00:00:00Z');
+  for(const localNewer of [false,true]) {
+    const d=destination([localNewer?old:upsert('a',2)]);
+    d.list=async()=>[old];
+    const state=emptyKnowledgeSyncState();if(localNewer)state.revisions.a={revision:2,operation:'upsert'};
+    const s=store(state),result=await expireKnowledge({stateStore:s,destination:d,now:NOW});
+    assert.equal(result.expired,0);assert.equal(s.saves,0);assert.equal(d.calls.length,0);
+    assert.deepEqual(s.current(),state);
+  }
+});
 test('expiry runs independently of source polling and records a deletion fence', async () => {
   const d = destination([{id:'a',operation:'upsert',revision:7,record:{retention:{expiresAt:'2026-09-05T11:59:59Z'}}},{id:'b',operation:'upsert',revision:8,record:{retention:{expiresAt:'2026-10-01T00:00:00Z'}}}]);
   const s = store({protocol:1,epoch:'e',cursor:'c',throughRevision:8,revisions:{}});

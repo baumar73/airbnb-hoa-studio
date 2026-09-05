@@ -173,8 +173,10 @@ export async function expireKnowledge({stateStore, destination, now = new Date()
     if (typeof deadline !== 'string' || !Number.isFinite(Date.parse(deadline)) || Date.parse(deadline) > now.getTime()) continue;
     const change = {id: entry.id, revision, operation: 'delete', reason: 'expired'};
     const prior = next.revisions[entry.id];
+    if (prior?.revision > revision) continue;
     if (prior?.revision === revision && prior.operation === 'delete') continue;
-    await applyChange(destination, change);
+    const outcome=await applyChange(destination, change);
+    if (outcome==='stale'||outcome==='delete-wins') continue;
     next.revisions[entry.id] = {revision, operation: 'delete'}; expired++;
   }
   if (expired) await stateStore.save(clone(next));
