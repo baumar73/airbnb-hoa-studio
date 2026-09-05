@@ -116,11 +116,18 @@ export async function sendViaGmail(env, { to, cc, subject, text, attachments, fr
   return true;
 }
 
-export async function sendTelegram(env, text) {
+export async function sendTelegram(env, text, fetcher=fetch, {timeoutMs=15000}={}) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return false;
-  const resp = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
-  });
-  return resp.ok;
+  if(!Number.isFinite(timeoutMs)||timeoutMs<=0||timeoutMs>30000)throw Error('Invalid Telegram timeout');
+  const controller=new AbortController();let timer;
+  try {
+    const resp=await Promise.race([
+      fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal:controller.signal,
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
+      }),
+      new Promise(resolve=>{timer=setTimeout(()=>{controller.abort();resolve(null);},timeoutMs);}),
+    ]);
+    return resp?.ok===true;
+  } catch { return false; } finally {clearTimeout(timer);}
 }

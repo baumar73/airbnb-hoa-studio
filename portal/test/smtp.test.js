@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {register} from 'node:module';
 register('./loaders/cloudflare-sockets-loader.mjs',import.meta.url);
-const {sendViaGmail,buildMime}=await import('../functions/lib/email.js');
+const {sendViaGmail,buildMime,sendTelegram}=await import('../functions/lib/email.js');
+
+test('Telegram alerts have a bounded timeout even if fetch ignores abort',async()=>{
+  const settings={TELEGRAM_BOT_TOKEN:'synthetic',TELEGRAM_CHAT_ID:'123'};let signal;
+  assert.equal(await sendTelegram(settings,'test',async(_,options)=>{signal=options.signal;return new Promise(()=>{});},{timeoutMs:10}),false);
+  assert.equal(signal.aborted,true);
+  assert.equal(await sendTelegram(settings,'test',async()=>({ok:true})),true);
+  assert.equal(await sendTelegram(settings,'test',async()=>{throw Error('private provider response');}),false);
+  assert.equal(await sendTelegram({},'test',()=>assert.fail('missing credentials must not fetch')),false);
+});
 
 function fakeSocket({rejectAuth=false,failQuit=false,fragment=false}={}) {
   let controller,authStep=0,inData=false;
