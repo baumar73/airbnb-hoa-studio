@@ -10,7 +10,13 @@ const actor=env=>{
 const names=['01-lease-application.pdf','02-background-authorization.pdf','03-rules-and-acknowledgment.pdf','04-short-term-lease.pdf','05-flood-disclosure.pdf'];
 
 export async function archivePackage(env,cases,c,attachments,contextHash,now=new Date()) {
-  if(!attachments.length||attachments.length>5||attachments.reduce((n,a)=>n+a.bytes.length,0)>8_000_000) throw new Error('invalid package size');
+  if(!Array.isArray(attachments)||!attachments.length||attachments.length>5) throw new Error('invalid package size');
+  const filenames=new Set();
+  for(const a of attachments) {
+    if(!a||typeof a.filename!=='string'||!a.filename.length||a.filename.length>255||/[\x00-\x1f\x7f"\\/]/.test(a.filename)||!a.filename.toLowerCase().endsWith('.pdf')||!(a.bytes instanceof Uint8Array)||!a.bytes.length||filenames.has(a.filename)) throw new Error('invalid package attachment');
+    filenames.add(a.filename);
+  }
+  if(attachments.reduce((n,a)=>n+a.bytes.length,0)>8_000_000) throw new Error('invalid package size');
   const id=crypto.randomUUID();
   const documents=await Promise.all(attachments.map(async(a,i)=>({filename:a.filename,reviewFilename:c.pathType==='full'?names[i]:'01-guest-registration.pdf',sha256:await digest(a.bytes),size:a.bytes.length})));
   const packageHash=await digest(new TextEncoder().encode(JSON.stringify(documents)));
