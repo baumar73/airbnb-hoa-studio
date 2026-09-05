@@ -25,6 +25,10 @@ const isCursor = value => value === null || (typeof value === 'string' && value.
 
 function fail(code) { throw new KnowledgeSyncError(code, 'Knowledge synchronization requires reconciliation'); }
 
+function checkCapacity(state,ids) {
+  if(new Set([...Object.keys(state.revisions),...ids]).size>MAX_STATE_ENTRIES) fail('SYNC_STATE_LIMIT');
+}
+
 function canonical(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -122,6 +126,7 @@ async function consumePage(pageInput, stateInput, destination, now) {
   if (state.epoch !== null && state.epoch !== page.epoch) fail('SYNC_EPOCH_MISMATCH');
   if (page.throughRevision < state.throughRevision) fail('SYNC_CHECKPOINT_ROLLBACK');
   if (page.hasMore && page.nextCursor === state.cursor) fail('SYNC_CURSOR_STALLED');
+  checkCapacity(state,page.changes.map(change=>change.id));
   const next = {...state, epoch: page.epoch, throughRevision: page.throughRevision, cursor: page.nextCursor, revisions: {...state.revisions}};
   let applied = 0, skipped = 0;
   for (const raw of page.changes) {
@@ -170,6 +175,7 @@ export async function expireKnowledge({stateStore, destination, now = new Date()
   let expired = 0;
   const entries = await destination.list();
   if (!Array.isArray(entries) || entries.length > 10000) fail('DESTINATION_INVALID');
+  checkCapacity(state,entries.filter(entry=>isId(entry?.id)&&entry.operation==='upsert'&&Number.isFinite(Date.parse(entry.record?.retention?.expiresAt))&&Date.parse(entry.record.retention.expiresAt)<=now.getTime()).map(entry=>entry.id));
   for (const entry of entries) {
     const record = entry?.record;
     const revision = destinationRevision(entry);

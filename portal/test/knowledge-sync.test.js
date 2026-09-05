@@ -118,6 +118,14 @@ test('invalid retention rejects the entire import page before destination writes
   await syncKnowledgeExport({stateStore:store(),destination:d,now:NOW,fetchPage:async()=>page('e',[upsert('a',1,'2026-09-01T00:00:00Z')])});
   assert.equal(d.values.get('a').operation,'delete');
 });
+test('state capacity is enforced before imports or expiry change the destination',async()=>{
+  const state=emptyKnowledgeSyncState();
+  for(let i=0;i<100000;i++)state.revisions['case'+i]={revision:1,operation:'delete'};
+  const s=store(state),d=destination([upsert('new',2,'2026-09-01T00:00:00Z')]);
+  await assert.rejects(syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage:async()=>page('e',[upsert('new',2)])}),{code:'SYNC_STATE_LIMIT'});
+  await assert.rejects(expireKnowledge({stateStore:s,destination:d,now:NOW}),{code:'SYNC_STATE_LIMIT'});
+  assert.equal(d.calls.length,0);assert.equal(s.saves,0);
+});
 test('expiry runs independently of source polling and records a deletion fence', async () => {
   const d = destination([{id:'a',operation:'upsert',revision:7,record:{retention:{expiresAt:'2026-09-05T11:59:59Z'}}},{id:'b',operation:'upsert',revision:8,record:{retention:{expiresAt:'2026-10-01T00:00:00Z'}}}]);
   const s = store({protocol:1,epoch:'e',cursor:'c',throughRevision:8,revisions:{}});
