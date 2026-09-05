@@ -65,9 +65,9 @@ Es erfolgt keine automatische
 Stornierung oder Freigabe; der Abgleich bleibt mit echten Airbnb-Formaten und
 einem kontrollierten Testfall abzunehmen.
 
-- [ ] Änderungen und Stornierungen zuverlässig zuordnen und wiederholte Verarbeitung ohne doppelte Nebenwirkungen testen.
-- [ ] Veraltete Dokumentenpakete und Prüfungen bei relevanten Änderungen als überholt markieren.
-- [ ] Sieben Tage Buchungsvorlauf und erforderliche HOA-Zustimmung vor Bezug im Inserat und Portal konsistent halten; nicht als garantierte Bearbeitungsfrist darstellen.
+- [x] Änderungen und Stornierungen mit synthetischen Airbnb-Nachrichten zuverlässig zuordnen und wiederholte Verarbeitung ohne doppelte Nebenwirkungen testen; echte Airbnb-Formate bleiben abzunehmen.
+- [x] Veraltete Dokumentenpakete und Prüfungen bei relevanten Änderungen als überholt markieren; die tatsächliche End-to-End-Abnahme bleibt offen.
+- [x] Sieben Tage Buchungsvorlauf und erforderliche HOA-Zustimmung vor Bezug im Inserat und Portal konsistent halten; nicht als garantierte Bearbeitungsfrist darstellen.
 
 ## Dokumente und Zahlungsablauf
 
