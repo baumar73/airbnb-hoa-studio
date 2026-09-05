@@ -7,7 +7,7 @@ export async function caseReviewDigest(c,wizard,includeSignatures=true) {
   const adults=((wizard&&wizard.adults)||[]).map(a=>{
     const copy={...a};if(!includeSignatures){delete copy.sigPng;delete copy.signatureAudit;}return copy;
   });
-  const payload={case:{id:c.id,reservationCode:c.reservationCode,checkIn:c.checkIn,checkOut:c.checkOut,adults:c.adults,pathType:c.pathType,applicationType:c.applicationType||'lease',sameLesseesConfirmed:c.sameLesseesConfirmed===true},
+  const payload={case:{id:c.id,guestName:c.guestName,reservationCode:c.reservationCode,checkIn:c.checkIn,checkOut:c.checkOut,adults:c.adults,expectedMinors:c.expectedMinors||0,screeningRoute:c.screeningRoute||null,pathType:c.pathType,applicationType:c.applicationType||'lease',sameLesseesConfirmed:c.sameLesseesConfirmed===true},
     wizard:{adults,esignConsent:!!wizard?.esignConsent,rulesAcknowledged:!!wizard?.rulesAcknowledged,auto:wizard?.auto||{},references:wizard?.references||[],emergency:wizard?.emergency||[],children:wizard?.children||[]}};
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload)));
   return [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
