@@ -255,8 +255,9 @@ test('missing guest contact is explicitly reported, not silently replaced by own
   assert.equal(result.waitingForContact,1);assert.equal(result.sent,0);
 });
 test('watchdog does not ask owner to chase guests when direct reminders are enabled',()=>{
-  const c={id:'test',checkIn:'2026-11-01',checkOut:'2026-12-01',createdAt:'2026-09-01',pathType:'full',screeningRoute:'paper',steps:[]};
-  assert.equal(computeAlerts([structuredClone(c)],new Date('2026-09-05')).some(a=>a.key==='wizardNudge'),true);
+  const c={id:'test',token:'synthetic-private-guest-token',checkIn:'2026-11-01',checkOut:'2026-12-01',createdAt:'2026-09-01',pathType:'full',screeningRoute:'paper',steps:[]};
+  const alerts=computeAlerts([structuredClone(c)],new Date('2026-09-05'));
+  assert.equal(alerts.some(a=>a.key==='wizardNudge'),true);assert.doesNotMatch(alerts.find(a=>a.key==='wizardNudge').text,/synthetic-private-guest-token|\/v\//);
   assert.equal(computeAlerts([structuredClone(c)],new Date('2026-09-05'),{directGuestReminders:true}).some(a=>a.key==='wizardNudge'),false);
   assert.equal(computeAlerts([{...c,screeningRoute:'online'}],new Date('2026-09-05')).some(a=>a.key==='wizardNudge'),false);
   assert.deepEqual(computeAlerts([{...c,status:'canceled'}],new Date('2026-09-05')),[]);

@@ -36,7 +36,7 @@ export function computeAlerts(cases, now, {directGuestReminders=false}={}) {
     }
 
     if (!directGuestReminders && c.screeningRoute!=='online' && !c.wizard && ageDays(c.createdAt, now) >= 3 && ageDays(n.wizardNudge, now) >= 3) {
-      alerts.push({ c, key: 'wizardNudge', text: `📝 ${who}: Gast hat den Formular-Wizard noch nicht ausgefüllt. Erinnerung über den Airbnb-Chat senden? Magic-Link: ${PORTAL}/v/${c.token}` });
+      alerts.push({ c, key: 'wizardNudge', text: `📝 ${who}: Gast hat den Formular-Wizard noch nicht ausgefüllt. Erinnerung über den Airbnb-Chat senden? Den privaten Gastzugang bitte erst im geschützten Admin-Bereich öffnen: ${link}` });
     }
     if (c.screeningRoute!=='online' && c.wizard && !stepDone(c, 'submitted_hoa') && ageDays(c.wizard.savedAt, now) >= 2 && ageDays(n.submitNudge, now) >= 3) {
       alerts.push({ c, key: 'submitNudge', text: `📤 ${who}: Wizard-Daten liegen seit ${Math.floor(ageDays(c.wizard.savedAt, now))} Tagen vor, aber das Paket ist noch nicht bei der HOA eingereicht. ${link}` });
