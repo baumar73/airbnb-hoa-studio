@@ -16,7 +16,10 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
   unvollständige Mails bleiben zur Prüfung sichtbar. Unveränderte Bestätigungen
   erzeugen weder Schreibzugriffe noch falsche Änderungszähler. Vier neue Tests
   einschließlich zwölf ungültiger Eingabevarianten, insgesamt 258 JS-Tests.
-- [ ] Erinnerungsversand: aktuelle Sperren und verlorene Versandbelege absichern.
+- [x] Erinnerungsversand: neue Zustellhinweise, geänderte Versandreservierungen,
+  deaktivierte Automatik und neue Wartefristen werden vor SMTP erneut geprüft.
+  Gelöschte Fälle oder verlorene Versandreservierungen gelten nach SMTP nicht als
+  gespeicherter Erfolg. Zwei neue Tests mit acht Ausfallvarianten; 260 JS-Tests.
 - [ ] Prüfdienst: beschädigte diagnostische Statusdaten sicher ersetzen.
 - [ ] Wiederanlauf: dauerhafte Speicherung mit einem lokalen Runtime-Neustart prüfen.
 

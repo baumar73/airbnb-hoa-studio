@@ -124,3 +124,44 @@ test('a case deleted after claiming a reminder is suppressed without dereferenci
   const result=await runGuestReminders(env,NOW,async()=>assert.fail('deleted case must not send'));
   assert.equal(result.suppressed,1);assert.equal((await loadStoredCases(env)).length,0);
 });
+
+test('new delivery holds, changed claims, disabled automation and a newer cooldown stop a claimed reminder',async()=>{
+  for(const change of [
+    (c,env)=>{env.AUTO_GUEST_REMINDERS='no';},
+    c=>{c.automation.reminderClaim.id='replacement-claim';},
+    c=>{c.automation.reminderClaim.state='uncertain';},
+    c=>{c.automation.reminderAttempts[0].deliveryNotices={synthetic:{reviewedAt:null}};},
+    c=>{c.automation.lastGuestReminderAt=NOW.toISOString();},
+  ]) {
+    const {env,requestEmail}=await setup();await requestEmail();
+    const cases=await loadStoredCases(env);cases[0].screeningRoute='paper';await saveStoredCases(env,cases);
+    const original=env.CASE_STORE.get;let changed=false,expectedCooldown;
+    env.CASE_STORE.get=name=>({fetch:async(url,options)=>{
+      const response=await original(name).fetch(url,options);
+      if(!changed&&options?.method==='PATCH'&&options.body.includes('"state":"claimed"')) {
+        changed=true;const current=await loadStoredCases(env);change(current[0],env);expectedCooldown=current[0].automation.lastGuestReminderAt;await saveStoredCases(env,current);
+      }
+      return response;
+    }});
+    const result=await runGuestReminders(env,NOW,async()=>assert.fail('claimed reminder must respect its latest hold'));
+    assert.equal(result.sent,0);assert.equal(result.suppressed,1);
+    assert.equal((await loadStoredCases(env))[0].automation.lastGuestReminderAt,expectedCooldown);
+  }
+});
+
+test('loss of the case or claim during SMTP cannot be counted as a recorded reminder send',async()=>{
+  for(const change of [
+    cases=>{cases.splice(0,1);},
+    cases=>{cases[0].automation.reminderClaim.id='replacement';},
+    cases=>{cases[0].automation.reminderClaim.state='uncertain';},
+  ]) {
+    const {env,requestEmail}=await setup();await requestEmail();
+    const cases=await loadStoredCases(env);cases[0].screeningRoute='paper';await saveStoredCases(env,cases);
+    let sends=0;
+    const result=await runGuestReminders(env,NOW,async()=>{
+      sends++;const fresh=await loadStoredCases(env);change(fresh);await saveStoredCases(env,fresh);
+    });
+    assert.equal(sends,1);assert.equal(result.sent,0);assert.equal(result.uncertain,1);
+    const [saved]=await loadStoredCases(env);assert.equal(saved?.automation.lastGuestReminderAt,undefined);
+  }
+});

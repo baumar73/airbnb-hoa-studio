@@ -84,3 +84,11 @@ structured delivery notices, hashed attempt history, mailbox monitoring and revi
 Baseline before relay implementation: `npm test`: 189 passing JavaScript tests. `python3 -m unittest discover -s test -p
 'test_*.py'`: 34 passing tests. Syntax check and Pages build pass; `npm audit --json`
 reports zero vulnerabilities. These are local/mock tests, not live delivery proof.
+# Final dispatch and receipt checks (2026-09-05)
+
+Immediately before SMTP, the worker rechecks the enabled flag, ownership/state
+of its durable claim, pending delivery notices, current tasks, reminder due time
+and recipient route. A later hold suppresses the attempt. If the case or claim
+disappears during SMTP, the summary reports uncertainty rather than a recorded
+send; it does not set a successful reminder timestamp or resend automatically.
+This is a final application check, not a transaction with the mail server.

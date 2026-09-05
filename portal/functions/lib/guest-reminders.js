@@ -8,7 +8,7 @@ import {recipientDigest} from './reminder-delivery.js';
 async function recordResult(env,id,claimId,state,now) {
   for(let attempt=0;attempt<4;attempt++) {
     const cases=await loadStoredCases(env),c=cases.find(c=>c.id===id);
-    if(!c || c.automation?.reminderClaim?.id!==claimId) return false;
+    if(!c || c.automation?.reminderClaim?.id!==claimId || c.automation.reminderClaim.state!=='claimed') return false;
     c.automation.reminderClaim.state=state;
     const attempt=c.automation.reminderAttempts?.find(a=>a.id===claimId);
     if(attempt) attempt.state=state;
@@ -47,7 +47,10 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     const latest=(await loadStoredCases(env)).find(c=>c.id===id);
     if(!latest) { result.suppressed++; continue; }
     const current=latest && planGuestJourney(latest,now,{feeRequestAuthorized:externalFeeRequestAuthorized(latest,JSON.parse(await env.CASES.get('compliance-config')||'{}'))});
-    if(!current?.guestTasks.length || reminderDeliveryTarget(latest,env,now)?.key!==target.key) {
+    const ownsClaim=latest.automation?.reminderClaim?.id===claimId&&latest.automation.reminderClaim.state==='claimed';
+    const pendingNotice=(latest.automation?.reminderAttempts||[]).some(a=>Object.values(a.deliveryNotices||{}).some(n=>!n.reviewedAt));
+    if(env.AUTO_GUEST_REMINDERS!=='yes'||!ownsClaim||pendingNotice||!current?.guestTasks.length ||
+      !current.nextReminderAt||new Date(current.nextReminderAt)>now||reminderDeliveryTarget(latest,env,now)?.key!==target.key) {
       await recordResult(env,id,claimId,'suppressed',now);result.suppressed++;continue;
     }
     try {
@@ -61,7 +64,7 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     }
     // If this write fails, the persistent claim deliberately remains blocked.
     // A reconciliation worker must inspect delivery before any retry.
-    try {await recordResult(env,id,claimId,'sent',now);result.sent++;}
+    try {if(await recordResult(env,id,claimId,'sent',now))result.sent++;else result.uncertain++;}
     catch {result.uncertain++;}
   }
   return result;
