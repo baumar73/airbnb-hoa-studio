@@ -363,7 +363,7 @@ function landingView() {
     `<div class="card"><h2>How it works</h2>
       <ol>
         <li><b>Book on Airbnb.</b> After your booking is confirmed, you receive a personal link to this portal via Airbnb chat.</li>
-        <li><b>Choose one application route.</b> Use the association's Tenant Evaluation service, or prepare its paper-route documents in this portal.</li>
+        <li><b>Choose one application route.</b> For a new application, we recommend Tenant Evaluation: complete the application, upload documents and pay online in one place. The paper route remains available.</li>
         <li><b>Book at least 7 days ahead.</b> Start the HOA application immediately after booking. HOA approval is required before check-in; seven days is not an approval guarantee.</li>
         <li><b>HOA board approval.</b> Allow up to 15 days after every required application, screening, document and payment item arrives. Follow the authorized payment instructions promptly once available.</li>
         <li><b>Check-in released.</b> Once approved, you receive the door codes and arrival guide.</li>
@@ -381,6 +381,13 @@ function landingView() {
       </form>
       <p class="muted">Your page is created within about an hour of booking. Can't find it? Just message Owner on Airbnb.</p>
      </div>
+     <section class="card" aria-labelledby="online-application-heading">
+       <p><span class="pill teal">Recommended for new applications</span></p>
+       <h2 id="online-application-heading">Tenant Evaluation: apply and pay online</h2>
+       <p>The association's online service brings your application, requested documents, screening and online payment together. No paper check or money order is needed for this route. You pay through the service, not to the property owner.</p>
+       <p>Start from your personal paperwork page after booking so you receive the correct association instructions. Written HOA approval is still required before check-in.</p>
+       <p class="muted"><b>Already submitted a paper application?</b> Please confirm with Owner or the HOA before starting again. Tenant Evaluation is a complete application process, not a payment-only link for an existing paper application. Do not apply or pay twice.</p>
+     </section>
      <div class="card"><h2>The home</h2>
       <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
       <ul class="steps" style="font-size:15px">
@@ -455,12 +462,15 @@ St. Petersburg, FL 33716</div>
   const screeningConfirmed = c.steps.find(s => s.id === 'screening_complete')?.done;
   const wizardCard = approved ? '' : route === 'undecided' ? `
     <div class="card"><h2>Choose the official application route</h2>
-      <p>The association offers two different processes. Choose first so this page gives you the correct forms and payment instructions.</p>
-      <p><a class="btn" href="/w/${c.token}">Choose online or paper</a></p>
+      <p>For a new application, we recommend Tenant Evaluation: application, documents and online payment in one place. The paper route remains available. Choose first so this page gives you the correct instructions.</p>
+      <p><a class="btn" href="/w/${c.token}">View application options</a></p>
     </div>` : route === 'online' ? `
     <div class="card"><h2>Complete the official online application</h2>
       <p><span class="pill teal">Online route · Tenant Evaluation</span></p>
-      <p>Create or open your application on <a href="https://tenantev.com/" target="_blank" rel="noopener">Tenant Evaluation</a>. The association's application code or invitation must come from Owner or the HOA. Complete the application, upload requested documents and pay the application fee there.</p>
+      <p><b>Application, documents and online payment in one place.</b> No paper check or money order is needed for this route. The association's application code or invitation must come from Owner or the HOA.</p>
+      <p><a class="btn" href="https://tenantev.com/" target="_blank" rel="noopener">Open Tenant Evaluation ↗</a></p>
+      <p>Complete your application and requested uploads there. Follow the verified fee instructions for your case. Review the total and available payment methods before paying; do not assume the paper-route fee is the online total. Payment goes through the service, not to the property owner.</p>
+      <p class="muted">This is a complete application process, not a payment-only link for an existing paper application. If you already submitted paper documents or paid a fee, confirm with Owner or the HOA before starting again. Do not apply or pay twice.</p>
       <div class="attn"><b>Privacy boundary:</b> enter any Social Security number or other sensitive screening answers only in Tenant Evaluation. This portal never asks for or receives that information.</div>
       ${screeningConfirmed
         ? '<p><span class="pill ok">Official application confirmed complete</span></p>'
@@ -643,8 +653,10 @@ function applicationRouteView(c, error) {
     `<h1>Choose how to complete the HOA application</h1>
      <p>Both routes go to the same condominium association, but the forms and payment method are different.</p>`,
     `${error ? `<div class="attn crit">${esc(error)}</div>` : ''}
-     <div class="card"><h2>Online — Tenant Evaluation</h2>
-       <p>Use the association's external Tenant Evaluation service for the application, requested uploads, screening and online payment. It can take up to about 45 minutes.</p>
+     <div class="card"><p><span class="pill teal">Recommended for new applications</span></p>
+       <h2>Online — Tenant Evaluation</h2>
+       <p><b>Application, documents and online payment in one place.</b> Use the association's external service for your application, requested uploads and screening. No paper check or money order is needed for this route. Completing the application can take up to about 45 minutes; this is not the HOA approval time.</p>
+       <p>Review the total and available payment methods before paying. The online total may differ from the paper-route fee. You pay through the service, not to the property owner.</p>
        <div class="attn"><b>Sensitive information stays there.</b> Any Social Security number, screening answers and identity uploads belong only in Tenant Evaluation, never in this portal.</div>
        <form method="post" action="/w/${c.token}/route">
          <button name="route" value="online">Choose Tenant Evaluation online</button>
@@ -656,7 +668,8 @@ function applicationRouteView(c, error) {
          <button class="ghost" name="route" value="paper">Choose the paper route</button>
        </form>
      </div>
-     <div class="card"><p class="muted">Choose only one route. If the HOA already sent you a Tenant Evaluation invitation, choose Online. If you are unsure, message Owner through Airbnb before choosing.</p></div>`);
+     <div class="card"><p><b>Already submitted a paper application or paid a fee?</b> Please confirm with Owner or the HOA before starting again. Tenant Evaluation is a complete application process, not a payment-only link for an existing paper application. Do not apply or pay twice.</p>
+       <p class="muted">Choose only one route. For a new application, use the association's Tenant Evaluation invitation if you received one. If you are unsure, message Owner through Airbnb before choosing.</p></div>`);
 }
 
 function wizardView(c, saved, draftVersion = null) {

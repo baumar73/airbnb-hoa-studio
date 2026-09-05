@@ -263,7 +263,37 @@ test('a full rental chooses the official application route before showing local 
   assert.doesNotMatch(body, /name="a0_firstName"/i);
 });
 
+test('Tenant Evaluation is recommended for new applications without switching existing paper cases', async () => {
+  resetSocketAttempts();
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  const read = async path => {
+    const response = await onRequest({request: guestRequest(path, {method: 'GET'}), env, waitUntil: () => {}});
+    assert.equal(response.status, 200);
+    return response.text();
+  };
+  const home = await read('/');
+  assert.match(home, /Recommended for new applications/);
+  assert.match(home, /Tenant Evaluation: apply and pay online/);
+  assert.match(home, /Already submitted a paper application/);
+  const paper = await read(`/v/${TOKEN}`);
+  assert.doesNotMatch(paper, /Open Tenant Evaluation/);
+  assert.equal((await readCases(env))[0].screeningRoute, 'paper');
+
+  delete c.screeningRoute;
+  store.set('cases', JSON.stringify([c]));
+  const choice = await read(`/w/${TOKEN}`);
+  assert.match(choice, /Recommended for new applications/);
+  assert.match(choice, /Already submitted a paper application/);
+  assert.match(choice, /confirm with Owner or the HOA before starting again/);
+  assert.match(choice, /Review the total and available payment methods before paying/);
+  assert.match(choice, /Choose the paper route/);
+  assert.equal((await readCases(env))[0].screeningRoute, undefined);
+  assert.equal(socketAttempts(), 0);
+});
+
 test('choosing the online route persists the choice without collecting screening data locally', async () => {
+  resetSocketAttempts();
   const { env, store } = mockEnv();
   const c = seedCase(store);
   delete c.screeningRoute;
@@ -288,9 +318,14 @@ test('choosing the online route persists the choice without collecting screening
   const body = await status.text();
   assert.match(body, /Complete the official online application/i);
   assert.match(body, /tenantev\.com/i);
+  assert.match(body, /class="btn" href="https:\/\/tenantev\.com\/"[^>]*>Open Tenant Evaluation/);
+  assert.match(body, /Application, documents and online payment in one place/);
+  assert.match(body, /Review the total and available payment methods before paying/);
+  assert.match(body, /not a payment-only link for an existing paper application/);
   assert.match(body, /Social Security number.*only.*Tenant Evaluation/i);
   assert.doesNotMatch(body, /I've mailed the check/i);
   assert.doesNotMatch(body, /name="a0_firstName"/i);
+  assert.equal(socketAttempts(), 0);
 });
 
 test('online completion can be reported but only the owner can confirm the official screening step', async () => {
