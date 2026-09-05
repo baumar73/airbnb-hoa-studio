@@ -43,6 +43,17 @@ test('diagnostics retain safe stage counts and explicit enabled flags, never arb
   assert.deepEqual(status.enabled,{guestReminders:true,hoaSubmission:false});
   assert.doesNotMatch(JSON.stringify(status),/private@example|never-store/);
 });
+test('failed package preparation is unhealthy even when the cycle completes normally',async()=>{
+  const {env,jobs,notifications}=fixture();
+  jobs.submissions=async()=>({failed:1,sent:0,blocked:2,private:'never-store'});
+  const status=await runAutomationCycle(env,jobs,new Date(at));
+  assert.equal(status.state,'completed');assert.equal(automationHealth(status,new Date(at)).reason,'package_submission_failed');
+  assert.deepEqual(status.results.submissions,{sent:0,failed:1,blocked:2});assert.equal(notifications.length,1);
+  await runAutomationCycle(env,jobs,new Date('2026-09-05T12:30:00Z'));assert.equal(notifications.length,1);
+  jobs.submissions=async()=>({failed:0,sent:1});
+  const recovered=await runAutomationCycle(env,jobs,new Date('2026-09-05T13:00:00Z'));
+  assert.equal(automationHealth(recovered,new Date('2026-09-05T13:00:00Z')).ok,true);
+});
 test('stuck claims are counted even after cancellation, never automatically unlocked or resent',async()=>{
   const cases=[{status:'canceled',automation:{reminderClaim:{state:'claimed',claimedAt:'2026-09-05T10:00:00Z'}}},{automation:{reminderClaim:{state:'uncertain'}}},{reviewLockedAt:'2026-09-05T10:00:00Z'},{reviewLockedAt:'2026-09-05T10:00:00Z',submission:{sentAt:at}},{automation:{reminderClaim:{state:'claimed',claimedAt:'2026-09-05T11:59:00Z'}}}];
   const original=structuredClone(cases);

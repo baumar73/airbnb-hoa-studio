@@ -5,7 +5,7 @@ const KEY='automation-health-v1';
 const MINUTE=60000;
 const age=(value,now)=>{const parsed=Date.parse(value||'');return Number.isFinite(parsed)?now.getTime()-parsed:Infinity;};
 const save=(env,status)=>env.CASES.put(KEY,JSON.stringify(status));
-const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflicts','uncertain','suppressed','deliveryNotices','bookingChanges','created','bookings','cancellations','approvals','alerts','news','released','skipped','hoaLinked','hoaUnassigned'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
+const safeCounts=result=>Object.fromEntries(['sent','failed','blocked','waitingForContact','conflicts','uncertain','suppressed','deliveryNotices','bookingChanges','created','bookings','cancellations','approvals','alerts','news','released','skipped','hoaLinked','hoaUnassigned'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
 
 export async function readAutomationStatus(env) {
   const raw=await env.CASES.get(KEY);
@@ -32,6 +32,7 @@ export function automationHealth(status,now=new Date()) {
   if(status.state==='failed') return {ok:false,reason:'stage_failed'};
   if(status.state==='running'&&age(status.startedAt,now)>15*MINUTE) return {ok:false,reason:'stalled'};
   if(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery) return {ok:false,reason:'delivery_reconciliation'};
+  if(status.results?.submissions?.failed>0) return {ok:false,reason:'package_submission_failed'};
   if(status.reviewer?.unhealthy) return {ok:false,reason:'reviewer_unavailable'};
   if(status.enabled?.guestReminders&&status.results?.reminders?.waitingForContact>0) return {ok:false,reason:'guest_contact_unavailable'};
   return {ok:true,reason:'ok'};
@@ -43,7 +44,7 @@ export async function notifyAutomationFailure(env,status,now,notify) {
   // One transient failure stays quiet. Persistent failure, a stale successful
   // heartbeat or uncertain delivery is a genuine exception, not a guest to-do.
   const missingContact=status.enabled?.guestReminders&&status.results?.reminders?.waitingForContact>0;
-  const actionable=missingContact||Boolean(status.reviewer?.unhealthy)||(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
+  const actionable=status.results?.submissions?.failed>0||missingContact||Boolean(status.reviewer?.unhealthy)||(status.consecutiveFailures>=2)||Boolean(status.stalled?.reminderDelivery||status.stalled?.hoaDelivery)||
     (status.lastSuccessAt&&age(status.lastSuccessAt,now)>90*MINUTE)||
     (status.state==='running'&&age(status.startedAt,now)>15*MINUTE);
   if(!actionable||health.ok||age(status.lastAlertAt,now)<24*60*MINUTE) return;

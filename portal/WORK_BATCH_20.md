@@ -25,5 +25,5 @@ gesonderte Arbeit.
 - [x] 16. Dokumentenarchiv: ungültige Eingaben vor dem Speichern abweisen
 - [x] 17. Explizit fehlgeschlagene Versandantworten nicht als Erfolg behandeln
 - [x] 18. Tenant-Evaluation-Ablauf mit Nachforderung durchgängig lokal prüfen
-- [ ] 19. Fehlgeschlagene Paketvorbereitung im Betriebsstatus sichtbar machen
+- [x] 19. Fehlgeschlagene Paketvorbereitung im Betriebsstatus sichtbar machen
 - [ ] 20. Verschlüsselte lokale Sicherung in getrennten Speicher zurückspielen und prüfen
