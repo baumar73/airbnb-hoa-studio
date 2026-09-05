@@ -30,6 +30,13 @@ No new service, host, account, credential, deployment or scheduler was created.
 - Extraction is not validation of every word or diagram. Existing text layers
   may themselves contain OCR mistakes. Empty and low-quality content need review.
   Site plans remain PDFs; text embeddings cannot reproduce their geometry.
+- `functions/lib/hoa-document-index.js` adds a destination-adapter importer core.
+  It validates the entire page set before writing, refuses conflicting existing
+  versions, reconciles uncertain writes by exact read-back, checks complete chunk
+  coverage and non-null embeddings, and awaits a durable page receipt before
+  continuing. A document receipt is returned only after all pages pass. Thirteen
+  synthetic tests cover retries, conflicts, partial chunks and receipt failures.
+  This is not an activated account collector or restricted guest-sync client.
 
 Example local archival command (no network writes):
 
@@ -80,11 +87,14 @@ historical account archive: financials, insurance, minutes and other folders rem
 outside this first retrieved set. The manifests deliberately say
 `inventoryComplete: false`.
 
-The original files and all extracted pages are preserved locally, but **not yet
-vectorized in gbrain**. Two read-only MCP checks (`get_brain_identity`, `whoami`)
-failed through the configured bridge. SSH and the existing loopback listener on
-VM103 were reachable. No gbrain write, service restart or credential change was
-attempted. The destination must be available and verified before claiming success.
+The original files and all extracted pages are preserved locally. The first two
+MCP checks failed; a later owner-authorized retry found gbrain available and
+began page imports. A private receipt preserves the first 24 verified pages;
+additional pages were processed, but the full 252-unique-page batch is **not
+confirmed complete**. Before resuming, inspect each existing destination page;
+do not blindly overwrite it or equate a request attempt with indexing success.
+No service restart or credential change was needed. Source-document imports do
+not establish that the separate restricted guest-data sync is ready.
 
 See [documentary comparison](HOA_DOCUMENT_AUDIT_2026-09-05.md) for findings that
 need to be resolved before any unattended activation.
