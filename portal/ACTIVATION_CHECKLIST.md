@@ -54,6 +54,13 @@ requiring reconciliation, not successful completion. `test/smtp.test.js` covers
 protocol timeouts and disconnects after DATA acceptance. These tests do not prove
 delivery through a real mailbox or restart behavior on the production host.
 
+Before dispatch, also test switching `submit-live` off while the archive is
+loading, removing/replacing the standing authorization and revoking the green
+package review after the release claim. All must stop before SMTP and keep the
+claim for reconciliation. A claimed automatic release must not silently become
+a test email. This final recheck cannot recall mail already handed to SMTP, and
+the existing KV switch is not a transactionally consistent emergency stop.
+
 ## Staged enablement
 
 Only after the synthetic sequence is recorded may the owner enable one function

@@ -100,7 +100,14 @@ export async function submitApprovedPackage(c, cases, env, {sendMail=sendViaGmai
       const signature=await getEncryptedSecret(env,'owner-signature-png');
       const compliance=JSON.parse(await env.CASES.get('compliance-config')||'{}');
       if(!fresh||fresh.status==='canceled'||fresh.reviewLockedAt!==c.reviewLockedAt||fresh.preparedPackage?.id!==archive.manifest.id||await caseReviewDigest(fresh,fresh.wizard)!==c.reviewHash||await reviewContextHash(fresh,signature,compliance)!==archive.manifest.contextHash||(live&&!validateLiveSubmissionPrerequisites(fresh).ok)) throw new Error('Reservation or release prerequisites changed before delivery');
+      if(fresh.aiReview?.status!=='green'||fresh.aiReview.packageId!==archive.manifest.id||fresh.aiReview.packageHash!==archive.manifest.packageHash) throw new Error('Package review was revoked or replaced before delivery');
     }
+    // Re-read the operator's switch after asynchronous package preparation.
+    // An automatic live release must never become a test email on revocation.
+    if(((await env.CASES.get('submit-live'))==='yes')!==live) throw new Error('Delivery mode changed before dispatch');
+    if(c.autoRelease && (!live||env.AUTO_HOA_SUBMIT!=='yes'||
+      env.OWNER_SIGNATURE_AUTHORIZATION!=='hoa-paperwork-v1'||
+      !env.OWNER_AUTHORIZATION_REFERENCE||env.OWNER_AUTHORIZATION_REFERENCE!==c.autoRelease.authorization)) throw new Error('Standing authorization changed before delivery');
     mailAttempted=true;
     await sendMail(env, {
       to: live ? recipients.to : [OWNER],

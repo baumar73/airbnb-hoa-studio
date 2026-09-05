@@ -435,6 +435,55 @@ test('case deleted during accepted delivery is never resurrected or reported dur
   assert.ok(notices.some(n=>n.includes('NICHT erneut senden')));
   await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);assert.equal(deliveries,1);
 });
+
+test('switching off live delivery while the archive loads stops the package before SMTP',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;
+  const originalGet=env.CASE_STORE.get;
+  const submit=(c,cases)=>{
+    env.CASE_STORE.get=()=>({fetch:async(url,options)=>{
+      const response=await originalGet().fetch(url,options);
+      if(new URL(url).pathname==='/packages') await env.CASES.put('submit-live','no');
+      return response;
+    }});
+    return submitApprovedPackage(c,cases,env,{sendMail:async()=>{deliveries++;},sendNotice:async()=>true});
+  };
+  assert.equal((await runAutomaticSubmissions(env,new Date('2026-09-05'),submit)).sent,0);
+  assert.equal(deliveries,0);
+  const [saved]=await loadStoredCases(env);
+  assert.ok(saved.reviewLockedAt);assert.equal(saved.submissionError.phase,'preparation_failed');
+});
+
+test('a claimed automatic live package cannot fall back to a test email when live mode is revoked',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;
+  const submit=async(c,cases)=>{
+    await env.CASES.put('submit-live','no');
+    return submitApprovedPackage(c,cases,env,{sendMail:async()=>{deliveries++;},sendNotice:async()=>true});
+  };
+  assert.equal((await runAutomaticSubmissions(env,new Date('2026-09-05'),submit)).sent,0);
+  assert.equal(deliveries,0);
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.submission,undefined);assert.equal(saved.testSubmission,undefined);assert.ok(saved.reviewLockedAt);
+});
+
+test('revoked standing authorization or review blocks a previously claimed package',async()=>{
+  for(const revoke of [
+    async env=>{env.AUTO_HOA_SUBMIT='no';},
+    async env=>{delete env.OWNER_SIGNATURE_AUTHORIZATION;},
+    async env=>{env.OWNER_AUTHORIZATION_REFERENCE='replacement-authorization';},
+    async env=>{const cases=await loadStoredCases(env);cases[0].aiReview.status='red';await saveStoredCases(env,cases);},
+    async env=>{const cases=await loadStoredCases(env);delete cases[0].aiReview;await saveStoredCases(env,cases);},
+  ]) {
+    const {env}=await automaticFixture();let deliveries=0;
+    const submit=async(c,cases)=>{
+      await revoke(env);
+      return submitApprovedPackage(c,cases,env,{sendMail:async()=>{deliveries++;},sendNotice:async()=>true});
+    };
+    assert.equal((await runAutomaticSubmissions(env,new Date('2026-09-05'),submit)).sent,0);
+    assert.equal(deliveries,0);
+    const [saved]=await loadStoredCases(env);
+    assert.equal(saved.submission,undefined);assert.ok(saved.reviewLockedAt);
+  }
+});
 test('review-only token cannot access owner controls or send a package',async()=>{
   const {env}=await automaticFixture();env.REVIEW_API_TOKEN='synthetic-review-token-at-least-32-chars';env.ADMIN_USER='owner';env.ADMIN_PASSWORD='test-only';
   const call=path=>onRequest({env,request:new Request('https://example.com'+path,{headers:{Authorization:'Bearer '+env.REVIEW_API_TOKEN}})});

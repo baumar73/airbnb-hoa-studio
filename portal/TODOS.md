@@ -95,6 +95,16 @@ für den manuellen Abgleich erhalten. Ungefilterte Provider-Fehlermeldungen werd
 nicht mehr im Fall gespeichert. Alle 238 JavaScript-Tests und Syntaxprüfungen
 bestanden; keine echten E-Mails, kein Live-Rollout.
 
+**Lokaler Fortschritt 2026-09-05 — Widerruf vor Versand:** Der Dispatcher liest
+nach der Paketvorbereitung den Live-Schalter erneut und prüft Dauerfreigabe sowie
+die aktuelle grüne Paketprüfung. Ein bereits beanspruchter Automatikversand
+wird bei ausgeschaltetem Live-Modus auch nicht als Test-E-Mail ausgeführt.
+Drei Regressionstests (einschließlich fünf Widerrufsvarianten) reproduzierten
+zunächst unerwünschten Versand und bestehen nach der Korrektur. Gesamter
+JavaScript-Prüfstand: 241 Tests. Bereits an SMTP übergebene Nachrichten können
+durch einen späteren Widerruf nicht zurückgeholt werden; die Prüfung liegt vor
+dem Transportaufruf und ist keine atomare Transaktion mit Gmail.
+
 ## Produktionssicherheit und Veröffentlichung
 
 ### Betriebsreife belegen, dann kontrolliert aktivieren
