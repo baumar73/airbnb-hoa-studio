@@ -15,7 +15,7 @@ export function bookingApprovalNotice(c, compliance = {}) {
     else if (done('fee_sent') || c.feeMailed || (c.screeningRoute === 'online' && (c.screeningReportedAt || done('screening_complete')))) payment = 'Your payment or application completion has been reported or recorded. Do not pay again. A guest report is not confirmation that the association has received payment or approved the stay.';
     else if (!externalFeeRequestAuthorized(c, compliance)) payment = 'Payment instructions are being verified. Do not make an off-platform payment until the authorized instructions are released. You can complete the other available steps now.';
     else if (c.screeningRoute === 'online') payment = 'Arrange payment promptly through your chosen online application when its authorized instructions are available. Do not also send a paper-route payment.';
-    else if (c.screeningRoute === 'paper') payment = 'Arrange payment promptly using the authorized paper-route instructions below. Mailing a payment is not confirmation of receipt; allow time for delivery and processing.';
+    else if (c.screeningRoute === 'paper') payment = 'Arrange payment promptly using the authorized paper-route instructions provided by the association. Mailing a payment is not confirmation of receipt; allow time for delivery and processing.';
     else payment = 'Choose one application route first, then follow its authorized payment instructions. Do not pay both routes.';
   }
   return `<section class="card" aria-label="Booking and HOA approval">

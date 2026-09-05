@@ -40,3 +40,7 @@ test('approved and non-paying guests are not told to pay for tenant approval', (
 test('paper screening completion alone does not imply payment', () => {
   assert.match(bookingApprovalNotice({...pending(),steps:[{id:'screening_complete',done:true}]},authorized),/Arrange payment promptly/);
 });
+test('paper payment copy does not imply that unconfigured instructions are present on the page', () => {
+  const html=bookingApprovalNotice({...pending(),screeningRoute:'paper'},authorized);
+  assert.match(html,/provided by the association/);assert.doesNotMatch(html,/instructions below/);
+});
