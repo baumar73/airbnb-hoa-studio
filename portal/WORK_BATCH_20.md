@@ -10,7 +10,7 @@ gesonderte Arbeit.
 - [x] 1. SMTP-Anhänge: Dateinamen vor Header-Einschleusung schützen
 - [x] 2. SMTP-Antworten auch bei fragmentierten Netzwerkpaketen korrekt lesen
 - [x] 3. Telegram-Störungsmeldungen mit Zeitlimit senden
-- [ ] 4. Versandabgleich: unmögliche UTC-Zeitangaben abweisen
+- [x] 4. Versandabgleich: unmögliche UTC-Zeitangaben abweisen
 - [ ] 5. Stornierungsmails mit mehreren Buchungscodes nicht automatisch zuordnen
 - [ ] 6. Explizite Jahreszahlen in Buchungsdaten erhalten
 - [ ] 7. Prüfversion an Gastname, Verfahrensweg und Kinderzahl binden

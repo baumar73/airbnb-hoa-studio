@@ -535,6 +535,14 @@ async function reconciliationFixture() {
   return {env,now,cases,c,input,call};
 }
 
+test('reconciliation rejects normalized impossible calendar days and 24-hour overflow',async()=>{
+  for(const sentAt of ['2026-02-30T12:00:00Z','2026-02-29T12:00:00Z','2026-02-28T24:00:00Z','2026-02-28T12:60:00Z']) {
+    const {env,cases,c,input}=await reconciliationFixture();
+    c.reviewLockedAt='2026-02-01T00:00:00Z';
+    const result=await reconcileAcceptedPackage(env,cases,c,{...input,sentAt},new Date('2026-03-10T00:00:00Z'));
+    assert.equal(result.status,400);assert.equal(result.ok,false);assert.ok(!c.submission);
+  }
+});
 test('owner can reconcile a verified archived send without sending again or approving HOA/check-in',async()=>{
   const {env,c,call,input}=await reconciliationFixture();
   const {socketAttempts,resetSocketAttempts}=await import('cloudflare:sockets');resetSocketAttempts();

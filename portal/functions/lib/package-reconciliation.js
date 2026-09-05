@@ -3,6 +3,7 @@ import {loadArchivedPackage} from './package-archive.js';
 import {caseReviewDigest} from './review.js';
 import {validMessageId} from './mail-headers.js';
 import {applyDeliveryOutcome} from './delivery.js';
+import {isValidISODate} from './workflow.js';
 
 const fail=(error,status=409)=>({ok:false,error,status});
 // Reconciliation records an owner-verified sent message. It never sends mail,
@@ -17,7 +18,7 @@ export async function reconcileAcceptedPackage(env,cases,c,input,now=new Date())
   // Avoid racing a currently active bounded SMTP operation. An old claim alone
   // proves nothing; the explicit original-message attestation is still required.
   if(!Number.isFinite(claimedAt)||now.getTime()-claimedAt<15*60000)return fail('Delivery may still be running. Wait at least 15 minutes after release.');
-  if(typeof input.sentAt!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z$/.test(input.sentAt)||!Number.isFinite(sentAt)||sentAt<claimedAt||sentAt>now.getTime())return fail('Enter a UTC send time between release and now.',400);
+  if(typeof input.sentAt!=='string'||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?Z$/.test(input.sentAt)||!isValidISODate(input.sentAt.slice(0,10))||!Number.isFinite(sentAt)||sentAt<claimedAt||sentAt>now.getTime())return fail('Enter a UTC send time between release and now.',400);
   if(input.packageId!==c.preparedPackage.id||input.packageHash!==c.preparedPackage.packageHash)return fail('Package changed. Reopen the case.');
   if(!c.reviewHash||await caseReviewDigest(c,c.wizard)!==c.reviewHash)return fail('Paperwork changed. Keep the original delivery held for separate reconciliation.');
   const archive=await loadArchivedPackage(env,c);
