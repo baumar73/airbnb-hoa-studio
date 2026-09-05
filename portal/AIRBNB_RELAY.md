@@ -81,5 +81,5 @@ thread headers/injection, concurrent claims and recipient ownership, opt-out,
 revocation, changed sources, mailbox order/cursor failures and SMTP stalls.
 They do not substitute for real-service acceptance.
 
-Verification: 206 JavaScript tests and 34 Python tests pass, syntax checks and
+Verification: 216 JavaScript tests and 34 Python tests pass, syntax checks and
 Pages build pass, and dependency audit reports zero known vulnerabilities.

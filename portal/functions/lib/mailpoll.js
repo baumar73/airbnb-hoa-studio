@@ -8,6 +8,7 @@ import { loadStoredCases, saveStoredCases } from './storage.js';
 import {configuredHoaSenders,analyseHoaReply,archiveHoaReply,markHoaReplyProcessed,refreshHoaArchiveRetention} from './hoa-mail.js';
 import {captureAirbnbRelay} from './airbnb-relay.js';
 import {pollReminderDelivery} from './reminder-delivery.js';
+import {reconcileBookingUpdate} from './booking-reconcile.js';
 
 const PORTAL = 'https://portal.example.test';
 
@@ -54,8 +55,11 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
       if (seenSet.has('b' + uid)) continue;
       const msg = decodeMessage(await imap.fetchMessage(uid));
       const b = parseBooking(msg, msg.date);
-      const dup = b.code && cases.some(c => c.reservationCode === b.code);
-      if (dup) { seenSet.add('b' + uid); delete ambiguous[uid]; continue; }
+      const existing = b.code && cases.find(c => c.reservationCode === b.code);
+      if (existing) {
+        if(b.complete&&reconcileBookingUpdate(existing,b)) { dirty=true;summary.bookingChanges=(summary.bookingChanges||0)+1; }
+        seenSet.add('b' + uid); delete ambiguous[uid]; continue;
+      }
       if (b.complete) {
         try {
           const c = newCaseFrom(b);

@@ -10,6 +10,7 @@ export function planGuestJourney(c,now=new Date(),{feeRequestAuthorized=true}={}
   if (c.status==='canceled') return {...plan,state:'canceled'};
   if (!isValidISODate(c.checkIn)||!isValidISODate(c.checkOut)) return {...plan,state:'exception',exception:'invalid_stay_dates'};
   if (new Date(c.checkOut+'T23:59:59Z')<now) return {...plan,state:'closed'};
+  if (c.bookingChange?.pending) return {...plan,state:'exception',exception:'booking_changed'};
   if (c.submissionError?.phase==='delivery_uncertain' || c.automation?.reminderClaim?.state==='uncertain') return {...plan,state:'exception',exception:'delivery_reconciliation'};
   const followUp=hoaEvidenceState(c);
   if(followUp.exception) return {...plan,state:'exception',exception:followUp.exception};

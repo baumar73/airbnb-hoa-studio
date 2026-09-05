@@ -55,6 +55,14 @@ Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Onlin
 **Effort:** L
 **Priority:** P1
 
+**Lokaler Fortschritt 2026-09-05:** Wiederholte Bestätigungen mit derselben
+Buchungsnummer werden nicht mehr blind als Duplikat verworfen. Abweichende
+Reisedaten, Belegung oder Gastdaten markieren den Vorgang als ausstehende
+Buchungsänderung, kennzeichnen alte Schritte/Pakete als überholt und halten den
+Gästeablauf bis zur Eigentümerprüfung an. Es erfolgt keine automatische
+Stornierung oder Freigabe; der Abgleich bleibt mit echten Airbnb-Formaten und
+einem kontrollierten Testfall abzunehmen.
+
 - [ ] Änderungen und Stornierungen zuverlässig zuordnen und wiederholte Verarbeitung ohne doppelte Nebenwirkungen testen.
 - [ ] Veraltete Dokumentenpakete und Prüfungen bei relevanten Änderungen als überholt markieren.
 - [ ] Sieben Tage Buchungsvorlauf und erforderliche HOA-Zustimmung vor Bezug im Inserat und Portal konsistent halten; nicht als garantierte Bearbeitungsfrist darstellen.
@@ -119,7 +127,7 @@ Diese drei Commits und der Beleg-/Nachforderungsablauf wurden am 2026-09-05 bis 
 
 ## Prüfstand und Abnahmeregeln
 
-Nach der lokalen Ergänzung des Airbnb-Antwortwegs und der optionalen Zustellüberwachung bestanden 212 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34, 189/34 und 206/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
+Nach der lokalen Ergänzung des Airbnb-Antwortwegs, der optionalen Zustellüberwachung und des Buchungsabgleichs bestanden 216 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34, 189/34, 206/34 und 212/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
 
 - Neue Abläufe brauchen Tests für vollständige, unvollständige, verspätete, geänderte und stornierte Buchungen sowie technische Ausfälle.
 - Eine Buchung kann vor HOA-Zustimmung bestehen; Bezug erst nach erforderlicher Zustimmung. Ablehnungen und mögliche Stornierungen bleiben gesondert zu prüfende Ausnahmen, keine automatische Schuldzuweisung an den Gast.
