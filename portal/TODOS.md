@@ -84,7 +84,16 @@ einem kontrollierten Testfall abzunehmen.
 - [ ] Sichere Ausweisübergabe für den Papierweg klären; keine SSN- oder Ausweis-Uploads im Portal und keine unsichere Ersatzlösung einführen.
 - [ ] Zahlungsanleitung auf nachgewiesene elektronische Möglichkeiten und Gebühren beschränken; keine unbestätigten Karten- oder PayPal-Optionen versprechen.
 - [ ] Gast zahlt direkt an HOA beziehungsweise deren Antragsdienst; kein Eigentümer-Aufschlag und keine doppelte Zahlung bei einem Wechsel des Verfahrens.
-- [ ] Versand-Timeouts und unklaren Versandausgang mit sicherer Wiederaufnahme testen, ohne doppelte Pakete zu versenden.
+- [x] Versand-Timeouts und unklaren Versandausgang mit synthetischen Ausfällen im tatsächlichen Paket-Dispatcher testen, ohne doppelte Pakete zu versenden; reale SMTP-/Neustart-Abnahme bleibt offen.
+
+**Lokaler Fortschritt 2026-09-05 — Paketversand:** Acht zusätzliche Tests prüfen
+Parallelität, Timeout, fehlgeschlagene Belegspeicherung, späte Stornierung oder
+fehlenden Zahlungsnachweis, Benachrichtigungsausfall, Prozessabbruch und Löschung
+während des Versands. Mailserver-Annahme ohne gespeicherten Versandnachweis wird
+nicht mehr als gesicherter Erfolg gemeldet. Die dauerhafte Versandsperre bleibt
+für den manuellen Abgleich erhalten. Ungefilterte Provider-Fehlermeldungen werden
+nicht mehr im Fall gespeichert. Alle 238 JavaScript-Tests und Syntaxprüfungen
+bestanden; keine echten E-Mails, kein Live-Rollout.
 
 ## Produktionssicherheit und Veröffentlichung
 

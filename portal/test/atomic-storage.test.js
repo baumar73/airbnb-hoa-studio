@@ -12,6 +12,7 @@ const {runGuestReminders}=await import('../functions/lib/guest-reminders.js');
 const {computeAlerts}=await import('../cron/src/index.js');
 const {archivePackage,loadArchivedPackage}=await import('../functions/lib/package-archive.js');
 const {automaticReleaseState,runAutomaticSubmissions}=await import('../functions/lib/auto-submit.js');
+const {submitApprovedPackage}=await import('../functions/lib/submit.js');
 
 // The fake serializes transactions, matching the actor's atomic storage API.
 // A separate workerd test verifies the same behavior in Cloudflare's runtime.
@@ -325,6 +326,114 @@ test('automation rejects missing fee evidence, changed signatures, stale review 
   delete env.OWNER_SIGNATURE_AUTHORIZATION;
   assert.ok((await automaticReleaseState(c,env,sig,compliance)).missing.includes('standing_owner_authorization'));
   let deliveries=0;await runAutomaticSubmissions(env,new Date('2026-09-05'),async()=>{deliveries++;});assert.equal(deliveries,0);
+});
+
+test('actual package dispatcher sends archived bytes once across concurrent workers and restart',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;
+  env.ASSETS={fetch:()=>assert.fail('reviewed PDFs must not be regenerated')};
+  const submit=(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async(_env,message)=>{
+    deliveries++;
+    assert.equal(message.attachments.length,4);
+    assert.equal(new TextDecoder().decode(message.attachments[3].bytes),'synthetic PDF fixture 4');
+    assert.ok(message.to.length);
+    assert.ok(![...message.to,...message.cc].includes('synthetic@example.test'),'guest is not a package recipient');
+  },sendNotice:async()=>true});
+  const results=await Promise.all([runAutomaticSubmissions(env,new Date('2026-09-05'),submit),runAutomaticSubmissions(env,new Date('2026-09-05'),submit)]);
+  assert.equal(results.reduce((sum,r)=>sum+r.sent,0),1);
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);
+  assert.equal(deliveries,1);
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.submission.packageHash,saved.preparedPackage.packageHash);
+  assert.ok(saved.reviewLockedAt);
+  assert.equal(saved.steps.some(s=>s.id==='board_approved'&&s.done),false);
+});
+
+test('package transport timeout retains a durable lock and excludes raw provider errors',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;const notices=[];
+  const submit=(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async()=>{
+    deliveries++;throw Error('synthetic-private-password https://example.test/v/private-guest-token SMTP timeout');
+  },sendNotice:async(_env,message)=>{notices.push(message);return true;}});
+  const result=await runAutomaticSubmissions(env,new Date('2026-09-05'),submit);
+  assert.equal(result.failed,1);assert.equal(result.sent,0);
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.submission,undefined);assert.ok(saved.reviewLockedAt);
+  assert.equal(saved.submissionError.phase,'delivery_uncertain');
+  assert.doesNotMatch(JSON.stringify({saved,notices}),/synthetic-private-password|private-guest-token/);
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);
+  assert.equal(deliveries,1);
+});
+
+test('accepted package with failed receipt storage is not reported sent or retried after recovery',async()=>{
+  const {env}=await automaticFixture();const originalGet=env.CASE_STORE.get;
+  let unavailable=false,deliveries=0;const notices=[];
+  env.CASE_STORE.get=()=>({fetch:(url,options)=>unavailable?Promise.resolve(new Response('synthetic unavailable',{status:503})):originalGet().fetch(url,options)});
+  const submit=(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async()=>{deliveries++;unavailable=true;},sendNotice:async(_env,message)=>{notices.push(message);return true;}});
+  const result=await runAutomaticSubmissions(env,new Date('2026-09-05'),submit);
+  assert.equal(result.sent,0);assert.equal(result.failed,1);
+  unavailable=false;
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.submission,undefined);assert.ok(saved.reviewLockedAt);
+  assert.ok(notices.some(n=>n.includes('NICHT erneut senden')));
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);
+  assert.equal(deliveries,1);
+});
+
+test('cancellation or missing payment after package claim prevents SMTP dispatch',async()=>{
+  for(const change of [c=>{c.status='canceled';},c=>{c.steps.find(s=>s.id==='fee_sent').done=false;}]) {
+    const {env}=await automaticFixture();let deliveries=0;
+    const submit=async(c,cases)=>{
+      const fresh=await loadStoredCases(env);change(fresh[0]);await saveStoredCases(env,fresh);
+      return submitApprovedPackage(c,cases,env,{sendMail:async()=>{deliveries++;},sendNotice:async()=>true});
+    };
+    assert.equal((await runAutomaticSubmissions(env,new Date('2026-09-05'),submit)).failed,1);
+    const [saved]=await loadStoredCases(env);
+    assert.equal(deliveries,0);assert.equal(saved.submission,undefined);
+    assert.equal(saved.submissionError.phase,'preparation_failed');assert.ok(saved.reviewLockedAt);
+  }
+});
+
+test('concurrent cancellation during SMTP is retained alongside the accepted package receipt',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;
+  const submit=(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async()=>{
+    deliveries++;const fresh=await loadStoredCases(env);fresh[0].status='canceled';fresh[0].notes='Preserve cancellation';await saveStoredCases(env,fresh);
+  },sendNotice:async()=>true});
+  assert.equal((await runAutomaticSubmissions(env,new Date('2026-09-05'),submit)).sent,1);
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.status,'canceled');assert.equal(saved.notes,'Preserve cancellation');assert.ok(saved.submission);
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);assert.equal(deliveries,1);
+});
+
+test('failure of an owner notification cannot turn an accepted package into a resend',async()=>{
+  const {env}=await automaticFixture();let deliveries=0,notices=0;
+  const submit=(c,cases)=>{
+    const ownerCase={...c,autoRelease:undefined};
+    return submitApprovedPackage(ownerCase,cases,env,{sendMail:async()=>{deliveries++;},sendNotice:async()=>{notices++;throw Error('synthetic notification outage');}});
+  };
+  assert.equal((await runAutomaticSubmissions(env,new Date('2026-09-05'),submit)).sent,1);
+  assert.equal(notices,1);assert.ok((await loadStoredCases(env))[0].submission);
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);assert.equal(deliveries,1);
+});
+
+test('process interruption after durable release claim does not resend on the next run',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;
+  await assert.rejects(runAutomaticSubmissions(env,new Date('2026-09-05'),async()=>{throw Error('synthetic process interruption');}),/synthetic process interruption/);
+  const [saved]=await loadStoredCases(env);
+  assert.ok(saved.reviewLockedAt);assert.equal(saved.submission,undefined);
+  const result=await runAutomaticSubmissions(env,new Date('2026-09-06'),async()=>{deliveries++;});
+  assert.equal(deliveries,0);assert.equal(result.blocked,1);
+});
+
+test('case deleted during accepted delivery is never resurrected or reported durably sent',async()=>{
+  const {env}=await automaticFixture();let deliveries=0;const notices=[];
+  const submit=(c,cases)=>submitApprovedPackage(c,cases,env,{sendMail:async()=>{
+    deliveries++;const fresh=await loadStoredCases(env);
+    await saveStoredCases(env,inheritCaseSnapshot(fresh,[]));
+  },sendNotice:async(_env,message)=>{notices.push(message);return true;}});
+  const result=await runAutomaticSubmissions(env,new Date('2026-09-05'),submit);
+  assert.equal(result.sent,0);assert.equal(result.failed,1);
+  assert.deepEqual(await loadStoredCases(env),[]);
+  assert.ok(notices.some(n=>n.includes('NICHT erneut senden')));
+  await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);assert.equal(deliveries,1);
 });
 test('review-only token cannot access owner controls or send a package',async()=>{
   const {env}=await automaticFixture();env.REVIEW_API_TOKEN='synthetic-review-token-at-least-32-chars';env.ADMIN_USER='owner';env.ADMIN_PASSWORD='test-only';

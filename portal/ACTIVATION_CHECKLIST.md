@@ -44,6 +44,16 @@ folder names; no folder is created or guessed by the worker.
 7. Simulate a canceled reservation during each step. Confirm guest access closes
    and no new delivery or HOA action starts.
 
+Local package-dispatch coverage (2026-09-05): `test/atomic-storage.test.js`
+exercises the actual dispatcher with archived synthetic bytes and fake mail
+transport, including concurrent workers, connection uncertainty, accepted mail
+with failed receipt persistence, cancellation/payment changes before dispatch,
+cancellation/deletion during dispatch, notification failure and interruption
+after a durable claim. Accepted mail without a durable receipt is reported as
+requiring reconciliation, not successful completion. `test/smtp.test.js` covers
+protocol timeouts and disconnects after DATA acceptance. These tests do not prove
+delivery through a real mailbox or restart behavior on the production host.
+
 ## Staged enablement
 
 Only after the synthetic sequence is recorded may the owner enable one function

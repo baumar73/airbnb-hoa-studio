@@ -69,10 +69,10 @@ export async function generatePackage(c, env, source={}) {
   return attachments;
 }
 
-export async function submitApprovedPackage(c, cases, env) {
+export async function submitApprovedPackage(c, cases, env, {sendMail=sendViaGmail,sendNotice=sendTelegram}={}) {
   const live = (await env.CASES.get('submit-live')) === 'yes';
   let mailAttempted=false,mailSent=false;
-  const notify=async message=>{try {await sendTelegram(env,message);} catch {console.error('delivery notification failed');}};
+  const notify=async message=>{try {await sendNotice(env,message);} catch {console.error('delivery notification failed');}};
   const stayRef = `Unit 405D / ${c.guestName} / ${c.checkIn} – ${c.checkOut}${c.reservationCode ? ' / Airbnb ' + c.reservationCode : ''}`;
   const renewal = c.applicationType === 'renewal';
   const feeState = applicationFeeState(c);
@@ -102,7 +102,7 @@ export async function submitApprovedPackage(c, cases, env) {
       if(!fresh||fresh.status==='canceled'||fresh.reviewLockedAt!==c.reviewLockedAt||fresh.preparedPackage?.id!==archive.manifest.id||await caseReviewDigest(fresh,fresh.wizard)!==c.reviewHash||await reviewContextHash(fresh,signature,compliance)!==archive.manifest.contextHash||(live&&!validateLiveSubmissionPrerequisites(fresh).ok)) throw new Error('Reservation or release prerequisites changed before delivery');
     }
     mailAttempted=true;
-    await sendViaGmail(env, {
+    await sendMail(env, {
       to: live ? recipients.to : [OWNER],
       cc: live ? recipients.cc : [],
       subject, text, attachments,
@@ -128,9 +128,14 @@ export async function submitApprovedPackage(c, cases, env) {
     if (mailSent) {
       console.error('delivery accepted but receipt persistence failed; retain delivery lock');
       await notify(`🚨 ${c.guestName}: Die E-Mail wurde vom Mailserver angenommen, der Versandnachweis konnte aber nicht gespeichert werden. NICHT erneut senden. Gesendet-Ordner und Vorgang manuell abgleichen: ${PORTAL}/admin`);
-      return true;
+      // Transport acceptance alone is not a durably recorded submission.
+      // The persisted release lock still prevents another scheduler run from
+      // sending again, while callers must report this as needing reconciliation.
+      return false;
     }
-    const failure={at:new Date().toISOString(),phase:mailAttempted?'delivery_uncertain':'preparation_failed',message:String(e && e.message || e).slice(0,300)};
+    // Provider exceptions can contain addresses, credentials or message bodies.
+    // Persist only a fixed, actionable description, never raw transport text.
+    const failure={at:new Date().toISOString(),phase:mailAttempted?'delivery_uncertain':'preparation_failed',message:mailAttempted?'Delivery could not be confirmed. Reconcile the sent-mail record before another attempt.':'Package preparation failed. No email was sent; review the package and release prerequisites.'};
     try {await persistDeliveryOutcome(env,cases,c,live?{submissionError:failure}:{testSubmissionError:failure});}
     catch {console.error('delivery failure could not be recorded; retain delivery lock');}
     await notify(`🚨 STÖRUNG bei ${c.guestName} (${c.checkIn}): ${mailAttempted?'Versandstatus unklar. Vor einem weiteren Versuch den Gesendet-Ordner prüfen.':'Paketvorbereitung fehlgeschlagen; keine E-Mail versandt.'} Es erfolgt kein automatischer Wiederholungsversuch. Details: ${PORTAL}/admin`);
