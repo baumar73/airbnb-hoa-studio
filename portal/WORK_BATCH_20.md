@@ -26,4 +26,15 @@ gesonderte Arbeit.
 - [x] 17. Explizit fehlgeschlagene Versandantworten nicht als Erfolg behandeln
 - [x] 18. Tenant-Evaluation-Ablauf mit Nachforderung durchgängig lokal prüfen
 - [x] 19. Fehlgeschlagene Paketvorbereitung im Betriebsstatus sichtbar machen
-- [ ] 20. Verschlüsselte lokale Sicherung in getrennten Speicher zurückspielen und prüfen
+- [x] 20. Verschlüsselte lokale Sicherung in getrennten Speicher zurückspielen und prüfen
+
+## Prüfstand nach dem Arbeitsblock
+
+286 JavaScript-Tests, 34 Python-Tests, Syntaxprüfung und Functions-Build bestanden.
+`npm run test:runtime` prüft zusätzlich den atomaren Speicher, Neustarts und eine
+kalte Sicherung in einem getrennten temporären Speicherverzeichnis. Vier
+synthetische Fälle, exakte Dokumentenbytes, Prüfaufträge, Export-Cursor und
+Versandsperren wurden wiederhergestellt; ein falscher Schlüssel wird abgewiesen.
+Das ist kein Nachweis für Stromverlust während eines Schreibvorgangs, keine
+Offsite-Sicherung und keine Produktionsabnahme. Es wurden keine echten E-Mails
+verschickt und keine Produktivschalter geändert.

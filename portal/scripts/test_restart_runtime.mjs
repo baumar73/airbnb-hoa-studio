@@ -1,7 +1,7 @@
 // Local workerd restart drill. Only generated fixtures and temporary storage;
 // no real Cloudflare account, credentials, tenants, mail or host services.
 import * as miniflare from 'miniflare';
-import {readFile,mkdtemp,rm} from 'node:fs/promises';
+import {readFile,mkdtemp,rm,cp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {register} from 'node:module';
@@ -13,14 +13,17 @@ import {findStalledWork} from '../functions/lib/automation-health.js';
 register('../test/loaders/cloudflare-sockets-loader.mjs',import.meta.url);
 const {runGuestReminders}=await import('../functions/lib/guest-reminders.js');
 const root=await mkdtemp(join(tmpdir(),'hoa-restart-fixtures-'));
+const backupRoot=await mkdtemp(join(tmpdir(),'hoa-backup-fixtures-'));
+const restoredRoot=join(backupRoot,'restored');
 let mf;
 try {
   const script=await readFile(new URL('../case-store/src/index.js',import.meta.url),'utf8');
   const options={modules:true,script,compatibilityDate:'2026-06-01',resourcePersistencePath:root,
     durableObjects:{CASE_STORE:{className:'CaseStore',useSQLite:true}},durableObjectsPersist:join(root,'objects'),
     kvNamespaces:['LEGACY_CASES'],kvPersist:join(root,'kv'),bindings:{ALLOW_CASE_IMPORT:'yes'}};
-  const start=async()=>{
-    mf=new miniflare.Miniflare(miniflare.convertV4MiniflareOptions?miniflare.convertV4MiniflareOptions(options):options);
+  const start=async(persistenceRoot=root)=>{
+    const runtimeOptions={...options,resourcePersistencePath:persistenceRoot,durableObjectsPersist:join(persistenceRoot,'objects'),kvPersist:join(persistenceRoot,'kv')};
+    mf=new miniflare.Miniflare(miniflare.convertV4MiniflareOptions?miniflare.convertV4MiniflareOptions(runtimeOptions):runtimeOptions);
     const CASE_STORE=await mf.getDurableObjectNamespace('CASE_STORE');
     const CASES=await mf.getKVNamespace('LEGACY_CASES');
     return {CASE_STORE,CASES,REQUIRE_ATOMIC_CASES:'yes',AUTO_GUEST_REMINDERS:'yes',PORTAL_ORIGIN:'https://example.com',DATA_ENCRYPTION_KEY:Buffer.alloc(32,19).toString('base64')};
@@ -53,6 +56,9 @@ try {
   assert.ok(checkpoint.epoch);assert.equal(checkpoint.changes.length,4);
 
   await mf.dispose();mf=null;
+  // Cold copy after clean shutdown, including SQLite sidecars and KV storage.
+  // A production backup procedure still needs a real independent destination.
+  await cp(root,restoredRoot,{recursive:true,errorOnExist:true,force:false});
   env=await start();
   const restored=await loadStoredCases(env);
   assert.equal(restored.find(c=>c.id==='draft').wizard.adults[0].firstName,'Synthetic private draft');
@@ -90,6 +96,21 @@ try {
   assert.equal((await actor().fetch('https://case-store/initialize',{method:'POST',body:JSON.stringify({expectedHash,expectedCount:0})})).status,409);
   assert.equal((await mf.dispatchFetch('https://worker.example/cases')).status,404);
   console.log('workerd restart OK: two fresh runtimes, encrypted draft/archive recovery, durable send holds, no reminder resend, review lease expiry/reclaim, stale writer rejection, stable export cursor, durable deletion, wrong-key rejection');
+  await mf.dispose();mf=null;
+  env=await start(restoredRoot);
+  const backup=await loadStoredCases(env);
+  assert.equal(backup.length,4);
+  assert.equal(backup.find(c=>c.id==='draft').wizard.adults[0].firstName,'Synthetic private draft');
+  assert.equal(backup.find(c=>c.id==='review').reviewJob.token,firstLease.token);
+  assert.deepEqual((await loadArchivedPackage(env,backup.find(c=>c.id==='packet'))).attachments[0].bytes,bytes);
+  assert.equal((await loadKnowledgeChanges(env,{cursor:checkpoint.nextCursor})).changes.length,0);
+  const restoredRaw=await (await actor().fetch('https://case-store/cases')).json();
+  assert.doesNotMatch(JSON.stringify(restoredRaw),/Synthetic private draft|synthetic@example/);
+  await assert.rejects(loadStoredCases({...env,DATA_ENCRYPTION_KEY:Buffer.alloc(32,20).toString('base64')}));
+  const backupReminders=await runGuestReminders(env,new Date(+now+21*60000),()=>assert.fail('backup restore must not resend claims'));
+  assert.equal(backupReminders.sent,0);assert.equal(backupReminders.uncertain,1);
+  assert.deepEqual(findStalledWork(backup,new Date(+now+21*60000)),{reminderDelivery:1,hoaDelivery:1});
+  console.log('workerd backup restore OK: isolated cold snapshot, four recovered encrypted cases, exact archive bytes, original revision/cursor, durable send holds, wrong-key rejection; no live system touched');
 } finally {
-  try {if(mf)await mf.dispose();} finally {await rm(root,{recursive:true,force:true});}
+  try {if(mf)await mf.dispose();} finally {await Promise.all([rm(root,{recursive:true,force:true}),rm(backupRoot,{recursive:true,force:true})]);}
 }
