@@ -2,6 +2,13 @@
 
 Stand: 2026-09-05. Gesicherte Arbeitsliste aus der Portalprüfung; kein Release und keine Freigabe für den unbeaufsichtigten Live-Betrieb.
 
+Aktueller Abschluss: Der [20er-Technikblock](WORK_BATCH_20.md) ist vollständig
+geprüft und auf GitHub gesichert. [Gesamtstatus und nächste Abnahme](ACCEPTANCE_STATUS.md)
+ordnet alle sechs Hauptpakete ein und benennt verbleibende Implementierung,
+Nachweise und Freigaben. `npm run verify` führt die komplette lokale Prüfkette
+aus. Stand: 286 JavaScript-Tests, 34 Python-Tests, Runtime-/Restore-Tests und alle
+drei Builds bestanden; kein Live-Rollout.
+
 ## Ziel und Status
 
 Der Eigentümer soll Gäste nicht mehr manuell an Unterlagen, Nachforderungen und die HOA-Gebühr erinnern müssen. Routinefälle sollen automatisch bearbeitet werden; unklare Rückmeldungen, Ablehnungen und technische Fehler müssen als nachvollziehbare Ausnahmen sichtbar werden.

@@ -1,5 +1,13 @@
 # Guest knowledge synchronization — export and local consumer prepared, writer not activated
 
+Local consumer hardening, 2026-09-05: destination acknowledgement is now checked
+against a canonical hash of the actual record, including after uncertain writes
+and checkpoint replay. Invalid/missing retention rejects the whole page before
+writes. Capacity is checked before imports/expiry, and stale expiry observations
+cannot overwrite a newer local deletion fence or claim an unapplied deletion.
+These checks do not supply the missing server-side CAS or autonomous expiry
+contract; no destination writer or live import has been activated.
+
 The direct Codex MCP connection is working. This increment implements the portal's
 protected, revisioned export and a destination-neutral local consumer. On 2026-09-05 the owner explicitly approved
 creating a dedicated source and sync identity on the existing brain. They now
