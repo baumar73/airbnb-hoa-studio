@@ -2,6 +2,7 @@
 // This module deliberately performs no network calls and has no gbrain SDK
 // dependency. The caller supplies a bounded page reader and a destination
 // adapter whose writes are scoped by its own credentials.
+import {isValidISODate} from './workflow.js';
 
 const PROTOCOL = 1;
 const MAX_CHANGES = 100;
@@ -57,6 +58,10 @@ function validatePage(page) {
     seen.add(change.id);
     if (change.revision > page.throughRevision) fail('SYNC_PAGE_INVALID');
     if (change.operation === 'upsert' && (!change.record || typeof change.record !== 'object' || Array.isArray(change.record))) fail('SYNC_PAGE_INVALID');
+    if (change.operation === 'upsert') {
+      const deadline=change.record.retention?.expiresAt;
+      if(typeof deadline!=='string'||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?Z$/.test(deadline)||!isValidISODate(deadline.slice(0,10))) fail('SYNC_RETENTION_INVALID');
+    }
     if (change.operation === 'delete' && Object.hasOwn(change, 'record')) fail('SYNC_PAGE_INVALID');
   }
   return page;

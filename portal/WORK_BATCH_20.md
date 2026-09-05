@@ -19,7 +19,7 @@ gesonderte Arbeit.
 - [x] 10. Beschädigte Prüfwiederholungszähler begrenzen
 - [x] 11. gbrain-Schreibergebnis anhand des tatsächlichen Inhalts prüfen
 - [x] 12. gbrain-Ablaufbereinigung vor überholten Löschständen schützen
-- [ ] 13. gbrain-Importe ohne gültige Aufbewahrungsfrist abweisen
+- [x] 13. gbrain-Importe ohne gültige Aufbewahrungsfrist abweisen
 - [ ] 14. gbrain-Zustandsgrenze vor neuen Schreibvorgängen durchsetzen
 - [ ] 15. Abgelaufene HOA-E-Mail-Belege nicht mehr ausliefern
 - [ ] 16. Dokumentenarchiv: ungültige Eingaben vor dem Speichern abweisen

@@ -108,6 +108,16 @@ test('expiry cannot record an old delete over a newer destination or local revis
     assert.deepEqual(s.current(),state);
   }
 });
+test('invalid retention rejects the entire import page before destination writes',async()=>{
+  for(const expiresAt of [undefined,null,'','tomorrow','2026-02-30T12:00:00Z','2026-09-05T24:00:00Z']) {
+    const d=destination(),s=store(),bad=upsert('b',2);bad.record.retention={expiresAt};
+    await assert.rejects(syncKnowledgeExport({stateStore:s,destination:d,now:NOW,fetchPage:async()=>page('e',[upsert('a',1),bad])}),{code:'SYNC_RETENTION_INVALID'});
+    assert.equal(d.calls.length,0);assert.equal(s.saves,0);
+  }
+  const d=destination();
+  await syncKnowledgeExport({stateStore:store(),destination:d,now:NOW,fetchPage:async()=>page('e',[upsert('a',1,'2026-09-01T00:00:00Z')])});
+  assert.equal(d.values.get('a').operation,'delete');
+});
 test('expiry runs independently of source polling and records a deletion fence', async () => {
   const d = destination([{id:'a',operation:'upsert',revision:7,record:{retention:{expiresAt:'2026-09-05T11:59:59Z'}}},{id:'b',operation:'upsert',revision:8,record:{retention:{expiresAt:'2026-10-01T00:00:00Z'}}}]);
   const s = store({protocol:1,epoch:'e',cursor:'c',throughRevision:8,revisions:{}});
