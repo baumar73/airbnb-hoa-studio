@@ -45,6 +45,7 @@ export async function runGuestReminders(env,now=new Date(),send=sendViaGmail) {
     try {await saveStoredCases(env,cases);}
     catch(error) {if(error.code==='CASE_CONFLICT'){result.conflicts++;continue;}throw error;}
     const latest=(await loadStoredCases(env)).find(c=>c.id===id);
+    if(!latest) { result.suppressed++; continue; }
     const current=latest && planGuestJourney(latest,now,{feeRequestAuthorized:externalFeeRequestAuthorized(latest,JSON.parse(await env.CASES.get('compliance-config')||'{}'))});
     if(!current?.guestTasks.length || reminderDeliveryTarget(latest,env,now)?.key!==target.key) {
       await recordResult(env,id,claimId,'suppressed',now);result.suppressed++;continue;

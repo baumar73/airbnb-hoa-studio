@@ -110,3 +110,17 @@ test('late completion or cancellation and concurrent runs never create extra rem
   const canceled=await loadStoredCases(env);canceled[0].status='canceled';canceled[0].steps=[];await saveStoredCases(env,canceled);
   await runGuestReminders(env,new Date('2026-09-11T12:00:00Z'),send);assert.equal(attempts,1);
 });
+test('a case deleted after claiming a reminder is suppressed without dereferencing missing state',async()=>{
+  const {env,requestEmail}=await setup();assert.equal((await requestEmail()).status,303);
+  const cases=await loadStoredCases(env);cases[0].screeningRoute='paper';await saveStoredCases(env,cases);
+  const original=env.CASE_STORE.get;let deleted=false;
+  env.CASE_STORE.get=(name)=>({fetch:async(url,options)=>{
+    const response=await original(name).fetch(url,options);
+    if(!deleted&&options?.method==='PATCH'&&options.body.includes('"state":"claimed"')) {
+      deleted=true;const current=await loadStoredCases(env);current.splice(0,1);await saveStoredCases(env,current);
+    }
+    return response;
+  }});
+  const result=await runGuestReminders(env,NOW,async()=>assert.fail('deleted case must not send'));
+  assert.equal(result.suppressed,1);assert.equal((await loadStoredCases(env)).length,0);
+});
