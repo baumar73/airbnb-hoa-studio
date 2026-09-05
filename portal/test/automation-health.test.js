@@ -36,8 +36,10 @@ test('successful recovery runs in order and clears failure count without sending
 test('diagnostics retain safe stage counts and explicit enabled flags, never arbitrary job output',async()=>{
   const {env,jobs}=fixture();env.AUTO_GUEST_REMINDERS='yes';
   jobs.reminders=async()=>({sent:2,waitingForContact:3,email:'private@example.test',password:'never-store'});
+  jobs.mail=async()=>({bookings:1,hoaLinked:2,hoaUnassigned:1,body:'never-store'});
   const status=await runAutomationCycle(env,jobs,new Date(at));
   assert.deepEqual(status.results.reminders,{sent:2,waitingForContact:3});
+  assert.deepEqual(status.results.mail,{bookings:1,hoaLinked:2,hoaUnassigned:1});
   assert.deepEqual(status.enabled,{guestReminders:true,hoaSubmission:false});
   assert.doesNotMatch(JSON.stringify(status),/private@example|never-store/);
 });

@@ -1,11 +1,11 @@
-// Mail polling: turn Airbnb booking confirmations into cases and HOA approval
-// replies into ticked steps. Anything ambiguous becomes a Telegram alert
-// instead of a guess.
+// Poll the mailbox for bookings and HOA correspondence. Email interpretation
+// creates evidence/triage events only, never approval or payment confirmation.
 import { Imap, decodeMessage } from './imap.js';
-import { parseBooking, parseCancellation, looksLikeApproval } from './parse.js';
+import { parseBooking, parseCancellation } from './parse.js';
 import { sendTelegram } from './email.js';
-import { validateAirbnbCaseInput, shouldAutoApproveFromEmail } from './workflow.js';
+import { validateAirbnbCaseInput } from './workflow.js';
 import { loadStoredCases, saveStoredCases } from './storage.js';
+import {configuredHoaSenders,analyseHoaReply,archiveHoaReply,markHoaReplyProcessed,refreshHoaArchiveRetention} from './hoa-mail.js';
 
 const PORTAL = 'https://portal.example.test';
 
@@ -31,20 +31,20 @@ function newCaseFrom(b) {
   };
 }
 
-export async function pollMail(env) {
+export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(env,text)}={}) {
   const seenRaw = await env.CASES.get('mail-seen');
   const seen = seenRaw ? JSON.parse(seenRaw) : { uids: [] };
   const seenSet = new Set(seen.uids);
-  const imap = new Imap();
-  const summary = { bookings: 0, cancellations: 0, approvals: 0, alerts: 0 };
+  const summary = { bookings: 0, cancellations: 0, approvals: 0, alerts: 0,hoaLinked:0,hoaUnassigned:0 };
   try {
     await imap.open(env.GMAIL_USER || 'contact008@example.test', env.GMAIL_APP_PASSWORD);
 
     // NOTE: query must stay ASCII-only — non-ASCII breaks IMAP quoted strings ("buchung" also matches "Buchung bestätigt")
     const bookingUids = await imap.searchRaw('from:airbnb.com subject:("reservation confirmed" OR buchung) newer_than:30d');
     const cancellationUids = await imap.searchRaw('from:airbnb.com subject:(canceled OR cancelled OR storniert) newer_than:30d');
-    const hoaUids = await imap.searchRaw('from:condominiumassociates.com newer_than:14d');
+    const senders=configuredHoaSenders(env);
     const cases = await loadStoredCases(env);
+    await refreshHoaArchiveRetention(env,cases);
     let dirty = false;
 
     const ambiguous = seen.ambiguous || {};
@@ -105,54 +105,50 @@ export async function pollMail(env) {
       seenSet.add('c' + uid);
     }
 
-    // every association mail becomes a news item for the admin dashboard
+    // Every distinct reply becomes an encrypted source plus a metadata-only
+    // event. Do not deduplicate by subject/day: multiple replies can differ.
+    // The folder must be verified on the actual account (e.g. its All Mail
+    // folder). Never guess localized Gmail names or mutate mailbox filters.
+    if(env.HOA_MAILBOX) await imap.selectMailbox(env.HOA_MAILBOX);
+    const hoaUids = await imap.searchRaw((senders.length?'from:('+senders.join(' OR ')+')':'from:condominiumassociates.com')+' newer_than:90d');
     const newsRaw = await env.CASES.get('hoa-news');
     const news = newsRaw ? JSON.parse(newsRaw) : [];
     let newsDirty = false;
+    const hoaNotifications=[];
+    const hoaProcessed=[];
 
     for (const uid of hoaUids) {
-      if (seenSet.has('h' + uid)) continue;
-      seenSet.add('h' + uid);
       const msg = decodeMessage(await imap.fetchMessage(uid));
-      const day = (msg.date || new Date().toISOString()).slice(0, 10);
-      if (!news.some(n => n.subject === msg.subject && (n.at || '').slice(0, 10) === day)) {
-        news.unshift({
-          at: msg.date || new Date().toISOString(),
-          from: msg.from.replace(/<[^>]*>/g, '').replace(/"/g, '').trim() || 'Example Property Management',
-          subject: msg.subject,
-          excerpt: msg.text.replace(/\s+/g, ' ').trim().slice(0, 400),
-        });
-        newsDirty = true;
-        summary.news = (summary.news || 0) + 1;
+      const analysis=analyseHoaReply(msg,cases,senders);
+      const {processed,...event}=await archiveHoaReply(env,msg,analysis,cases);
+      const hit=cases.find(c=>c.id===event.caseId);
+      const existing=news.find(n=>n.id===event.id);
+      if(hit && !(hit.hoaMailEvents||[]).some(e=>e.id===event.id)) {
+        hit.hoaMailEvents=[...(hit.hoaMailEvents||[]),{id:event.id,at:event.at,mailDate:event.mailDate,categories:event.categories,matchReason:event.matchReason,reviewRequired:true}];
+        dirty=true;summary.hoaLinked++;
       }
-      if (!looksLikeApproval(msg.subject)) continue;
-      const active = cases.filter(c => c.status !== 'canceled' && !c.steps.find(s => s.id === 'board_approved')?.done);
-      const hit = active.find(c => {
-        const last = (c.guestName || '').trim().split(/\s+/).pop();
-        return last && (msg.subject + msg.text.slice(0, 2000)).toLowerCase().includes(last.toLowerCase());
-      });
-      if (hit) {
-        hit.approvalCandidate = {
-          detectedAt: new Date().toISOString(),
-          mailDate: msg.date,
-          subject: msg.subject.slice(0, 160),
-          autoApproved: shouldAutoApproveFromEmail(),
-        };
-        dirty = true; summary.approvals++;
-        await sendTelegram(env, `🏛️ Mögliche Board-Freigabe für ${hit.guestName} (${hit.checkIn}) erkannt: „${msg.subject.slice(0, 70)}“. Aus Sicherheitsgründen wurde nichts automatisch bestätigt und keine Gastmail gesendet. Bitte im Admin prüfen: ${PORTAL}/admin/cases`);
-      } else {
-        summary.alerts++;
-        await sendTelegram(env, `🏛️ Mail der Verwaltung sieht nach Approval aus, passt aber zu keinem offenen Vorgang: „${msg.subject.slice(0, 80)}" — bitte selbst prüfen.`);
+      if(!existing && !processed) {
+        news.unshift(event);newsDirty=true;summary.news=(summary.news||0)+1;
+        if(!hit) summary.hoaUnassigned++;
+        // No private body, guest name or sender-provided instructions in alerts.
+        hoaNotifications.push('🏛️ Neue HOA-E-Mail erfasst. '+(hit?'Dem Mietvorgang zugeordnet.':'Zuordnung unklar.')+' Zahlungs- und Freigabestatus wurden nicht verändert. Quelle unter '+PORTAL+'/admin/hoa-mail/'+event.id+' prüfen.');
+      } else if(existing && existing.caseId!==event.caseId) {
+        Object.assign(existing,event);newsDirty=true;
       }
+      if(!processed) hoaProcessed.push(event.id);
     }
 
+    // Persist case events before cursors/indexes. Failed atomic updates must be
+    // retried on the next poll; archived evidence alone is not a processed event.
+    if (dirty) await saveStoredCases(env, cases);
     if (newsDirty) {
       news.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
       await env.CASES.put('hoa-news', JSON.stringify(news.slice(0, 100)));
     }
-    if (dirty) await saveStoredCases(env, cases);
     seen.uids = [...seenSet].slice(-2000);
     await env.CASES.put('mail-seen', JSON.stringify(seen));
+    for(const id of hoaProcessed) await markHoaReplyProcessed(env,id);
+    for(const text of hoaNotifications) {try {await notify(text);} catch { /* Source and pending event remain visible in the portal. */ }}
   } finally {
     await imap.close();
   }

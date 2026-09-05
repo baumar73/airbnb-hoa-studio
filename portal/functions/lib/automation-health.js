@@ -4,7 +4,7 @@ const KEY='automation-health-v1';
 const MINUTE=60000;
 const age=(value,now)=>{const parsed=Date.parse(value||'');return Number.isFinite(parsed)?now.getTime()-parsed:Infinity;};
 const save=(env,status)=>env.CASES.put(KEY,JSON.stringify(status));
-const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflicts','uncertain','suppressed','created','cancellations','approvals','alerts','news','released','skipped'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
+const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflicts','uncertain','suppressed','created','bookings','cancellations','approvals','alerts','news','released','skipped','hoaLinked','hoaUnassigned'].filter(k=>Number.isSafeInteger(result?.[k])&&result[k]>=0).map(k=>[k,result[k]]));
 
 export async function readAutomationStatus(env) {
   const raw=await env.CASES.get(KEY);

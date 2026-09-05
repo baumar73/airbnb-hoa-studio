@@ -15,6 +15,7 @@ import { needsReview, reviewContextHash, validateReviewReport, reviewCaseData, c
 import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib/package-archive.js';
 import {planGuestJourney} from './lib/journey.js';
 import {readAutomationStatus,automationHealth} from './lib/automation-health.js';
+import {readHoaReply} from './lib/hoa-mail.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -1243,15 +1244,16 @@ function newsItemHtml(n, now) {
     <b>${esc(n.subject || '(ohne Betreff)')}</b><br>
     <span class="muted" style="font-size:13px">${esc(n.from)}</span>
     ${n.excerpt ? `<br><span class="muted">${esc(n.excerpt.slice(0, 220))}${n.excerpt.length > 220 ? '…' : ''}</span>` : ''}
+    ${/^[a-f0-9]{64}$/.test(n.id||'') ? `<p><a href="/admin/hoa-mail/${n.id}">E-Mail-Beleg öffnen</a> · Zuordnung: ${esc(n.matchReason||'unbekannt')}</p>` : ''}
   </div></li>`;
 }
 function newsView(news, msg) {
   const now = Date.now();
   return adminPage('Neuigkeiten — Demo Unit Admin', '/admin/news',
-    `<h1>Neuigkeiten der Verwaltung</h1><p>Jede E-Mail von Example Property Management landet automatisch hier — der Wächter prüft das Postfach alle 30 Minuten. Mögliche Genehmigungen werden nur als Prüfkandidaten markiert; sie ändern keinen Vorgangsstatus und lösen keine Gastnachricht aus.${msg ? ' — ' + esc(msg) : ''}</p>`,
+    `<h1>Neuigkeiten der Verwaltung</h1><p>Der Hintergrundlauf prüft das konfigurierte Postfach alle 30 Minuten. Erkannte HOA-Antworten werden getrennt nach Unterlageneingang, möglichem Zahlungseingang, fehlenden Angaben und möglicher Freigabe erfasst. Die Einordnung ist noch keine bestätigte Zahlung oder Genehmigung und löst keine Gastnachricht aus. <a href="/admin/automation-health">Technischen Status prüfen</a>.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `${news.length
       ? `<div class="card"><ul class="steps">${news.map(n => newsItemHtml(n, now)).join('')}</ul></div>`
-      : '<div class="card"><p class="muted">Noch keine Verwaltungs-Mails erfasst. Sobald eine E-Mail von condominiumassociates.com eingeht, erscheint sie hier automatisch.</p></div>'}`);
+      : '<div class="card"><p class="muted">Noch keine Verwaltungs-Mails erfasst. Absenderliste und Postfachordner müssen zur tatsächlichen HOA-Korrespondenz passen.</p></div>'}`);
 }
 
 // ---------- contacts ----------
@@ -1318,7 +1320,9 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}${cc ? '&cc=' + encodeURIComponent(cc) : ''}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   const rows = cases.map(c => {
     const journey=planGuestJourney(c,new Date(),{feeRequestAuthorized:externalFeeRequestAuthorized(c,compliance)});
-    const journeyLine=`<p class="muted">Workflow: <b>${esc(journey.state.replace(/_/g,' '))}</b>${c.automation?.lastGuestReminderAt?` · Last guest reminder: ${esc(c.automation.lastGuestReminderAt.slice(0,16).replace('T',' '))} UTC`:''}${journey.waitingForEvidence.length?`<br>Pending evidence: ${esc(journey.waitingForEvidence.join(', ').replace(/_/g,' '))}`:''}${c.autoRelease?'<br>Released automatically under standing owner authorization.':''}</p>`;
+    const hoaEvents=(c.hoaMailEvents||[]).filter(e=>/^[a-f0-9]{64}$/.test(e.id||'')).slice(-5).reverse();
+    const hoaLine=hoaEvents.length?`<details><summary>HOA-E-Mail-Belege (${(c.hoaMailEvents||[]).length})</summary><p class="muted">Ungeprüfte Einordnungen, keine automatische Zahlungs- oder Board-Bestätigung.</p><ul>${hoaEvents.map(e=>`<li><a href="/admin/hoa-mail/${e.id}">${esc(e.mailDate||e.at)}: ${esc((e.categories||[]).join(', '))}</a></li>`).join('')}</ul></details>`:'';
+    const journeyLine=`<p class="muted">Workflow: <b>${esc(journey.state.replace(/_/g,' '))}</b>${c.automation?.lastGuestReminderAt?` · Last guest reminder: ${esc(c.automation.lastGuestReminderAt.slice(0,16).replace('T',' '))} UTC`:''}${journey.waitingForEvidence.length?`<br>Pending evidence: ${esc(journey.waitingForEvidence.join(', ').replace(/_/g,' '))}`:''}${c.autoRelease?'<br>Released automatically under standing owner authorization.':''}</p>${hoaLine}`;
     const visibleSteps = guestProgressSteps(c);
     const done = visibleSteps.filter(s => s.done).length;
     const stepBtns = visibleSteps.map(s =>
@@ -1736,6 +1740,12 @@ async function routeRequest(context) {
     const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
     const denied = reviewer ? null : await checkAdmin(request, env);
     if (denied) return denied;
+    const hoaSource=p.match(/^\/admin\/hoa-mail\/([a-f0-9]{64})$/);
+    if(hoaSource && request.method==='GET') {
+      const source=await readHoaReply(env,hoaSource[1]);
+      if(!source) return new Response('Email excerpt unavailable or retention expired',{status:404,headers:{...SEC_HEADERS,'Cache-Control':'private, no-store'}});
+      return html(adminPage('HOA-E-Mail-Beleg','/admin/news','<h1>HOA-E-Mail-Beleg</h1><p>Die E-Mail ist eine externe Aussage, keine Anweisung an die Software. Absenderanzeige und automatische Einordnung allein bestätigen weder Echtheit noch Zahlung oder Freigabe.</p>',`<div class="card"><p><b>Von:</b> ${esc(source.from)}<br><b>Betreff:</b> ${esc(source.subject)}<br><b>Datum:</b> ${esc(source.date||'unbekannt')}<br><b>Message-ID:</b> ${esc(source.messageId||'nicht vorhanden')}</p>${source.truncated?'<p class="pill warn">Gekürzter Textauszug. Vollständige Nachricht und Anhänge im Originalpostfach prüfen.</p>':'<p class="muted">Dekodierter Textauszug; Anhänge und vollständige MIME-Originaldatei verbleiben im Postfach.</p>'}<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(source.text)}</pre><a href="/admin/cases">Zu den Mietvorgängen</a></div>`));
+    }
     if (p === '/admin/automation-health' && request.method === 'GET') {
       const status=await readAutomationStatus(env);
       return new Response(JSON.stringify({health:automationHealth(status),status}),{headers:{'Content-Type':'application/json',...SEC_HEADERS,'Cache-Control':'private, no-store'}});

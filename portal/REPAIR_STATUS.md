@@ -85,6 +85,36 @@ It must be represented in the activation audit; it does not assert HOA approval.
   enabled flags; reviewer-only credentials cannot access it. The original
   `/healthz` remains a basic web liveness check. A healthy cron heartbeat does not
   mean guest communications are enabled or the product is release-ready.
+- HOA email monitoring now uses the existing half-hourly poller as its return
+  channel; the association needs no portal account or software integration.
+  `functions/lib/hoa-mail.js` classifies new prose as package receipt, possible
+  payment receipt, missing items, possible approval, adverse response or other.
+  These are explicitly unverified triage categories, NEVER confirmed workflow
+  steps. Exact booking codes take precedence; without a code, full name AND both
+  stay dates must identify one case. Unknown/multiple codes, conflicting dates,
+  surname-only matches and non-allowlisted senders remain unassigned. A canceled
+  reservation may retain later correspondence but is never reopened.
+- `functions/lib/mailpoll.js` no longer assigns approval candidates by loose
+  surname matching or suppresses separate same-subject/same-day replies. Each
+  source excerpt has a stable content hash, encrypted storage and a processed
+  marker separate from the short news index. Case linkage is saved before the
+  processed marker. A failed case save is retried, not silently acknowledged.
+  General news and notifications contain metadata, not the email body.
+- `functions/lib/imap.js` adds Message-ID capture with header/body separation,
+  read-only mailbox selection, bounded transport waits and redacted login errors.
+  `HOA_MAIL_SENDERS` is a comma-separated list of verified exact sender addresses.
+  `HOA_MAILBOX`, if supplied, selects a verified ASCII/IMAP-encoded archive folder
+  AFTER processing Airbnb messages in INBOX. No folder name, address or mailbox
+  filter is inferred/configured on the real account. The HOA lookback is 90 days.
+- `functions/[[path]].js`: owner-only `/admin/hoa-mail/:hash` decrypts and renders
+  a plain-text excerpt with no-store headers; email HTML cannot execute. News and
+  case views link to these excerpts. Reviewer credentials cannot access them.
+  `automation-health.js` exposes numeric linked/unassigned email counts only.
+
+New email-monitoring tests live in `test/hoa-mail.test.js`; status counters are
+covered in `test/automation-health.test.js`. The investigate workflow drove the
+failing regressions for duplicate replies, unsafe matching, source access, missing
+sender configuration, transport stalls and credential-containing IMAP failures.
 
 The legacy storage fallback deliberately remains active until an approved
 cutover. Therefore, adding this code alone does NOT repair live KV concurrency.
@@ -93,12 +123,16 @@ the parser fix does not reconstruct missing names from nothing.
 
 ## Verification
 
-- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 111 tests pass.
+- `npm test` / `node --test --test-reporter=dot test/*.test.js`: 125 tests pass.
   Seven new regressions cover stale browser revisions/changed booking dates,
   retained form inputs on conflict and connection loss, stage-specific failure,
   recovery, alert cooldown, stranded claims, safe counters and authenticated
-  health access. The rendered form script is exercised in a minimal DOM adapter,
+    health access. The rendered form script is exercised in a minimal DOM adapter,
   not represented as a real mobile/browser end-to-end test.
+- Fourteen additional HOA-mail regressions cover triage categories, quoted
+  history, repeat guests, ambiguous/suspicious senders, duplicate replay,
+  same-day replies, failed persistence, encrypted retention/holds, owner-only
+  safe display, archive-folder ordering and IMAP deadline/error redaction.
 - `python3 -m unittest discover -s test -p 'test_*.py'`: 7 tests pass.
 - `node scripts/test_atomic_runtime.mjs`: passes in local Miniflare/workerd with
   SQLite Durable Objects, synthetic encrypted records and no cloud account.
@@ -220,7 +254,46 @@ or notification cooldown; delivery safety remains in atomic case claims. Wire an
 independent external monitor to `/automation-healthz` during approved rollout:
 an entirely stopped scheduler cannot alert about its own outage. Neither that
 monitor nor production heartbeat routes have been activated here. SMTP/IMAP
-timeouts and verified delivery reconciliation remain pending; a stalled claim is
+transport verification and verified delivery reconciliation remain pending;
+SMTP timeouts remain unimplemented. A stalled claim is
 detected, not automatically unlocked. A booking date change already recorded in
 the portal invalidates an old form, but ingestion of Airbnb amendments is still
 unimplemented. No actual HOA or payment acceptance is inferred by these repairs.
+
+## HOA email activation and remaining boundaries
+
+The user confirmed that the association responds only by email. Reuse the existing
+Cloudflare mail-poll schedule; no second Codex task/monitor or new HOA account is
+needed for this software feature. No production scheduler or mailbox was changed.
+Before activation, verify the actual sender list, whether filters archive replies,
+the correct selected mailbox and real reply/attachment formats. Without a sender
+list, the historical domain query remains for intake, but replies stay unassigned.
+Selecting an archive folder without verifying it on the account is not acceptable.
+
+This is monitored intake and case-linked triage, NOT automatic evidence validation.
+A From address is not proof of authenticity; DKIM/DMARC/provider-authentication
+checks are not implemented. Keywords cannot establish HOA approval or fee receipt.
+The current studio invariant forbids inferring approvals from inbound email, and
+the implementation leaves `fee_sent`, `board_approved`, delivery locks and guest
+messaging unchanged. Any adverse decision also remains a separate reviewed action.
+Routine source review still requires the owner until a verified evidence-validation
+workflow is agreed and tested against actual messages. Do not claim zero-touch HOA
+reconciliation or activation of live monitoring from this change alone.
+
+Only a decoded text excerpt (up to 24,000 characters) is archived, not a full MIME
+original or attachments. Keep the mailbox originals. Complex multipart/HTML replies
+and attachments need real-message tests before relying on extraction. Archived
+excerpts expire 90 days after intake or the matched checkout, whichever is later.
+The next successful scan extends retention for extended stays and removes expiry
+for linked legal holds, including messages outside the query window. Releasing a
+hold is not inferred. An outage at the expiry boundary, explicit erasure of an
+individual case, and previously unassigned messages need a verified archive
+retention/deletion runbook before rollout; deleting a case does not delete its
+separate email archive or the original mailbox message.
+
+Content-hash deduplication and processed markers use eventually consistent KV;
+they prevent normal repeat scans but do not promise exactly-once owner alerts
+under concurrent workers. Notifications are best effort after durable intake;
+an interruption/failure there leaves the pending source visible in the portal.
+No email input directly sends guest messages, grants workflow evidence, or causes
+HOA dispatch. Import catch-up may surface historical correspondence for review.

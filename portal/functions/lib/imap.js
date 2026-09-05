@@ -4,7 +4,16 @@
 import { connect } from 'cloudflare:sockets';
 
 export class Imap {
-  constructor() { this.tagN = 0; this.buf = ''; }
+  constructor({timeoutMs=15000}={}) { this.tagN = 0; this.buf = '';this.timeoutMs=timeoutMs;this.closed=false; }
+
+  async bounded(operation) {
+    let timer;
+    try {return await Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>{
+      this.closed=true;
+      try {Promise.resolve(this.sock?.close()).catch(()=>{});} catch { /* best effort transport abort */ }
+      reject(new Error('IMAP transport timeout'));
+    },this.timeoutMs);})]);} finally {clearTimeout(timer);}
+  }
 
   async open(user, pass, host) {
     this.sock = connect((host || 'imap.gmail.com') + ':993', { secureTransport: 'on', allowHalfOpen: false });
@@ -12,9 +21,15 @@ export class Imap {
     this.r = this.sock.readable.getReader();
     this.dec = new TextDecoder();
     this.enc = new TextEncoder();
-    await this.readUntil(/^\* (OK|PREAUTH)/m);
+    await this.bounded(this.readUntil(/^\* (OK|PREAUTH)/m));
     await this.cmd(`LOGIN ${JSON.stringify(user)} ${JSON.stringify(pass)}`);
-    await this.cmd('SELECT INBOX');
+    await this.selectMailbox('INBOX');
+  }
+
+  async selectMailbox(name) {
+    // Read-only mailbox access. Non-ASCII names need verified IMAP encoding.
+    if(!/^[\x20-\x7e]{1,200}$/.test(String(name||''))) throw new Error('Invalid IMAP mailbox name');
+    await this.cmd('EXAMINE '+JSON.stringify(name));
   }
 
   async readMore() {
@@ -33,12 +48,15 @@ export class Imap {
   }
 
   async cmd(c) {
+    if(this.closed) throw new Error('IMAP connection closed');
     const tag = 'A' + (++this.tagN);
-    await this.w.write(this.enc.encode(`${tag} ${c}\r\n`));
     const re = new RegExp(`^${tag} (OK|NO|BAD)([^\\r\\n]*)`, 'm');
-    const resp = await this.readUntil(re);
+    const resp = await this.bounded((async()=>{
+      await this.w.write(this.enc.encode(`${tag} ${c}\r\n`));
+      return this.readUntil(re);
+    })());
     const m = resp.match(re);
-    if (m[1] !== 'OK') throw new Error(`IMAP ${m[1]}${m[2]}: ${c.slice(0, 30)}`);
+    if (m[1] !== 'OK') throw new Error(`IMAP command rejected (${m[1]})`);
     return resp;
   }
 
@@ -51,18 +69,20 @@ export class Imap {
 
   // returns raw response containing headers + first MIME part text
   async fetchMessage(uid) {
-    return this.cmd(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE)] BODY.PEEK[1])`);
+    return this.cmd(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)] BODY.PEEK[1])`);
   }
 
   async close() {
     try { await this.cmd('LOGOUT'); } catch (e) {}
-    try { await this.sock.close(); } catch (e) {}
+    try { await this.bounded(this.sock.close()); } catch (e) {}
+    this.closed=true;
   }
 }
 
 // Decode a fetched message blob into { subject, from, text } (best effort).
 export function decodeMessage(raw) {
-  const subjM = raw.match(/^Subject: ([^\r\n]+(?:\r\n[ \t][^\r\n]+)*)/mi);
+  const header=raw.split(/BODY\[1\]/i)[0];
+  const subjM = header.match(/^Subject: ([^\r\n]+(?:\r\n[ \t][^\r\n]+)*)/mi);
   let subject = subjM ? subjM[1].replace(/\r\n[ \t]/g, ' ') : '';
   // RFC2047 encoded words
   subject = subject.replace(/=\?utf-8\?B\?([^?]+)\?=/gi, (_, b) => {
@@ -70,8 +90,9 @@ export function decodeMessage(raw) {
   }).replace(/=\?utf-8\?Q\?([^?]+)\?=/gi, (_, q) => {
     try { return q.replace(/_/g, ' ').replace(/=([0-9A-F]{2})/gi, (__, h) => String.fromCharCode(parseInt(h, 16))); } catch (e) { return _; }
   });
-  const fromM = raw.match(/^From: ([^\r\n]+)/mi);
-  const dateM = raw.match(/^Date: ([^\r\n]+)/mi);
+  const fromM = header.match(/^From: ([^\r\n]+)/mi);
+  const dateM = header.match(/^Date: ([^\r\n]+)/mi);
+  const messageIdM=header.match(/^Message-ID:\s*(<[^<>\r\n]+>)/mi);
   let date = null;
   if (dateM) { const d = new Date(dateM[1]); if (!isNaN(d)) date = d.toISOString(); }
 
@@ -83,8 +104,9 @@ export function decodeMessage(raw) {
   text = text.replace(/(?:[A-Za-z0-9+/]{60,}\r?\n)+[A-Za-z0-9+/=]*/g, (blk) => {
     try { return decodeURIComponent(escape(atob(blk.replace(/\s+/g, '')))); } catch (e) { return blk; }
   });
+  const replyText=text.replace(/<blockquote\b[\s\S]*?<\/blockquote>/gi,'').replace(/<(?:br|\/p|\/div)\b[^>]*>/gi,'\n').replace(/<[^>]+>/g,' ');
   // strip html
   text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
              .replace(/&amp;/g, '&').replace(/[ \t]+/g, ' ');
-  return { subject, from: fromM ? fromM[1] : '', date, text };
+  return { subject, from: fromM ? fromM[1] : '', date, text,replyText,messageId:messageIdM?.[1]||null };
 }
