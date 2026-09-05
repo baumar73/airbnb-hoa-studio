@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {register} from 'node:module';
 register('./loaders/cloudflare-sockets-loader.mjs',import.meta.url);
-const {runAutomationCycle,automationHealth,findStalledWork,notifyAutomationFailure}=await import('../functions/lib/automation-health.js');
+const {runAutomationCycle,automationHealth,findStalledWork,notifyAutomationFailure,readAutomationStatus}=await import('../functions/lib/automation-health.js');
 const {onRequest}=await import('../functions/[[path]].js');
 const at='2026-09-05T12:00:00Z';
 function fixture(){
@@ -58,6 +58,12 @@ test('missing heartbeat is unhealthy and failed notification does not consume it
   const status=await runAutomationCycle(env,jobs,new Date('2026-09-05T12:30:00Z'));
   assert.equal(status.lastAlertAt,undefined);
   let sent=0;await notifyAutomationFailure(env,status,new Date('2026-09-05T13:00:00Z'),async()=>{sent++;return true;});assert.equal(sent,1);
+});
+test('corrupt persisted automation status is treated as absent so the next cycle can recover',async()=>{
+  const {env,jobs,values}=fixture();values.set('automation-health-v1','{"state":');
+  assert.equal(await readAutomationStatus(env),null);
+  const status=await runAutomationCycle(env,jobs,new Date(at));
+  assert.equal(status.state,'completed');assert.equal(JSON.parse(values.get('automation-health-v1')).state,'completed');
 });
 test('public health exposes no details and detailed status requires owner credentials',async()=>{
   const {env,jobs}=fixture();await runAutomationCycle(env,jobs,new Date());

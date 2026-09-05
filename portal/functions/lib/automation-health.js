@@ -9,7 +9,9 @@ const safeCounts=result=>Object.fromEntries(['sent','waitingForContact','conflic
 
 export async function readAutomationStatus(env) {
   const raw=await env.CASES.get(KEY);
-  return raw?JSON.parse(raw):null;
+  if(!raw)return null;
+  try { return JSON.parse(raw); }
+  catch { return null; }
 }
 
 export function findStalledWork(cases,now=new Date()) {
