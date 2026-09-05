@@ -3,6 +3,7 @@
   "version": "1.1.0",
   "description": "Private HOA guest-paperwork and owner-review portal for Example Island Unit 405D",
   "scripts": {
+    "verify": "node scripts/verify.mjs",
     "test": "node --test test/*.test.js",
     "test:runtime": "node scripts/test_atomic_runtime.mjs && node scripts/test_restart_runtime.mjs",
     "check": "bash -lc 'for f in functions/[[path]].js functions/lib/*.js cron/src/*.js; do node --check \"$f\" || exit 1; done'",

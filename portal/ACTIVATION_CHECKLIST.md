@@ -1,5 +1,13 @@
 # Controlled activation checklist
 
+## One-command local verification
+
+Run `npm run verify` from `portal/` (installed npm dependencies and Python 3
+required). It stops on the first failed gate: JavaScript tests, syntax checks,
+Python tests, local workerd/restart/backup recovery, Pages compilation, cron
+dry-run and case-store dry-run. It does not deploy, read guest records or send
+mail. Run `npm audit --json` separately for the network-backed dependency audit.
+
 ## Repeatable local runtime recovery drill
 
 Run `npm run test:runtime` from `portal/`. This executes the existing atomic-store
@@ -17,10 +25,14 @@ Verified with synthetic records on 2026-09-05:
   reclaimed with a new token. A stale pre-restart writer receives a conflict.
 - Knowledge-export epoch/cursor and deletions survive the next restart.
 - A wrong encryption key is rejected; the actor has no public case endpoint.
+- A cold snapshot restores into a separate temporary directory. All four
+  synthetic cases, exact archive bytes, original review lease, export cursor
+  and send holds are checked independently of the changed original store.
 
 The drill uses orderly local runtime shutdown, not abrupt host power loss. It
-does not exercise a production host, send real mail, change production bindings
-or restore a backup. Keep those real operational acceptance gates open below.
+does not exercise a production host, send real mail or change production bindings.
+Its backup is local and synthetic, not an offsite production recovery. Keep the
+real operational acceptance gates open below.
 
 This is a runbook for the existing deployment. It authorizes no deployment,
 service move, mailbox change or real message by itself. Use synthetic records and
