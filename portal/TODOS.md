@@ -1,0 +1,128 @@
+# TODOS — Automatischer Gäste- und HOA-Ablauf
+
+Stand: 2026-09-05. Gesicherte Arbeitsliste aus der Portalprüfung; kein Release und keine Freigabe für den unbeaufsichtigten Live-Betrieb.
+
+## Ziel und Status
+
+Der Eigentümer soll Gäste nicht mehr manuell an Unterlagen, Nachforderungen und die HOA-Gebühr erinnern müssen. Routinefälle sollen automatisch bearbeitet werden; unklare Rückmeldungen, Ablehnungen und technische Fehler müssen als nachvollziehbare Ausnahmen sichtbar werden.
+
+Die Oberfläche ist weiter als der durchgehend automatische Ablauf. „Lokal programmiert“, „lokal getestet“ und „in Produktion aktiviert und abgenommen“ sind getrennte Zustände. Kein offener Punkt unten gilt allein durch vorhandenen Code als erledigt.
+
+Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Online-Antrag → konkrete Nachforderungen → Erinnerungen → nachgewiesener Abschluss → HOA-Entscheidung.
+
+## Tenant Evaluation und HOA-Rückmeldungen
+
+### Verifizierbare Rückmeldungen und Nachforderungen verarbeiten
+
+**What:** Abschluss, Zahlung, Vollständigkeit und HOA-Entscheidung getrennt und anhand belastbarer Nachweise erfassen.
+**Why:** Die Selbstauskunft des Gastes „erledigt“ ersetzt keine Bestätigung; sonst bleibt die Nachverfolgung beim Eigentümer.
+**Context:** E-Mail-Auswertung und Zuordnung sind vorbereitet, dienen aber zunächst der Prüfung. Eine eingehende E-Mail oder KI-Klassifizierung darf nicht als automatische Genehmigung behandelt werden.
+**Effort:** L
+**Priority:** P1
+
+- [ ] Festlegen und anhand tatsächlicher Rückmeldungen prüfen, welche Nachweise Tenant Evaluation und HOA für die einzelnen Schritte liefern.
+- [ ] HOA-Nachforderungen nach sicherer Zuordnung als konkrete offene Gastaufgaben abbilden; erledigte Vorgänge bei neuen Anforderungen kontrolliert wieder öffnen.
+- [ ] Mehrdeutige, widersprüchliche oder nicht sicher zuordenbare Nachrichten zur Prüfung vorlegen, ohne einen positiven Status zu erfinden.
+- [ ] Durchgängigen Testfall vom Antrag bis zur belegten HOA-Entscheidung einschließlich Nachforderung abnehmen.
+
+## Erinnerungen und Erreichbarkeit
+
+### Zuverlässigen Nachfassweg für jeden Gast schließen
+
+**What:** Statusabhängige Erinnerungen aktivieren und einen verlässlichen Weg für Gäste ohne bekannte E-Mail-Adresse ergänzen.
+**Why:** Unterschiedliche Antwortzeiten und teilweise ausgefüllte Unterlagen dürfen keine manuelle Merkliste erfordern.
+**Context:** Gezielte E-Mail-Erinnerungen sind lokal programmiert, aber nicht aktiviert. Ohne Gast-E-Mail fehlt noch ein verlässlicher Nachfassweg über Airbnb.
+**Effort:** L
+**Priority:** P1
+**Depends on:** Eindeutige offene Aufgaben und belastbare Statusänderungen.
+
+- [ ] E-Mail-Erreichbarkeit und den zulässigen Airbnb-Nachfassweg klären und testen.
+- [ ] Erinnerungen konkret auf fehlende Angaben, Unterlagen, Zahlung oder Nachforderungen beziehen.
+- [ ] Versandfehler, doppelte Ausführung und verspätete Antworten testen; erledigte und stornierte Fälle nicht weiter erinnern.
+- [ ] Erinnerungen erst nach kontrolliertem Test und ausdrücklicher Betriebsfreigabe aktivieren.
+
+## Airbnb-Buchungsabgleich
+
+### Änderungen automatisch übernehmen
+
+**What:** Änderungen an Reisedaten, Belegung und Buchungsstatus zuverlässig in den Fall übernehmen.
+**Why:** Veraltete Angaben können falsche Dokumente, Fristen und Erinnerungen auslösen.
+**Context:** Der automatische Abgleich ist noch nicht vollständig; relevante Änderungen müssen gegebenenfalls neue Unterlagen und eine erneute Prüfung auslösen.
+**Effort:** L
+**Priority:** P1
+
+- [ ] Änderungen und Stornierungen zuverlässig zuordnen und wiederholte Verarbeitung ohne doppelte Nebenwirkungen testen.
+- [ ] Veraltete Dokumentenpakete und Prüfungen bei relevanten Änderungen als überholt markieren.
+- [ ] Sieben Tage Buchungsvorlauf und erforderliche HOA-Zustimmung vor Bezug im Inserat und Portal konsistent halten; nicht als garantierte Bearbeitungsfrist darstellen.
+
+## Dokumente und Zahlungsablauf
+
+### Echten Dokumenten- und Versandweg vollständig abnehmen
+
+**What:** Papier- und Online-Weg mit den tatsächlichen Anforderungen Ende zu Ende prüfen.
+**Why:** Lokale Tests ersetzen weder echte Vorlagen noch den Nachweis, dass alle erforderlichen Vertragsunterlagen beim richtigen Empfänger ankommen.
+**Context:** Automatischer Papierpaket-Versand mit der für diesen Zweck freigegebenen hinterlegten Unterschrift ist vorbereitet. Tests mit tatsächlichen Vorlagen und echtem Versandweg stehen aus. Für den Online-Weg ist zu klären, welche Vertragsunterlagen Tenant Evaluation tatsächlich abdeckt.
+**Effort:** L
+**Priority:** P1
+
+- [ ] Dokumentenabdeckung von Tenant Evaluation klären und verbleibende Vertragslücken schließen.
+- [ ] PDF-Ausgabe, Unterschriftenzuordnung, unveränderliche Archivierung und richtigen Empfängerkreis mit echten Vorlagen kontrolliert testen.
+- [ ] Sichere Ausweisübergabe für den Papierweg klären; keine SSN- oder Ausweis-Uploads im Portal und keine unsichere Ersatzlösung einführen.
+- [ ] Zahlungsanleitung auf nachgewiesene elektronische Möglichkeiten und Gebühren beschränken; keine unbestätigten Karten- oder PayPal-Optionen versprechen.
+- [ ] Gast zahlt direkt an HOA beziehungsweise deren Antragsdienst; kein Eigentümer-Aufschlag und keine doppelte Zahlung bei einem Wechsel des Verfahrens.
+- [ ] Versand-Timeouts und unklaren Versandausgang mit sicherer Wiederaufnahme testen, ohne doppelte Pakete zu versenden.
+
+## Produktionssicherheit und Veröffentlichung
+
+### Betriebsreife belegen, dann kontrolliert aktivieren
+
+**What:** Sichere Datenänderungen, Wiederanlauf, unabhängige Ausfallwarnungen und wiederherstellbare Sicherungen in Betrieb nehmen.
+**Why:** Stromausfälle, Neustarts und parallele Bearbeitung dürfen keine Vorgänge verlieren oder doppelte Aktionen auslösen.
+**Context:** Entsprechende Bausteine sind vorbereitet, aber noch nicht durchgehend aktiviert und im realen Betrieb abgenommen. Vor Infrastruktur- oder Produktionsänderungen sind Zielsystem und Annahmen ausdrücklich zu bestätigen; diese Liste autorisiert keinen Umzug oder Rollout.
+**Effort:** L
+**Priority:** P0 — vor Aktivierung des unbeaufsichtigten Betriebs; blockiert reine Dokumentationsänderungen nicht.
+
+- [ ] Atomaren Fallspeicher kontrolliert aktivieren und gleichzeitige Änderungen testen.
+- [ ] Wiederanlauf und ausstehende Aufgaben nach Prozessabbruch, Stromausfall und Neustart praktisch nachweisen.
+- [ ] Unabhängige Ausfallüberwachung mit wirksamem Alarmweg einrichten und einen Probealarm testen.
+- [ ] Verschlüsselte Sicherungen und tatsächliche Wiederherstellung testen; Aufbewahrung und Zugriff dokumentieren, ohne Geheimnisse ins Repository zu schreiben.
+- [ ] Fehlende Betriebsfreigaben, sichere Rückkehr zum vorherigen Stand und Ende-zu-Ende-Abnahme dokumentieren.
+- [ ] Ausstehende Programmänderungen separat prüfen, auf GitHub sichern und nach Freigabe veröffentlichen.
+
+### Lokal vorbereitete, noch nicht veröffentlichte Änderungen
+
+Zum Zeitpunkt dieser Bestandsaufnahme lag GitHub `main` bei `1a151ac`; lokal waren drei weitere Commits vorhanden:
+
+- `c1eb474` — Prepare protected revisioned guest knowledge export
+- `d5f6e01` — Clarify booking notice and prepare scoped guest knowledge access
+- `f88beef` — Highlight Tenant Evaluation for new guest applications
+
+Die Sicherung dieser To-do-Datei veröffentlicht diese Programmänderungen nicht. Daneben vorhandene lokale Oberflächenänderungen bleiben ebenfalls getrennt.
+
+## gbrain / Hermes
+
+### Gästedaten-Synchronisierung ergänzen
+
+**What:** Geschützte, revisionsbasierte Gästedaten-Synchronisierung mit nachvollziehbaren Zugriffsrechten umsetzen.
+**Why:** Der Eigentümer soll Fälle wiederfinden und später über Hermes damit arbeiten können.
+**Context:** Der direkte MCP-Zugang zu gbrain besteht; die laufende Gästedaten-Synchronisierung fehlt noch. Sie soll den Kernablauf nicht verzögern. Export, Schreibzugriff, Löschung und Berechtigungen müssen getrennt geprüft werden.
+**Effort:** L
+**Priority:** P2
+**Depends on:** Stabiler Kernablauf und sichere Fallrevisionen.
+
+- [ ] Synchronisierung, Aktualisierung, Löschung und Zugriffsbeschränkungen testen.
+- [ ] Keine Geheimnisse oder realen Gastunterlagen in GitHub speichern; Datenumfang zweckgebunden halten.
+
+## Prüfstand und Abnahmeregeln
+
+Bei der vorangegangenen lokalen Prüfung bestanden 156 JavaScript- und 34 Python-Tests. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
+
+- Neue Abläufe brauchen Tests für vollständige, unvollständige, verspätete, geänderte und stornierte Buchungen sowie technische Ausfälle.
+- Eine Buchung kann vor HOA-Zustimmung bestehen; Bezug erst nach erforderlicher Zustimmung. Ablehnungen und mögliche Stornierungen bleiben gesondert zu prüfende Ausnahmen, keine automatische Schuldzuweisung an den Gast.
+- Gäste verwenden ausschließlich die vorgesehenen .com-Seiten.
+- Gast-Speichern bleibt Entwurfsspeicherung; keine implizite HOA-Einreichung oder Genehmigung.
+- Details und bestehende Sicherheitsgrenzen: [Reparaturstatus](REPAIR_STATUS.md), [Hybridbetrieb](HYBRID_OPERATIONS.md), [MCP-Anbindung](GBRAIN_MCP.md).
+
+## Completed
+
+Noch kein oben aufgeführter Ende-zu-Ende-Arbeitspunkt ist als produktiv abgenommen markiert.
