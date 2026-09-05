@@ -1,0 +1,67 @@
+# Merge this section into the private Codex config, replacing all placeholders.
+# Never commit the complete user config or the Hermes credential files.
+[mcp_servers.gbrain]
+command = "/absolute/path/to/python3"
+args = ["/private/path/gbrain_mcp_bridge.py", "--ssh-host", "example-hermes"]
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.gbrain.tools.search]
+approval_mode = "approve"
+output_token_limit = 4000
+
+[mcp_servers.gbrain.tools.get_page]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.list_pages]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_tags]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_links]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_backlinks]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_timeline]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_brain_identity]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.whoami]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.sources_list]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.sources_status]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.recall]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.context_pack]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.delta]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.entity]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_chunks]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.resolve_slugs]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_versions]
+approval_mode = "approve"
+
+[mcp_servers.gbrain.tools.get_status_snapshot]
+approval_mode = "approve"

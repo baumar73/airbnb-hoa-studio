@@ -104,12 +104,15 @@ project context, operate the workflow through defined tools and prepare software
 repairs. This is additive; neither gbrain nor Hermes should become a prerequisite
 for guest draft saving, mail intake or deterministic delivery checks.
 
-Confirmed read-only on 2026-09-05: the existing Hermes VM has active gbrain HTTP
-MCP and Hermes gateway services. This Codex session exposes no callable gbrain MCP
-tool. SSH access works. No gbrain installation, registration, scope change, content
-import or service restart was performed. Actual host details stay in infra-map
-canon, not in this sanitized repository. The generic setup-gbrain skill assumes
-a new local brain/Claude registration; those steps do NOT apply to this setup.
+Verified on 2026-09-05: the existing Hermes VM has active gbrain HTTP MCP and
+Hermes gateway services. Direct Codex MCP access is now registered locally through
+the existing SSH connection; authenticated initialization, the filtered 24-tool
+inventory and `whoami` succeeded end-to-end. A fresh native Codex app-server also
+connected and discovered all 24 tools. The active conversation's tool
+inventory has not yet been observed refreshed. No server installation, token/scope
+change, content import or service restart occurred. Actual host details and
+credentials stay outside this sanitized repository. `GBRAIN_MCP.md` documents the
+reusable bridge and its client-side limits; guest-source sync is NOT implemented.
 
 Proposed split, not yet integrated:
 
@@ -142,10 +145,10 @@ Proposed split, not yet integrated:
   must not grant production deploy, shell-on-server, signature or sending authority.
   Preserve unrelated user edits. Production activation remains separately approved.
 
-Next connection work: inspect the existing authenticated MCP endpoint/client
-registration and source permissions using private configuration; test scoped
-access with synthetic guest records and deletion replay, then connect the
-user-requested guest source and project knowledge in the requested client. Do
+Next integration work: verify native client tool availability after refresh,
+establish dedicated source permissions, test scoped access with synthetic guest
+records and deletion replay, then connect the user-requested guest source and
+project knowledge through revisioned synchronization. Do
 not bulk-import real guest records during connection diagnostics. Never
 initialize a second brain because a local CLI is absent.
 Any Codex/client restart or consequential live scope change must be confirmed.

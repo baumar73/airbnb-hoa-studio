@@ -32,11 +32,15 @@ It must be represented in the activation audit; it does not assert HOA approval.
   installed. Actual before-login startup, power restoration and authentication
   still need a separately approved real-host drill. See `HYBRID_OPERATIONS.md`.
 - User additionally requests gbrain/Hermes integration INCLUDING searchable
-  guest data. Existing gbrain MCP and Hermes services were verified active by
-  read-only SSH. No callable gbrain MCP tool is exposed in this Codex session.
-  No brain was installed, initialized, connected, imported into or restarted.
-  `HYBRID_OPERATIONS.md` records protected guest-source synchronization and
-  scoped operations/repair boundaries. These are plans, not implemented sync.
+  guest data. Direct Codex MCP access to the existing gbrain is now registered
+  locally over SSH and verified by authenticated initialization, filtered tools
+  and a read-only identity call. `scripts/gbrain_mcp_bridge.py`, the credential-free
+  configuration example and `GBRAIN_MCP.md` make this setup reproducible. No
+  server restart, database initialization or brain-content write occurred. A fresh
+  native Codex app-server discovered all 24 tools; the already-running conversation
+  still needs its tool inventory refreshed.
+  Protected guest-source sync and scoped operations/repair boundaries in
+  `HYBRID_OPERATIONS.md` remain plans, not implemented synchronization.
 
 - `functions/lib/parse.js`: retain complete guest names; normalize lookup names,
   including apostrophes, accents and suffixes, without truncating middle names.
@@ -152,11 +156,17 @@ the parser fix does not reconstruct missing names from nothing.
   history, repeat guests, ambiguous/suspicious senders, duplicate replay,
   same-day replies, failed persistence, encrypted retention/holds, owner-only
   safe display, archive-folder ordering and IMAP deadline/error redaction.
-- `python3 -m unittest discover -s test -p 'test_*.py'`: 16 tests pass.
+- `python3 -m unittest discover -s test -p 'test_*.py'`: 29 tests pass.
   New hybrid tests cover claim exclusivity, expiry/reclaim and fencing, failure
   backoff, result replay, heartbeat failure, continued work after one case fails,
   private configuration, scratch cleanup, sanitized logs and OS lock recovery
   after an actual synthetic child-process kill. No hardware reboot was performed.
+- Thirteen offline MCP bridge regressions cover alias/quoting safety, malformed
+  request recovery, tool/method filtering, session forwarding, JSON/SSE bounds,
+  response IDs, loopback endpoint enforcement, redirect/proxy refusal, private
+  credential interpolation and uncertain-write/no-replay/error-redaction behavior.
+  Both direct stdio and native Codex discovery connected to existing gbrain;
+  only authenticated read checks ran, with no brain-content writes.
 - `node scripts/test_atomic_runtime.mjs`: passes in local Miniflare/workerd with
   SQLite Durable Objects, synthetic encrypted records and no cloud account.
   Verified explicit import, independent concurrent writes, same-case conflict,
