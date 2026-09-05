@@ -68,14 +68,20 @@ export async function sendViaGmail(env, { to, cc, subject, text, attachments, fr
   let buf = '';
   async function readReply() {
     // collect until final line "NNN " (space after code)
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 4096; i++) {
       const lines = buf.split('\r\n');
-      for (const ln of lines) if (/^\d{3} /.test(ln)) { const out = buf; buf = ''; return out; }
+      let end = 0;
+      for (const ln of lines.slice(0, -1)) {
+        end += ln.length + 2;
+        if (!/^\d{3}[ -]/.test(ln)) throw Error('Invalid SMTP response');
+        if (/^\d{3} /.test(ln)) { const out = buf.slice(0, end); buf = buf.slice(end); return out; }
+      }
       const { value, done } = await reader.read();
       if (done) break;
-      buf += dec.decode(value);
+      buf += dec.decode(value, {stream:true});
+      if (buf.length > 65536) throw Error('SMTP response too large');
     }
-    const out = buf; buf = ''; return out;
+    throw Error('Incomplete SMTP response');
   }
   async function cmd(line, expect) {
     if(aborted)throw Error('SMTP transport aborted');

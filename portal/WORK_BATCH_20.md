@@ -8,7 +8,7 @@ Ende dokumentiert. Reale Mailzustellung, HOA-Abnahme und Live-Rollout bleiben
 gesonderte Arbeit.
 
 - [x] 1. SMTP-Anhänge: Dateinamen vor Header-Einschleusung schützen
-- [ ] 2. SMTP-Antworten auch bei fragmentierten Netzwerkpaketen korrekt lesen
+- [x] 2. SMTP-Antworten auch bei fragmentierten Netzwerkpaketen korrekt lesen
 - [ ] 3. Telegram-Störungsmeldungen mit Zeitlimit senden
 - [ ] 4. Versandabgleich: unmögliche UTC-Zeitangaben abweisen
 - [ ] 5. Stornierungsmails mit mehreren Buchungscodes nicht automatisch zuordnen

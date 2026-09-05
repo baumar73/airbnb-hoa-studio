@@ -4,13 +4,14 @@ import {register} from 'node:module';
 register('./loaders/cloudflare-sockets-loader.mjs',import.meta.url);
 const {sendViaGmail,buildMime}=await import('../functions/lib/email.js');
 
-function fakeSocket({rejectAuth=false,failQuit=false}={}) {
+function fakeSocket({rejectAuth=false,failQuit=false,fragment=false}={}) {
   let controller,authStep=0,inData=false;
   const encoder=new TextEncoder(),decoder=new TextDecoder();
-  const reply=text=>controller.enqueue(encoder.encode(text+'\r\n'));
+  const reply=text=>{const value=text+'\r\n';for(const chunk of fragment?[...value]:[value])controller.enqueue(encoder.encode(chunk));};
   const readable=new ReadableStream({start(c){controller=c;reply('220 synthetic SMTP');}});
   const writable=new WritableStream({write(data){
     const command=decoder.decode(data).trim();
+    if(command.startsWith('EHLO')){reply('250-synthetic\r\n250 AUTH LOGIN');return;}
     if(inData){inData=false;reply('250 message accepted');return;}
     if(command==='AUTH LOGIN'){authStep=1;reply('334 username');return;}
     if(authStep===1){authStep=2;reply('334 password');return;}
@@ -23,6 +24,13 @@ function fakeSocket({rejectAuth=false,failQuit=false}={}) {
 }
 const env={GMAIL_USER:'synthetic@example.test',GMAIL_APP_PASSWORD:'synthetic-private-password'};
 const message={to:['guest@example.test'],cc:[],subject:'Synthetic test',text:'No real email'};
+test('SMTP reads complete lines even when every byte is a separate packet',async()=>{
+  assert.equal(await sendViaGmail(env,message,()=>fakeSocket({fragment:true})),true);
+});
+test('SMTP rejects a truncated final response instead of accepting its prefix',async()=>{
+  const socket={readable:new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('220 incomplete'));c.close();}}),writable:new WritableStream({write:()=>assert.fail('must not send commands')}),close:async()=>{}};
+  await assert.rejects(sendViaGmail(env,message,()=>socket),/Incomplete/);
+});
 test('attachment filenames cannot inject MIME headers or paths',async()=>{
   for(const filename of ['a.pdf\r\nBcc: x@y','a".pdf','../a.pdf','a\\b.pdf','', 'x'.repeat(256)]) {
     await assert.rejects(sendViaGmail(env,{...message,attachments:[{filename,bytes:new Uint8Array([1])}]},()=>assert.fail('unsafe attachment opened socket')),/attachment/);
