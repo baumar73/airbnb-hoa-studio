@@ -7,7 +7,8 @@ export function parseCancellation(msg) {
   // Quoted history is evidence of an earlier message, not a new cancellation.
   const body = text.split(/\r?\n/).filter(line => !/^\s*>/.test(line)).join('\n');
   const all = `${subject}\n${body}`;
-  const code = (all.match(/\b(HM[A-Z0-9]{8,12})\b/i) || [])[1];
+  const codes = [...new Set((all.match(/\bHM[A-Z0-9]{8,12}\b/gi)||[]).map(code=>code.toUpperCase()))];
+  const code = codes.length===1 ? codes[0] : null;
   const canceledWord = /\b(?:canceled|cancelled|storniert|annulliert)\b/i;
   const negated = /\b(?:not|nicht|never|kein(?:e|er|en|em|es)?)\s+(?:be\s+|been\s+|ist\s+|wurde\s+)?(?:canceled|cancelled|storniert|annulliert)\b/i;
   const canceled = canceledWord.test(all) && !negated.test(all) && /\b(?:reservation|buchung)\b/i.test(all);

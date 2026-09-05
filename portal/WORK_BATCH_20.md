@@ -11,7 +11,7 @@ gesonderte Arbeit.
 - [x] 2. SMTP-Antworten auch bei fragmentierten Netzwerkpaketen korrekt lesen
 - [x] 3. Telegram-Störungsmeldungen mit Zeitlimit senden
 - [x] 4. Versandabgleich: unmögliche UTC-Zeitangaben abweisen
-- [ ] 5. Stornierungsmails mit mehreren Buchungscodes nicht automatisch zuordnen
+- [x] 5. Stornierungsmails mit mehreren Buchungscodes nicht automatisch zuordnen
 - [ ] 6. Explizite Jahreszahlen in Buchungsdaten erhalten
 - [ ] 7. Prüfversion an Gastname, Verfahrensweg und Kinderzahl binden
 - [ ] 8. Leere oder strukturell ungültige KI-Prüfberichte abweisen
