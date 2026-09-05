@@ -18,6 +18,7 @@ import {readAutomationStatus,automationHealth} from './lib/automation-health.js'
 import {readHoaReply} from './lib/hoa-mail.js';
 import {completedReview,reviewAvailable,claimReview,ownsReview,failReview,recordReviewerHeartbeat} from './lib/review-jobs.js';
 import {knowledgeExportResponse} from './lib/knowledge-export.js';
+import {bookingApprovalNotice} from './lib/booking-notice.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -363,7 +364,8 @@ function landingView() {
       <ol>
         <li><b>Book on Airbnb.</b> After your booking is confirmed, you receive a personal link to this portal via Airbnb chat.</li>
         <li><b>Choose one application route.</b> Use the association's Tenant Evaluation service, or prepare its paper-route documents in this portal.</li>
-        <li><b>HOA board approval.</b> Allow up to 15 days after every required application, screening, document and payment item arrives.</li>
+        <li><b>Book at least 7 days ahead.</b> Start the HOA application immediately after booking. HOA approval is required before check-in; seven days is not an approval guarantee.</li>
+        <li><b>HOA board approval.</b> Allow up to 15 days after every required application, screening, document and payment item arrives. Follow the authorized payment instructions promptly once available.</li>
         <li><b>Check-in released.</b> Once approved, you receive the door codes and arrival guide.</li>
       </ol>
       <p class="muted">Paid rentals must be at least 30 nights and require association approval. Sensitive background-screening information is entered only in the association's approved process, never on this public site. Simplified guest registration is reserved for confirmed, non-paying guests.</p>
@@ -486,7 +488,7 @@ St. Petersburg, FL 33716</div>
     `<h1>Hi ${esc(c.guestName.split(' ')[0])}, here's where your approval stands</h1>
      <p>Stay: <b>${esc(c.checkIn)} → ${esc(c.checkOut)}</b> (${c.nights} nights, ${c.adults} ${c.adults === 1 ? 'adult' : 'adults'} age 18+${Number(c.expectedMinors || 0) ? `, ${Number(c.expectedMinors)} minor${Number(c.expectedMinors) === 1 ? '' : 's'}` : ''})${c.reservationCode ? ' · Reservation ' + esc(c.reservationCode) : ''}</p>
      ${banner}`,
-    wizardCard + `<div class="card">
+    bookingApprovalNotice(c, compliance) + wizardCard + `<div class="card">
        <h2>Progress</h2>
        <div class="bar"><div style="width:${pct}%"></div></div>
        <p class="muted">${done} of ${total} steps complete</p>

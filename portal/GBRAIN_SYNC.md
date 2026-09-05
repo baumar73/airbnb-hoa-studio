@@ -1,9 +1,43 @@
 # Guest knowledge synchronization — export prepared, writer not activated
 
 The direct Codex MCP connection is working. This increment implements only the
-portal's protected, revisioned export. No real guest data has been imported into
-gbrain, no gbrain source/credential was created, no scheduler was installed, and
-no production portal deployment occurred.
+portal's protected, revisioned export. On 2026-09-05 the owner explicitly approved
+creating a dedicated source and sync identity on the existing brain. They now
+exist, with partial live access verification as recorded below. No real guest
+data has been imported, no scheduler was installed, and no production portal
+deployment occurred.
+
+## Destination provisioning status — NOT activated
+
+- Created the pathless `airbnb-hoa-guests` source, explicitly non-federated.
+  There is no guest-data Git remote, clone, or filesystem write-through path.
+- Created `airbnb-hoa-guest-sync`, an OAuth client-credentials identity with
+  `read write` only, write source and read grant limited to that source,
+  `guest-cases/` write prefix, 300-second access-token lifetime, and no admin
+  grant. Existing Hermes clients and server configuration were left unchanged.
+- Its runtime credential is stored only in the existing server's private
+  credential directory (directory 0700, file 0600), not in this repository.
+  The private infrastructure proposal records its location and revocation ID.
+- Live verification passed identity/source/grant/lifetime checks, restricted
+  source enumeration, and explicit denials for foreign-source read/delete,
+  out-of-prefix write and an admin operation. The source still has zero pages.
+- The run then STOPPED at the token-elevation check: the test expected HTTP
+  rejection, while the installed OAuth provider intersects requested scopes
+  with the registered grant. Read-only source inspection confirmed that behavior.
+  The local verifier now checks actual granted scopes and admin denial for
+  either response pattern, with a regression test. It has NOT been rerun live.
+- Opposite-direction access, owner/Hermes access to synthetic content, and the
+  own-source write/search/delete round trip remain unverified. No temporary
+  verification client or synthetic page was created before that stop point.
+- Non-federation is not protection against the owner's existing broad legacy
+  administrator credentials or local database administrators. No such credential
+  was revoked or silently narrowed. Ordinary OAuth grants remain explicit.
+
+`scripts/gbrain_guest_scope.py` is an operator-only provisioning/check utility,
+not the synchronization writer. Its `--provision` mode must never be repeated
+against the existing source/client; continue later with verification mode only.
+The setup-gbrain smoke-test stop gate was respected: no upgrade, migration,
+restart, real import or activation followed the failed test assertion.
 
 ## Implemented interface
 
@@ -118,8 +152,8 @@ remain preserved under the portal's legal hold. No legal hold is lifted here.
 
 ## Required destination contract (not yet implemented)
 
-Before any real import, prepare a separate protected source in the EXISTING brain
-and a dedicated, source-scoped sync identity. Verify with positive AND negative
+Before any real import, complete verification of the newly prepared source in
+the EXISTING brain and its dedicated, source-scoped sync identity. Verify with positive AND negative
 authorization tests: allowed guest-source read/write/delete; denied other-source
 read/write/admin; approved owner/Hermes read access; no unintended federation.
 The existing broad Hermes token is unsuitable for unattended synchronization.

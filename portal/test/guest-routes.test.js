@@ -77,6 +77,22 @@ function validSignaturePng() {
   return bytes.toString('base64');
 }
 
+test('public and private pages explain advance notice without asserting approval or making unverified payment demands', async () => {
+  resetSocketAttempts();
+  const {env,store}=mockEnv(); seedCase(store);
+  const home=await onRequest({request:guestRequest('/',{method:'GET'}),env,waitUntil:()=>{}});
+  assert.match(await home.text(),/Book at least 7 days ahead/);
+  const status=await onRequest({request:guestRequest(`/v/${TOKEN}`,{method:'GET'}),env,waitUntil:()=>{}});
+  assert.equal(status.status,200);
+  const text=await status.text();
+  assert.match(text,/at least 7 days of advance notice/);
+  assert.match(text,/HOA approval is required before check-in/);
+  assert.match(text,/not a guarantee of HOA approval/);
+  assert.match(text,/Do not make an off-platform payment/);
+  assert.doesNotMatch(text,/Arrange payment promptly/);
+  assert.equal(socketAttempts(),0);
+});
+
 function completeGuestForm() {
   return {
     saveMode: 'complete',

@@ -2,6 +2,18 @@
 
 ## Status
 
+2026-09-05 follow-up: the requested seven-day/HOA cooperation notice was saved in
+both languages in the Florida Airbnb listing. The corresponding portal notice
+is implemented and tested LOCALLY, not deployed. Fee collection and cancellation
+rules were not changed. See `BOOKING_HOA_NOTICE.md` for payment-policy evidence.
+
+The owner also approved a source-scoped gbrain identity. The empty, non-federated
+source and private credential now exist on the existing server. Six initial
+access checks passed, but the full smoke test stopped on an OAuth scope-clamping
+test assumption. The corrected verifier is local-only pending a fresh run;
+write/search/delete and opposite-direction tests remain outstanding. See
+`GBRAIN_SYNC.md`. No real guest data was imported or service restarted.
+
 Local implementation in the sanitized studio only. Not deployed,
 not copied to the private production tree or the existing runner. No real guest
 messages, HOA submissions, payment transactions or production data changes.
