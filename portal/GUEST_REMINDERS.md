@@ -44,10 +44,14 @@ real addresses or guest records belong in this repository.
 
 ## Airbnb boundary and remaining acceptance
 
-No Airbnb messaging transport is implemented or configured in this repository.
-The warning is **not** a delivery queue and does not claim an Airbnb message was
-sent. Until an approved messaging integration is identified and tested, guests
-without a usable email still require follow-up in the existing Airbnb conversation.
+The existing Hermes workflow uses Gmail replies to a conversation-specific
+`@reply.airbnb.com` address, with the original subject and reply headers. A
+default-disabled implementation is now available here; no paid PMS is required
+for this proposed route. See [Airbnb reply relay](AIRBNB_RELAY.md) for the
+owner-verification boundary, activation gates and acceptance still required.
+Without a usable direct address or an enabled, verified relay, guests still
+require follow-up in their existing Airbnb conversation. Turning off direct
+email does not disable an independently verified and enabled Airbnb route.
 Do not mark the entire reachability TODO complete on the basis of these changes.
 
 Airbnb permits a guest-requested alternative communication method after booking;
@@ -58,7 +62,7 @@ moving a booking or payment off Airbnb. Source checked 2026-09-05:
 This is an implementation constraint, not an Airbnb approval of the deployment.
 
 Before live activation: verify the actual listing/privacy disclosures, determine
-the supported Airbnb messaging path, test with a controlled recipient, check email
+the actual Airbnb reply mechanism, test with a controlled recipient, check email
 deliverability/bounces and ambiguous outcomes, and obtain explicit operational
 approval. No real email, Airbnb message or HOA submission was used for local tests.
 
@@ -70,6 +74,6 @@ access, encrypted storage/corruption, plaintext rejection, legacy storage, disab
 delivery disclosure, opt-out/old-address precedence, pre-send opt-out, parallel
 workers, late completion/cancellation, missing-contact health and alert cooldown.
 
-`npm test`: 189 passing JavaScript tests. `python3 -m unittest discover -s test -p
+Baseline before relay implementation: `npm test`: 189 passing JavaScript tests. `python3 -m unittest discover -s test -p
 'test_*.py'`: 34 passing tests. Syntax check and Pages build pass; `npm audit --json`
 reports zero vulnerabilities. These are local/mock tests, not live delivery proof.

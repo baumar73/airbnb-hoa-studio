@@ -64,6 +64,10 @@ export async function decryptPrivateJson(env,purpose,record) {
 
 async function sealWizard(c, env) {
   c={...c};
+  if(c.airbnbRelay) {
+    c.airbnbRelayEncrypted=await encryptPrivateJson(env,'airbnb-relay:'+c.id,c.airbnbRelay);
+    delete c.airbnbRelay;
+  }
   if(c.guestContact) {
     c.guestContactEncrypted=await encryptPrivateJson(env,'guest-contact:'+c.id,c.guestContact);
     delete c.guestContact;
@@ -80,6 +84,10 @@ async function sealWizard(c, env) {
 
 async function openWizard(c, env) {
   c={...c};
+  if(c.airbnbRelayEncrypted) {
+    c.airbnbRelay=await decryptPrivateJson(env,'airbnb-relay:'+c.id,c.airbnbRelayEncrypted);
+    delete c.airbnbRelayEncrypted;
+  }
   if(c.guestContactEncrypted) {
     c.guestContact=await decryptPrivateJson(env,'guest-contact:'+c.id,c.guestContactEncrypted);
     delete c.guestContactEncrypted;

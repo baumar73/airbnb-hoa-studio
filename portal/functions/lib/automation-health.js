@@ -45,7 +45,7 @@ export async function notifyAutomationFailure(env,status,now,notify) {
     (status.state==='running'&&age(status.startedAt,now)>15*MINUTE);
   if(!actionable||health.ok||age(status.lastAlertAt,now)<24*60*MINUTE) return;
   try {
-    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf oder der lokale Prüfdienst braucht Aufmerksamkeit. Technischen Status unter /admin/automation-health prüfen.'+(missingContact?' Mindestens ein Gast mit fälligen Aufgaben ist per E-Mail nicht erreichbar. Unter /admin/cases prüfen und über die bestehende Airbnb-Unterhaltung nachfassen; kein automatischer Airbnb-Versand ist eingerichtet.':'')+(status.reviewer?.urgent?' Offene Prüfungen betreffen Anreisen innerhalb von sieben Tagen.':'')+' Unklare Sendungen werden nicht automatisch erneut versendet.')) {
+    if(await notify('⚠️ HOA-Automatik: Ein Hintergrundablauf oder der lokale Prüfdienst braucht Aufmerksamkeit. Technischen Status unter /admin/automation-health prüfen.'+(missingContact?' Mindestens ein Gast mit fälligen Aufgaben hat keinen nutzbaren aktivierten Versandweg. Unter /admin/cases die E-Mail-Erreichbarkeit oder verifizierte Airbnb-Antwortverbindung prüfen und nötigenfalls in der bestehenden Unterhaltung nachfassen.':'')+(status.reviewer?.urgent?' Offene Prüfungen betreffen Anreisen innerhalb von sieben Tagen.':'')+' Unklare Sendungen werden nicht automatisch erneut versendet.')) {
       status.lastAlertAt=now.toISOString();await save(env,status);
     }
   } catch { /* Leave cooldown open; the public health endpoint remains unhealthy. */ }

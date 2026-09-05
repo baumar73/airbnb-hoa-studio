@@ -69,7 +69,7 @@ export class Imap {
 
   // returns raw response containing headers + first MIME part text
   async fetchMessage(uid) {
-    return this.cmd(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)] BODY.PEEK[1])`);
+    return this.cmd(`UID FETCH ${uid} (BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID REPLY-TO REFERENCES)] BODY.PEEK[1])`);
   }
 
   async close() {
@@ -92,7 +92,10 @@ export function decodeMessage(raw) {
   });
   const fromM = header.match(/^From: ([^\r\n]+)/mi);
   const dateM = header.match(/^Date: ([^\r\n]+)/mi);
-  const messageIdM=header.match(/^Message-ID:\s*(<[^<>\r\n]+>)/mi);
+  const messageIdM=header.match(/^Message-ID:[ \t]*([^\r\n]*(?:\r\n[ \t]+[^\r\n]*)*)/mi);
+  const replyTo=header.match(/^Reply-To:[ \t]*([^\r\n]*(?:\r\n[ \t]+[^\r\n]*)*)/mi)?.[1]?.replace(/\r\n[ \t]+/g,' ')||'';
+  const replyToCount=[...header.matchAll(/^Reply-To:/gmi)].length;
+  const messageIdCount=[...header.matchAll(/^Message-ID:/gmi)].length;
   let date = null;
   if (dateM) { const d = new Date(dateM[1]); if (!isNaN(d)) date = d.toISOString(); }
 
@@ -108,5 +111,5 @@ export function decodeMessage(raw) {
   // strip html
   text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
              .replace(/&amp;/g, '&').replace(/[ \t]+/g, ' ');
-  return { subject, from: fromM ? fromM[1] : '', date, text,replyText,messageId:messageIdM?.[1]||null };
+  return { subject, from: fromM ? fromM[1] : '', date, text,replyText,messageId:messageIdM?.[1]?.replace(/\r\n[ \t]+/g,' ').trim()||null,replyTo,replyToCount,messageIdCount };
 }

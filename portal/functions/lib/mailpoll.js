@@ -6,6 +6,7 @@ import { sendTelegram } from './email.js';
 import { validateAirbnbCaseInput } from './workflow.js';
 import { loadStoredCases, saveStoredCases } from './storage.js';
 import {configuredHoaSenders,analyseHoaReply,archiveHoaReply,markHoaReplyProcessed,refreshHoaArchiveRetention} from './hoa-mail.js';
+import {captureAirbnbRelay} from './airbnb-relay.js';
 
 const PORTAL = 'https://portal.example.test';
 
@@ -105,11 +106,26 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
       seenSet.add('c' + uid);
     }
 
+    // No message text/header alone authorizes this destination. The owner
+    // verifies a candidate against the original Airbnb conversation first.
+    if(env.AIRBNB_RELAY_CAPTURE==='yes'||env.AIRBNB_RELAY_REMINDERS==='yes') {
+      if(!env.CASE_STORE||env.REQUIRE_ATOMIC_CASES!=='yes')throw Error('Relay capture requires mandatory atomic storage');
+      if(env.AIRBNB_RELAY_MAILBOX)await imap.selectMailbox(env.AIRBNB_RELAY_MAILBOX);
+      const relayUids=await imap.searchRaw('from:airbnb.com newer_than:30d');
+      if(relayUids.length>200)throw Error('Airbnb relay scan exceeds safe batch limit');
+      for(const uid of relayUids) {
+        if(await captureAirbnbRelay(decodeMessage(await imap.fetchMessage(uid)),cases)) {
+          dirty=true;summary.relayCandidates=(summary.relayCandidates||0)+1;
+        }
+      }
+    }
+
     // Every distinct reply becomes an encrypted source plus a metadata-only
     // event. Do not deduplicate by subject/day: multiple replies can differ.
     // The folder must be verified on the actual account (e.g. its All Mail
     // folder). Never guess localized Gmail names or mutate mailbox filters.
     if(env.HOA_MAILBOX) await imap.selectMailbox(env.HOA_MAILBOX);
+    else if(env.AIRBNB_RELAY_MAILBOX&&(env.AIRBNB_RELAY_CAPTURE==='yes'||env.AIRBNB_RELAY_REMINDERS==='yes')) await imap.selectMailbox('INBOX');
     const hoaUids = await imap.searchRaw((senders.length?'from:('+senders.join(' OR ')+')':'from:condominiumassociates.com')+' newer_than:90d');
     const newsRaw = await env.CASES.get('hoa-news');
     const news = newsRaw ? JSON.parse(newsRaw) : [];

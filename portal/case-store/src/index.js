@@ -4,6 +4,8 @@ const response = (data, status = 200) => Response.json(data, {status, headers:{'
 const validId = id => typeof id === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/.test(id);
 const versionOf = (versions,id) => Object.hasOwn(versions,id) ? versions[id] : 0;
 const validRecord = c => c && validId(c.id) && !Object.hasOwn(c,'wizard') && !Object.hasOwn(c,'guestContact') &&
+  !Object.hasOwn(c,'airbnbRelay') && (!c.airbnbRelayKey||/^[a-f0-9]{64}$/.test(c.airbnbRelayKey)) &&
+  (!c.airbnbRelayEncrypted || (c.airbnbRelayEncrypted.version==='aes-256-gcm-v1' && typeof c.airbnbRelayEncrypted.iv==='string' && typeof c.airbnbRelayEncrypted.ciphertext==='string')) &&
   (!c.guestContactEncrypted || (c.guestContactEncrypted.version==='aes-256-gcm-v1' && typeof c.guestContactEncrypted.iv==='string' && typeof c.guestContactEncrypted.ciphertext==='string')) &&
   (!c.wizardCiphertext || (c.wizardCipherVersion === 'aes-256-gcm-v1' && typeof c.wizardIv === 'string'));
 
@@ -22,6 +24,8 @@ export class CaseStore {
       const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw)))].map(b=>b.toString(16).padStart(2,'0')).join('');
       const cases = JSON.parse(raw);
       if (digest !== expectedHash || !Array.isArray(cases) || cases.length !== expectedCount || !cases.every(validRecord) || new Set(cases.map(c=>c.id)).size!==cases.length) return response({error:'import does not match verified encrypted snapshot'},409);
+      const relays=cases.map(c=>c.airbnbRelayKey).filter(Boolean);
+      if(new Set(relays).size!==relays.length)return response({error:'Airbnb relay already assigned'},409);
       return this.storage.transaction(async tx=>{
         if (await tx.get('snapshot')) return response({error:'already initialized'},409);
         const versions=Object.fromEntries(cases.map(c=>[c.id,1]));
@@ -54,6 +58,8 @@ export class CaseStore {
       }
       const codes=[...records.values()].map(c=>String(c.reservationCode||'').toUpperCase()).filter(Boolean);
       if (new Set(codes).size!==codes.length) return response({error:'reservation code already exists'},409);
+      const relays=[...records.values()].map(c=>c.airbnbRelayKey).filter(Boolean);
+      if(new Set(relays).size!==relays.length)return response({error:'Airbnb relay already assigned'},409);
       // Source ownership spans cases, so per-case versions alone cannot guard
       // two owner forms assigning the same unassigned email concurrently.
       const sourceOwners=new Map();
