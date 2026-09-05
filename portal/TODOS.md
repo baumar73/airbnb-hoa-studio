@@ -115,6 +115,15 @@ JavaScript-Prüfstand: 241 Tests. Bereits an SMTP übergebene Nachrichten könne
 durch einen späteren Widerruf nicht zurückgeholt werden; die Prüfung liegt vor
 dem Transportaufruf und ist keine atomare Transaktion mit Gmail.
 
+**Lokaler Fortschritt 2026-09-05 — Abgleich bestätigter Sendungen:** Für einen
+gesperrten Vorgang mit unverändertem archiviertem Paket kann der Eigentümer jetzt
+die im Gesendet-Ordner geprüfte Originalmail mit Nachrichten-ID und UTC-Sendezeit
+erfassen. Das speichert den bisherigen Versand; es sendet nichts und genehmigt
+weder HOA noch Check-in. Geänderte Vorgänge und weiterhin unklare Sendungen
+bleiben gesperrt. Details und Grenzen: [Paketversand-Abgleich](PACKAGE_RECONCILIATION.md).
+Neun zusätzliche Tests; insgesamt 254 JavaScript-Tests, Syntaxprüfung und
+Functions-Build bestanden. Kein Live-Rollout.
+
 ## Produktionssicherheit und Veröffentlichung
 
 ### Betriebsreife belegen, dann kontrolliert aktivieren

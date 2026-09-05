@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 import { CaseStore } from '../case-store/src/index.js';
-import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret } from '../functions/lib/storage.js';
+import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret, caseSnapshotVersion } from '../functions/lib/storage.js';
 import {caseReviewDigest,reviewContextHash} from '../functions/lib/review.js';
 import {reconcileBookingUpdate,acknowledgeBookingChange} from '../functions/lib/booking-reconcile.js';
 import { register } from 'node:module';
@@ -14,6 +14,7 @@ const {computeAlerts}=await import('../cron/src/index.js');
 const {archivePackage,loadArchivedPackage}=await import('../functions/lib/package-archive.js');
 const {automaticReleaseState,runAutomaticSubmissions}=await import('../functions/lib/auto-submit.js');
 const {submitApprovedPackage}=await import('../functions/lib/submit.js');
+const {reconcileAcceptedPackage}=await import('../functions/lib/package-reconciliation.js');
 
 // The fake serializes transactions, matching the actor's atomic storage API.
 // A separate workerd test verifies the same behavior in Cloudflare's runtime.
@@ -515,6 +516,128 @@ test('booking change during accepted SMTP preserves an unresolved delivery witho
   assert.equal(saved.submissionError.phase,'delivery_uncertain');
   assert.equal(saved.submissionError.packageId,originalPackage);
   await runAutomaticSubmissions(env,new Date('2026-09-06'),submit);assert.equal(deliveries,1);
+});
+
+async function reconciliationFixture() {
+  const {env}=await automaticFixture();env.ADMIN_USER='owner';env.ADMIN_PASSWORD='synthetic-owner';
+  const now=new Date(),cases=await loadStoredCases(env),c=cases[0];
+  c.reviewLockedAt=new Date(+now-3600000).toISOString();
+  c.submissionError={phase:'delivery_uncertain',message:'Synthetic timeout'};
+  c.steps.push({id:'submitted_hoa',done:false},{id:'board_approved',done:false},{id:'checkin_released',done:false});
+  await saveStoredCases(env,cases);
+  const input={caseVersion:String(caseSnapshotVersion(cases,c.id)),reservation:c.reservationCode,
+    packageId:c.preparedPackage.id,packageHash:c.preparedPackage.packageHash,
+    messageId:'<synthetic-prior-send@example.test>',sentAt:new Date(+now-3500000).toISOString(),attested:true,by:'owner'};
+  const call=(changes={},headers={})=>onRequest({env,request:new Request('https://portal.example.test/admin/package-delivery-reconcile',{
+    method:'POST',headers:{Origin:'https://portal.example.test',Authorization:'Basic '+btoa('owner:synthetic-owner'),...headers},
+    body:new URLSearchParams({...input,attested:'yes',id:c.id,...changes}),
+  })});
+  return {env,now,cases,c,input,call};
+}
+
+test('owner can reconcile a verified archived send without sending again or approving HOA/check-in',async()=>{
+  const {env,c,call,input}=await reconciliationFixture();
+  const {socketAttempts,resetSocketAttempts}=await import('cloudflare:sockets');resetSocketAttempts();
+  const view=await onRequest({env,request:new Request('https://portal.example.test/admin/cases',{headers:{Authorization:'Basic '+btoa('owner:synthetic-owner')}})});
+  assert.equal(view.status,200);assert.match(await view.text(),/Record verified prior send/);
+  assert.equal((await call()).status,303);
+  const [saved]=await loadStoredCases(env);
+  assert.equal(saved.submission.packageId,c.preparedPackage.id);
+  assert.equal(saved.submission.reconciliation.messageId,input.messageId);
+  assert.equal(saved.submission.reconciliation.by,'owner');assert.equal(saved.submission.docs.length,4);
+  assert.equal(saved.steps.find(s=>s.id==='submitted_hoa').done,true);
+  assert.equal(saved.steps.find(s=>s.id==='board_approved').done,false);
+  assert.equal(saved.steps.find(s=>s.id==='checkin_released').done,false);
+  assert.equal(saved.submissionError,undefined);assert.equal(saved.reviewLockedAt,c.reviewLockedAt);
+  assert.equal((await call()).status,409);
+  await runAutomaticSubmissions(env,new Date(),()=>assert.fail('reconciled send must not be repeated'));
+  assert.equal(socketAttempts(),0);
+});
+
+test('package reconciliation requires owner authentication, origin and exact case revision',async()=>{
+  const {env,c,call}=await reconciliationFixture();
+  assert.equal((await call({}, {Authorization:''})).status,401);
+  env.REVIEW_API_TOKEN='synthetic-review-only-token-long-enough';
+  assert.equal((await call({}, {Authorization:'Bearer '+env.REVIEW_API_TOKEN})).status,401);
+  assert.equal((await call({}, {Origin:'https://evil.example.test'})).status,403);
+  assert.equal((await call({caseVersion:'0'})).status,409);
+  assert.equal((await call({reservation:'WRONG'})).status,409);
+  assert.equal((await call({packageId:'WRONG'})).status,409);
+  assert.equal((await call({packageHash:'WRONG'})).status,409);
+  const [saved]=await loadStoredCases(env);assert.equal(saved.submission,undefined);assert.equal(saved.reviewLockedAt,c.reviewLockedAt);
+});
+
+test('reconciliation rejects missing attestations, invalid message identifiers and implausible send times',async()=>{
+  const {env,call,c}=await reconciliationFixture();
+  for(const changes of [{attested:'no'},{messageId:'<a@b>\r\nBcc: evil@example.test'},{messageId:''},{sentAt:'tomorrow'},{sentAt:'2000-01-01T00:00:00Z'},{sentAt:'2999-01-01T00:00:00Z'},{sentAt:'2026-09-05T10:00:00'}])assert.equal((await call(changes)).status,400);
+  const [saved]=await loadStoredCases(env);assert.equal(saved.submission,undefined);assert.equal(saved.reviewLockedAt,c.reviewLockedAt);
+});
+
+test('recent release, changed booking and missing archive cannot be reconciled through the normal form',async()=>{
+  for(const change of [
+    c=>{c.reviewLockedAt=new Date().toISOString();},
+    c=>{c.bookingChange={pending:true};},
+    c=>{c.submissionError.packageId=c.preparedPackage.id;},
+    c=>{c.wizard.adults[0].firstName='Changed';},
+    c=>{delete c.preparedPackage;},
+  ]) {
+    const {env,cases,c,input,now}=await reconciliationFixture();change(c);await saveStoredCases(env,cases);
+    input.caseVersion=String(caseSnapshotVersion(cases,c.id));
+    assert.equal((await reconcileAcceptedPackage(env,cases,c,input,now)).ok,false);
+    assert.equal((await loadStoredCases(env))[0].submission,undefined);
+  }
+});
+
+test('a canceled reservation can retain proof of its prior send without reopening the reservation',async()=>{
+  const {env,cases,c,input,now}=await reconciliationFixture();c.status='canceled';await saveStoredCases(env,cases);
+  input.caseVersion=String(caseSnapshotVersion(cases,c.id));
+  assert.equal((await reconcileAcceptedPackage(env,cases,c,input,now)).ok,true);
+  const [saved]=await loadStoredCases(env);assert.equal(saved.status,'canceled');assert.ok(saved.submission);
+  assert.equal(saved.steps.find(s=>s.id==='board_approved').done,false);
+});
+
+test('concurrent owner reconciliation is saved once and stale decisions are not automatically retried',async()=>{
+  const {env,c,input,now}=await reconciliationFixture();
+  const first=await loadStoredCases(env),second=await loadStoredCases(env);
+  const results=await Promise.allSettled([reconcileAcceptedPackage(env,first,first[0],input,now),reconcileAcceptedPackage(env,second,second[0],input,now)]);
+  assert.equal(results.filter(r=>r.status==='fulfilled'&&r.value.ok).length,1);
+  assert.equal(results.find(r=>r.status==='rejected').reason.code,'CASE_CONFLICT');
+  const [saved]=await loadStoredCases(env);assert.ok(saved.submission);assert.equal(saved.reviewLockedAt,c.reviewLockedAt);
+});
+
+test('unavailable or tampered archive prevents reconciliation without changing the durable claim',async()=>{
+  for(const tampered of [false,true]) {
+    const {env,cases,c,input,now}=await reconciliationFixture(),originalGet=env.CASE_STORE.get;
+    env.CASE_STORE.get=()=>({fetch:async(url,options)=>{
+      const response=await originalGet().fetch(url,options);
+      if(new URL(url).pathname!=='/packages')return response;
+      if(!tampered)return new Response('Synthetic archive outage',{status:503});
+      const data=await response.json();data.manifest.documents[0].filename='changed.pdf';
+      return Response.json(data);
+    }});
+    await assert.rejects(reconcileAcceptedPackage(env,cases,c,input,now),{code:tampered?'CASE_ARCHIVE_INVALID':'CASE_ARCHIVE_MISSING'});
+    const [saved]=await loadStoredCases(env);assert.equal(saved.submission,undefined);assert.equal(saved.reviewLockedAt,c.reviewLockedAt);
+  }
+});
+
+test('case changes during reconciliation archive validation require a fresh owner decision',async()=>{
+  const {env,cases,c,input,now}=await reconciliationFixture(),originalGet=env.CASE_STORE.get;
+  env.CASE_STORE.get=()=>({fetch:async(url,options)=>{
+    const response=await originalGet().fetch(url,options);
+    if(new URL(url).pathname==='/packages') {
+      const changed=await loadStoredCases(env);changed[0].notes='Concurrent operator update';await saveStoredCases(env,changed);
+    }
+    return response;
+  }});
+  await assert.rejects(reconcileAcceptedPackage(env,cases,c,input,now),{code:'CASE_CONFLICT'});
+  const [saved]=await loadStoredCases(env);assert.equal(saved.submission,undefined);
+  assert.equal(saved.notes,'Concurrent operator update');assert.equal(saved.reviewLockedAt,c.reviewLockedAt);
+});
+
+test('reconciliation has no legacy storage fallback',async()=>{
+  const {env,cases,c,input,now,call}=await reconciliationFixture();delete env.CASE_STORE;
+  assert.equal((await reconcileAcceptedPackage(env,cases,c,input,now)).status,503);
+  assert.equal((await call()).status,503);
 });
 test('review-only token cannot access owner controls or send a package',async()=>{
   const {env}=await automaticFixture();env.REVIEW_API_TOKEN='synthetic-review-token-at-least-32-chars';env.ADMIN_USER='owner';env.ADMIN_PASSWORD='test-only';

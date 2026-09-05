@@ -24,6 +24,7 @@ import {HOA_ITEMS,HOA_CONFIRMATIONS,hoaEvidenceState,hoaTaskText,reviewHoaEviden
 import {completedReview,reviewAvailable,claimReview,ownsReview,failReview,recordReviewerHeartbeat} from './lib/review-jobs.js';
 import {knowledgeExportResponse} from './lib/knowledge-export.js';
 import {bookingApprovalNotice} from './lib/booking-notice.js';
+import {reconcileAcceptedPackage,packageReconciliationView} from './lib/package-reconciliation.js';
 
 // ---------- domain ----------
 const STEP_TEMPLATES = {
@@ -1374,6 +1375,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     const relayLine=candidate?`<details><summary>Airbnb reply route: ${relay?'verified':'source review needed'}</summary><p>Check the original notification and the actual Airbnb conversation, sender, recipient, reservation and dates. Header discovery alone is not authentication.</p><p>Notification: ${esc(candidate.date)} · ${esc(candidate.subject)}<br>Original Message-ID: ${esc(candidate.messageId)}</p><form method="post" action="/admin/airbnb-relay"><input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="caseVersion" value="${caseSnapshotVersion(cases,c.id)}"><input type="hidden" name="sourceHash" value="${candidate.sourceHash}"><label>Type the reservation code<input name="reservation" required autocomplete="off"></label><label><input type="checkbox" name="attested" value="yes" required> I checked the original message and Airbnb conversation. This reply address belongs to this guest and this reservation. I authorize it only for HOA task reminders, not approvals or cancellation.</label><button name="action" value="verify">Verify reply route</button><button class="ghost" name="action" value="revoke" formnovalidate>Revoke reply route</button></form><p class="muted">Saving sends no message. A source older than 30 days or changed reservation needs verification of a fresh source; this is a local safety limit, not an Airbnb delivery guarantee. No relay address is published here.</p></details>`:'';
     const deliveryNotices=pendingDeliveryNotices(c);
     const deliveryLine=deliveryNotices.length?`<details><summary>Delivery notices need review (${deliveryNotices.length})</summary><p class="muted">A structured mail-delivery notice was matched to a prior reminder. This does not confirm a bounce, recipient contact, or authorize a resend.</p>${deliveryNotices.map(n=>`<form method="post" action="/admin/reminder-delivery-review"><input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="caseVersion" value="${caseSnapshotVersion(cases,c.id)}"><input type="hidden" name="messageId" value="${esc(n.messageId)}"><input type="hidden" name="sourceHash" value="${esc(n.sourceHash)}"><label>Reservation code<input name="reservation" required autocomplete="off"></label><label><input type="checkbox" name="attested" value="yes" required> I checked the original reminder and this delivery notice.</label><button>Mark notice reviewed</button></form>`).join('')}</details>`:'';
+    const packageDeliveryLine=packageReconciliationView(c,()=>caseSnapshotVersion(cases,c.id),esc);
     const bookingChangeLine=c.bookingChange?.pending?`<details open><summary class="pill warn">Airbnb booking details changed — owner review required</summary><p>Prior documents and approvals are marked stale. Check the new dates, guest count and original Airbnb confirmation before continuing.</p><form method="post" action="/admin/booking-change-review"><input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="caseVersion" value="${caseSnapshotVersion(cases,c.id)}"><label>Reservation code<input name="reservation" required autocomplete="off"></label><label><input type="checkbox" name="attested" value="yes" required> I checked the original Airbnb confirmation and approve this updated stay context for renewed paperwork.</label><button>Confirm booking change</button></form></details>`:'';
     const hoaEvents=(c.hoaMailEvents||[]).filter(e=>/^[a-f0-9]{64}$/.test(e.id||'')).slice(-5).reverse();
     const hoaLine=hoaEvents.length?`<details><summary>HOA-E-Mail-Belege (${(c.hoaMailEvents||[]).length})</summary><p class="muted">Ungeprüfte Einordnungen, keine automatische Zahlungs- oder Board-Bestätigung.</p><ul>${hoaEvents.map(e=>`<li><a href="/admin/hoa-mail/${e.id}">${esc(e.mailDate||e.at)}: ${esc((e.categories||[]).join(', '))}</a></li>`).join('')}</ul></details>`:'';
@@ -1448,7 +1450,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
       <td><b>${esc(c.guestName)}</b><br><span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights}n · ${esc(c.pathType)}</span><br>
           ${c.screeningRoute === 'online' ? '<span class="pill teal">external application — no local wizard required</span>' : c.wizard ? `<span class="pill ok">wizard data ${esc((c.wizard.savedAt || '').slice(0,10))}</span>` : '<span class="pill warn">no wizard data yet</span>'}
           ${feeState}<br>${screeningControl}
-          <span class="muted">${docLine}</span><br>${subLine}${journeyLine}${classification}${reviewButton}</td>
+          <span class="muted">${docLine}</span><br>${subLine}${journeyLine}${packageDeliveryLine}${classification}${reviewButton}</td>
       <td>${done}/${visibleSteps.length}<br>${stepBtns}<br>${mailBtns}</td>
       <td><a href="/v/${c.token}" target="_blank">/v/${c.token}</a><br>
           ${c.pathType === 'full' ? `<a href="/admin/adverse-action?id=${encodeURIComponent(c.id)}">Adverse-Action-Hinweis</a><br>` : ''}
@@ -1813,6 +1815,16 @@ async function routeRequest(context) {
     const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
     const denied = reviewer ? null : await checkAdmin(request, env);
     if (denied) return denied;
+    if(p==='/admin/package-delivery-reconcile'&&request.method==='POST') {
+      if(!env.CASE_STORE)return new Response('Atomic storage required',{status:503,headers:SEC_HEADERS});
+      const form=await request.formData(),cases=await loadCases(env),c=cases.find(c=>c.id===form.get('id'));
+      const result=await reconcileAcceptedPackage(env,cases,c,{
+        caseVersion:form.get('caseVersion'),reservation:form.get('reservation'),packageId:form.get('packageId'),packageHash:form.get('packageHash'),
+        messageId:form.get('messageId'),sentAt:form.get('sentAt'),attested:form.get('attested')==='yes',by:env.ADMIN_USER||'owner',
+      });
+      if(!result.ok)return new Response(result.error,{status:result.status,headers:SEC_HEADERS});
+      return redirect('/admin/cases?msg='+encodeURIComponent('Prior package send recorded from owner verification. No email sent; HOA approval remains separate.'));
+    }
     if(p==='/admin/airbnb-relay'&&request.method==='POST') {
       if(!env.CASE_STORE)return new Response('Atomic storage required',{status:503,headers:SEC_HEADERS});
       const form=await request.formData(),cases=await loadCases(env),c=cases.find(c=>c.id===form.get('id'));

@@ -68,6 +68,14 @@ the new stay's paperwork complete. The local tests cover this race, repeated
 booking updates, and attempts to persist a receipt against replaced review or
 package hashes. A booking-change acknowledgement is never a resend permission.
 
+For unchanged paperwork with a verified prior send, the owner-only
+[package reconciliation form](PACKAGE_RECONCILIATION.md) records the original
+Message-ID/send time after archive verification and a minimum 15-minute release
+age. Test stale forms, cross-origin requests, archive/storage failures and replay.
+Saving must send no mail, preserve cancellations, leave HOA/check-in decisions
+untouched and retain the release fence. Uncertain non-delivery and superseded
+packages are not resolved by this form.
+
 ## Staged enablement
 
 Only after the synthetic sequence is recorded may the owner enable one function

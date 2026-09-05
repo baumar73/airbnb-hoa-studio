@@ -1,6 +1,6 @@
 import {CaseStoreError,loadStoredCases,saveStoredCases} from './storage.js';
 
-function applyOutcome(c, outcome) {
+export function applyDeliveryOutcome(c, outcome) {
   for (const key of ['submission','testSubmission','submissionError','testSubmissionError']) {
     if (!Object.hasOwn(outcome,key)) continue;
     if (outcome[key]===null) delete c[key]; else c[key]=outcome[key];
@@ -24,10 +24,10 @@ export async function persistDeliveryOutcome(env, originalCases, claimed, outcom
       (claimed.preparedPackage && (current.preparedPackage?.id!==claimed.preparedPackage.id || current.preparedPackage?.packageHash!==claimed.preparedPackage.packageHash))) {
       throw new CaseStoreError('CASE_DELIVERY_CHANGED','Delivery claim or package context changed; reconcile the sent-mail record manually');
     }
-    applyOutcome(current,outcome);
+    applyDeliveryOutcome(current,outcome);
     try {
       await saveStoredCases(env,cases);
-      applyOutcome(claimed,outcome);
+      applyDeliveryOutcome(claimed,outcome);
       return;
     } catch(error) {
       if (error.code!=='CASE_CONFLICT' || attempt===3) throw error;
