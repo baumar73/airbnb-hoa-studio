@@ -203,7 +203,34 @@ Diese drei Commits und der Beleg-/Nachforderungsablauf wurden am 2026-09-05 bis 
 - [x] Lokalen Consumer für Synchronisierung, Aktualisierung, Löschung und Zugriffsbeschränkungen mit synthetischen Daten testen; echte Zielrechte und der Live-Roundtrip bleiben offen.
 - [x] Repository-Sicherheitsprüfung durchgeführt: keine Schlüssel-/Credential-/Gastdokument-Dateien in den getrackten Dateien; Export-Allowlist und synthetische Tests halten den gbrain-Umfang zweckgebunden. Vor jedem weiteren Import erneut prüfen.
 
-## Prüfstand und Abnahmeregeln
+## HOA-Account und Dokumentenänderungen überwachen (Auftrag 2026-09-05)
+
+**What:** Bestehenden HOA-Account regelmäßig auf neue/geänderte Unterlagen prüfen,
+Originale versioniert archivieren und die Inhalte in gbrain vektorisieren.
+**Why:** Neue Regeln und Formulare dürfen nicht unbemerkt an veralteten
+Gästeanweisungen vorbeilaufen.
+**Priority:** P1
+
+- [x] Lokalen Abgleich für neue, geänderte, verschwundene und zurückgekehrte
+  Dokumente, Wochenfälligkeit und Fehler-Wiederholung mit synthetischen Tests
+  implementieren; kein automatisches Ändern von Gästeregeln.
+- [x] Privaten Original-/SHA-256-Archivierer mit seitenweiser Text-/OCR-Aufbereitung
+  und gbrain-Seitenvorbereitung implementieren. Erste 30 PDF-Einträge/255 Seiten
+  aus dem authentifizierten Portal sichern; kein vollständiger Kontoexport.
+- [ ] Belegten, unbeaufsichtigten Nur-Lese-Abruf im bestehenden Laufzeitsystem mit
+  vollständiger Ordnerabdeckung, Login-Ausfallmeldung und dauerhaftem Checkpoint
+  anbinden und nach Betriebsfreigabe aktivieren.
+- [ ] Alle abgerufenen Originalversionen in gbrain indexieren und exakte Inhalte
+  sowie Embeddings prüfen. Der bestehende MCP-Zugang scheitert derzeit bereits
+  beim Lesen; kein Live-Import erfolgt und kein Dienst neugestartet.
+- [ ] Neue Originalfunde abarbeiten: aktuelle Regeln, Gastformular-Fülltest,
+  Jahresvermietungsgrenze, Zustimmung/Buchungsreihenfolge, Screening-Vorlauf,
+  Online-Gebührenabdeckung und widersprüchliche Haustierangaben klären.
+
+Details: [Überwachungsbausteine und Aktivierungsgrenzen](HOA_DOCUMENT_WATCH.md),
+[Abgleich der HOA-Originale](HOA_DOCUMENT_AUDIT_2026-09-05.md).
+
+## Prüfstand und Abnahmeregeln (bisheriger Ablauf)
 
 Nach der lokalen Ergänzung des Airbnb-Antwortwegs, der optionalen Zustellüberwachung, des Buchungsabgleichs, des gbrain-Consumer-Scaffolds, der ausfallsicheren Poller-Benachrichtigung, der konservativeren Stornierungsanalyse, der robusteren Erinnerungszustellung, des ausfallsicheren Cron-Alarmpfads, der beschädigungsfesten Statusüberwachung und des Bearer-Link-Schutzes in Cron-Hinweisen bestanden 230 JavaScript- und 34 Python-Tests (2026-09-05). Die früheren Prüfstände lagen bei 156/34, 177/34, 179/34, 189/34, 206/34 und 212/34. Das belegt lokale Technik, keinen vollständig getesteten Live-Ablauf.
 

@@ -7,6 +7,24 @@ Insbesondere existiert der gbrain-Zielschreiber noch nicht; der lokale Consumer
 ist keine aktivierte Synchronisierung. HOA-Quellen werden weiterhin ausdrücklich
 geprüft, nicht allein durch eine KI-Klassifizierung bestätigt.
 
+## Ergänzung: HOA-Originale und Dokumentenüberwachung
+
+Nach Freigabe des privaten Bestandsabgleichs und Anmeldung durch den Eigentümer
+wurden am 2026-09-05 über Safari 30 PDF-Einträge mit 255 Seiten heruntergeladen
+und außerhalb von Git unverändert archiviert. Die [Originalprüfung](HOA_DOCUMENT_AUDIT_2026-09-05.md)
+zeigt aktuelle Regeln, bisher fehlende Vorlagen und offene Widersprüche zu
+Vorlauf, Zustimmung und Haustierangaben. Es ist kein vollständiger Kontoexport
+und keine juristische Gesamtfreigabe.
+
+Die neuen [Dokumentenüberwachungsbausteine](HOA_DOCUMENT_WATCH.md) sind lokal
+implementiert: SHA-256-/Versionsabgleich, Wochenfälligkeit, Fehler-Wiederholung
+und seitenweise Archiv-/Indexvorbereitung. Aktuell bestehen 292 JavaScript-
+und 38 Python-Tests, Syntaxprüfung und Pages-Build; npm audit meldet weiterhin
+null Schwachstellen. Der Scheduler/Account-Collector ist noch nicht angebunden
+oder aktiviert. Zwei MCP-Leseaufrufe zu gbrain scheiterten; daher sind die
+neuen Inhalte noch **nicht vektorisiert**. Es gab keine gbrain-Schreibzugriffe,
+Neustarts, realen Nachrichten, Zahlungen oder Produktionsänderungen.
+
 ## Wiederholbare technische Prüfung
 
 `npm run verify` in `portal/` führt die vollständige lokale Prüfkette aus und
