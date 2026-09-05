@@ -95,8 +95,14 @@ export async function markHoaReplyProcessed(env,id,now=new Date()) {
   const stored=JSON.parse(raw);
   if(!stored.processedAt) {stored.processedAt=now.toISOString();await saveArchive(env,key,stored,now);}
 }
-export async function readHoaReply(env,id) {
+export async function readHoaReply(env,id,now=new Date()) {
   if(!/^[a-f0-9]{64}$/.test(String(id||''))) return null;
   const key='hoa-mail:'+id,raw=await env.CASES.get(key);
-  return raw?decryptPrivateJson(env,key,JSON.parse(raw)):null;
+  if(!raw) return null;
+  const stored=JSON.parse(raw);
+  // KV eviction may lag expiry. Access must enforce retention independently.
+  // Explicit null is a recorded hold; missing/malformed deadlines are not holds.
+  if(!Number.isFinite(now.getTime()))return null;
+  if(stored.expiresAt!==null && (typeof stored.expiresAt!=='string'||!Number.isFinite(Date.parse(stored.expiresAt))||Date.parse(stored.expiresAt)<=now.getTime()))return null;
+  return decryptPrivateJson(env,key,stored);
 }

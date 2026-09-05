@@ -56,6 +56,18 @@ test('source evidence is encrypted, content-addressed and retained through the m
   assert.equal((await readHoaReply(env,first.id)).text,msg.text);
   assert.ok(options.get('hoa-mail:'+first.id).expirationTtl>90*86400);
 });
+test('expired or missing retention blocks source access even if KV retains the bytes',async()=>{
+  const {env,values}=environment(),msg=mail();
+  const source=await archiveHoaReply(env,msg,analyseHoaReply(msg,cases,allow),cases,new Date('2026-09-05'));
+  const key='hoa-mail:'+source.id,original=JSON.parse(values.get(key)),deadline=new Date(original.expiresAt);
+  assert.equal((await readHoaReply(env,source.id,new Date(+deadline-1))).text,msg.text);
+  assert.equal(await readHoaReply(env,source.id,deadline),null);
+  for(const expiresAt of [undefined,'bad',123]) {
+    values.set(key,JSON.stringify({...original,expiresAt}));assert.equal(await readHoaReply(env,source.id),null);
+  }
+  values.set(key,JSON.stringify({...original,expiresAt:null}));
+  assert.equal((await readHoaReply(env,source.id,new Date('2030-01-01'))).text,msg.text);
+});
 test('a later legal hold removes archive expiry on the next scan, and an extended stay extends retention',async()=>{
   const {env,options}=environment(),msg=mail(),analysis=analyseHoaReply(msg,cases,allow),updated=structuredClone(cases);
   const source=await archiveHoaReply(env,msg,analysis,updated,new Date('2026-09-05'));

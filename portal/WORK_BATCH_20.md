@@ -21,7 +21,7 @@ gesonderte Arbeit.
 - [x] 12. gbrain-Ablaufbereinigung vor überholten Löschständen schützen
 - [x] 13. gbrain-Importe ohne gültige Aufbewahrungsfrist abweisen
 - [x] 14. gbrain-Zustandsgrenze vor neuen Schreibvorgängen durchsetzen
-- [ ] 15. Abgelaufene HOA-E-Mail-Belege nicht mehr ausliefern
+- [x] 15. Abgelaufene HOA-E-Mail-Belege nicht mehr ausliefern
 - [ ] 16. Dokumentenarchiv: ungültige Eingaben vor dem Speichern abweisen
 - [ ] 17. Explizit fehlgeschlagene Versandantworten nicht als Erfolg behandeln
 - [ ] 18. Tenant-Evaluation-Ablauf mit Nachforderung durchgängig lokal prüfen
