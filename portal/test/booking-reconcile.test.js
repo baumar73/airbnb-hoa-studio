@@ -45,3 +45,10 @@ test('a confirmed delivery can be superseded without leaving an unresolved lock'
   assert.equal(c.reviewLockedAt,undefined);assert.equal(c.submissionError,undefined);
   assert.equal(c.supersededSubmission.packageId,'old');
 });
+test('incomplete or malformed matching updates preserve all original booking and delivery data',()=>{
+  for(const invalid of [{guestName:''},{guestName:'Guest\nOther'},{guestName:42},{checkIn:''},{checkIn:'2026-02-30'},{checkOut:'2026-09-30'},{checkOut:'2028-11-01'},{adults:null},{adults:0},{adults:1.5},{adults:'2'},{adults:5}]) {
+    const c=base(),before=structuredClone(c);
+    const update={code:c.reservationCode,guestName:c.guestName,checkIn:c.checkIn,checkOut:c.checkOut,adults:c.adults,...invalid};
+    assert.deepEqual(reconcileBookingUpdate(c,update),{changed:false,invalid:true});assert.deepEqual(c,before);
+  }
+});

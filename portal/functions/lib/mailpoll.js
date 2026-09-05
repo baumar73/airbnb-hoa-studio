@@ -59,11 +59,14 @@ export async function pollMail(env,{imap=new Imap(),notify=text=>sendTelegram(en
       const msg = decodeMessage(await imap.fetchMessage(uid));
       const b = parseBooking(msg, msg.date);
       const existing = b.code && cases.find(c => c.reservationCode === b.code);
-      if (existing) {
-        if(b.complete&&reconcileBookingUpdate(existing,b)) { dirty=true;summary.bookingChanges=(summary.bookingChanges||0)+1; }
-        seenSet.add('b' + uid); delete ambiguous[uid]; continue;
+      if (existing && b.complete) {
+        const update=reconcileBookingUpdate(existing,b);
+        if(!update.invalid) {
+          if(update.changed) { dirty=true;summary.bookingChanges=(summary.bookingChanges||0)+1; }
+          seenSet.add('b' + uid); delete ambiguous[uid]; continue;
+        }
       }
-      if (b.complete) {
+      if (b.complete && !existing) {
         try {
           const c = newCaseFrom(b);
           cases.push(c); dirty = true; summary.bookings++;

@@ -1,7 +1,10 @@
+import {validateCaseInput} from './workflow.js';
 const fields=c=>({guestName:String(c.guestName||''),checkIn:String(c.checkIn||''),checkOut:String(c.checkOut||''),adults:Number(c.adults||0)});
 
 export function reconcileBookingUpdate(c,booking,now=new Date()) {
   if(!c||!booking||c.reservationCode!==booking.code)return {changed:false};
+  if(typeof booking.guestName!=='string'||!booking.guestName.trim()||booking.guestName.length>160||
+    /[\u0000-\u001f\u007f]/.test(booking.guestName)||!Number.isInteger(booking.adults)||!validateCaseInput(booking).ok) return {changed:false,invalid:true};
   const before=fields(c),after={guestName:String(booking.guestName||''),checkIn:String(booking.checkIn||''),checkOut:String(booking.checkOut||''),adults:Number(booking.adults||0)};
   if(JSON.stringify(before)===JSON.stringify(after))return {changed:false};
   const supersededAt=now.toISOString();

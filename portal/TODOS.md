@@ -10,6 +10,18 @@ Die Oberfläche ist weiter als der durchgehend automatische Ablauf. „Lokal pro
 
 Priorität: zuerst den Tenant-Evaluation-Ablauf schließen — Buchung → Online-Antrag → konkrete Nachforderungen → Erinnerungen → nachgewiesener Abschluss → HOA-Entscheidung.
 
+## Vier lokale Zuverlässigkeitsaufgaben (2026-09-05)
+
+- [x] Buchungsimport: fehlerhafte Änderungen erhalten den bestehenden Fall;
+  unvollständige Mails bleiben zur Prüfung sichtbar. Unveränderte Bestätigungen
+  erzeugen weder Schreibzugriffe noch falsche Änderungszähler. Vier neue Tests
+  einschließlich zwölf ungültiger Eingabevarianten, insgesamt 258 JS-Tests.
+- [ ] Erinnerungsversand: aktuelle Sperren und verlorene Versandbelege absichern.
+- [ ] Prüfdienst: beschädigte diagnostische Statusdaten sicher ersetzen.
+- [ ] Wiederanlauf: dauerhafte Speicherung mit einem lokalen Runtime-Neustart prüfen.
+
+Diese Teilaufgaben belegen lokale Technik, keine Live-Abnahme.
+
 ## Tenant Evaluation und HOA-Rückmeldungen
 
 ### Verifizierbare Rückmeldungen und Nachforderungen verarbeiten
