@@ -1,5 +1,10 @@
 # Florida and HOA compliance controls
 
+> **Vollständige Rechts- und Regel-Inventur** (HOA-Regeln, anwendbare
+> Florida-Statuten incl. Fair Housing/Antidiskriminierung, Airbnb-Host-Bedingungen,
+> gemappt auf Software-Anforderungen): siehe
+> [`HOA_STATUTES_AIRBNB_BASIS.md`](./HOA_STATUTES_AIRBNB_BASIS.md).
+
 This file documents the portal's operational controls. It is not a substitute
 for advice from a Florida community-association or fair-housing lawyer.
 
