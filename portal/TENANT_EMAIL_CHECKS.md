@@ -65,7 +65,29 @@ sind hier nur als Quellen-Gattung referenziert.
   Quell-Bestätigung offen (fail-closed).
 - **Test:** `test/tenant-evaluation-flow.test.js` (+2).
 
+## Bestätigung + Versand der ausgefüllten Formulare (neu, optional)
+
+Der Gast kann seine ausgefüllten, unterschriebenen Formulare **herunterladen**
+(`/w/[token]/pdf/*`, bestehend) und — als **explizite, getrennte Aktion** —
+an die Condo-Association per E-Mail senden lassen, mit dem Eigentümer in CC,
+um den Fluss zu überwachen. Er erhält danach eine Bestätigung.
+
+- **Invariante:** Das ist **kein** HOA-Submit und **kein** Nebeneffekt des
+  Speicherns. Es ist default **aus** (`FORM_DELIVERY_ENABLED` != `yes` → 503,
+  fail-closed). Der Gast ist **nie** Empfänger — nur die Association
+  (`FORM_DELIVERY_RECIPIENT`) und der Eigentümer in CC
+  (`FORM_DELIVERY_CC`). Adressen kommen aus dem Secret-Store, nie aus Git.
+  Blockiert bei: Flag aus, fehlender/wertloser Empfänger-Adresse, gecanceltem
+  Fall, ungespeicherten Formularen, bereits eingereichter/locked Buchung.
+- **Ist (`functions/lib/form-delivery.js`, Route `POST /w/[token]/send-forms`):**
+  `deliveryErrors()` + `sendFilledForms()` (Reuse `generatePackage`, Versand via
+  `sendViaGmail`, `formDelivery`-Log, Bestätigungsseite). Button nur im
+  Wizard-View bei aktivem Flag (`[[path]].js`).
+- **Test:** `test/form-delivery.test.js` (+5): Empfänger=Keila + CC=Owner, Gast
+  nie Empfänger, flag-off blockiert, canceled blockiert, savedAt fehlt
+  blockiert, Empfänger nicht konfiguriert blockiert. Suite: **336** Tests grün.
+
 ## Abgedeckte Regeln (Wiederbeleg)
 
 Die abgedeckten Zeilen korrespondieren mit bestehenden grünen Tests. Belegspuren:
-`node --test test/*.test.js` (aktuell 327, alle grün) — vgl. `npm test`.
+`node --test test/*.test.js` (aktuell 336, alle grün) — vgl. `npm test`.

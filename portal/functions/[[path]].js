@@ -7,6 +7,7 @@ import { generateFloodDisclosure } from './lib/flood.js';
 import { submitApprovedPackage, isReadyForOwnerReview, docStates, generatePackage } from './lib/submit.js';
 import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isGuestPaperworkComplete } from './lib/workflow.js';
 import { COMPLIANCE_POLICY_VERSION, HOA_SOURCE_PACKET, adverseActionNotice, isAnnualRental, isSameLesseeRenewal, liveComplianceState, externalFeeRequestAuthorized } from './lib/compliance.js';
+import { sendFilledForms, deliveryConfig, deliveryErrors } from './lib/form-delivery.js';
 import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases, inheritCaseSnapshot, caseSnapshotVersion } from './lib/storage.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
@@ -776,7 +777,7 @@ function applicationRouteView(c, error) {
        <p class="muted">Choose only one route. For a new application, use the association's Tenant Evaluation invitation if you received one. If you are unsure, message Owner through Airbnb before choosing.</p></div>`);
 }
 
-function wizardView(c, saved, draftVersion = null) {
+function wizardView(c, saved, draftVersion = null, deliveryEnabled = false) {
   const w = c.wizard || {};
   const adults = w.adults || [];
   const A = (i, f) => {
@@ -966,8 +967,19 @@ function wizardView(c, saved, draftVersion = null) {
          </p>
        </div>
      </form>
-     ${downloads}
-     ${sigScript}`);
+         ${downloads}
+         ${deliveryEnabled ? `
+           <div class="card"><h2>Send your completed forms to the association</h2>
+             ${c.wizard && c.wizard.savedAt ? `
+               ${c.formDelivery ? `<p class="pill ok">Your forms were emailed on ${esc((c.formDelivery.sentAt || '').slice(0, 10))}.</p>`
+                 : `<p>Your filled, signed forms can be emailed to the association, with a copy to the owner. This is optional — it does not submit the HOA package and is not an approval.</p>
+                    <form method="post" action="${esc('/w/' + c.token + '/send-forms?deliver=yes')}" data-confirm="Send your completed, signed forms to the association now?">
+                      <label>Confirm your details are complete before sending.<input name="deliver" type="hidden" value="yes"></label>
+                      <button type="submit" name="saveMode" value="none">Send my forms to the association</button>
+                    </form>`}`
+             : '<p class="muted">Save your forms above before you can send them.</p>'}
+           </div>` : ''}
+         ${sigScript}`);
 }
 
 function settingsView(hasSig, liveMode, msg, compliance, complianceState) {
@@ -1750,7 +1762,7 @@ async function routeRequest(context) {
     return redirect(`/w/${c.token}`);
   }
 
-  const mW = p.match(/^\/w\/([A-Za-z0-9_-]{6,})(\/pdf\/(lease-application|background-authorization|rules-and-regulations|guest-registration|lease-agreement|flood-disclosure))?$/);
+  const mW = p.match(/^\/w\/([A-Za-z0-9_-]{6,})(\/pdf\/(lease-application|background-authorization|rules-and-regulations|guest-registration|lease-agreement|flood-disclosure)|\/send-forms)?$/);
   if (mW) {
     const cases = await loadCases(env);
     const c = cases.find(c => c.token === mW[1]);
@@ -1762,7 +1774,7 @@ async function routeRequest(context) {
       if (c.pathType === 'full' && !c.hoaOccupancyConfirmedAt) return html(occupancyView(c));
       if (c.pathType === 'full' && c.screeningRoute === 'undecided') return html(applicationRouteView(c));
       if (c.pathType === 'full' && c.screeningRoute === 'online') return redirect(`/v/${c.token}`);
-      return html(wizardView(c, url.searchParams.get('saved'), env.CASE_STORE ? caseSnapshotVersion(cases,c.id) : null));
+      return html(wizardView(c, url.searchParams.get('saved'), env.CASE_STORE ? caseSnapshotVersion(cases,c.id) : null, env.FORM_DELIVERY_ENABLED === 'yes'));
     }
 
     if (!mW[2] && request.method === 'POST') {
@@ -1838,6 +1850,23 @@ async function routeRequest(context) {
       if (becameReady) waitUntil(sendTelegram(env, `🤖 ${c.guestName} (${c.checkIn}): Unterlagen vollständig. Die OpenAI-KI-Vorprüfung läuft; du erhältst nur bei Abweichungen Rückfragen oder anschließend eine kompakte Versandfreigabe.`));
       const saveState = saveMode !== 'draft' && guestPaperworkComplete ? 'ready' : 'draft';
       return redirect(`/w/${c.token}?saved=${saveState}`);
+    }
+
+    if (mW[2] === '/send-forms' && request.method === 'POST') {
+      if (!isAllowedMutationOrigin(request, env) || url.searchParams.get('deliver') !== 'yes') {
+        return new Response('cross-origin or missing confirmation', { status: 403, headers: { ...SEC_HEADERS, 'Cache-Control': 'private, no-store' } });
+      }
+      if (c.submission || c.reviewLockedAt) return redirect(`/v/${c.token}`);
+      const cfg = deliveryConfig(env);
+      if (!cfg.enabled) return html(page('Form delivery', '<h1>Not available</h1>', '<p>Form delivery is currently disabled. Please contact the owner.</p>'), 503);
+      const err = deliveryErrors(c, env);
+      if (err) return html(page('Form delivery', '<h1>Cannot send yet</h1>', `<p>${esc(err)}</p>`), 409);
+      const out = await sendFilledForms(c, cases, env);
+      if (!out.ok) return html(page('Form delivery', '<h1>Not sent</h1>', `<p>${esc(out.error || 'delivery failed')}</p>`), 502);
+      return html(page('Forms sent', '<h1>Your forms were sent</h1>', `
+        <div class="card"><p class="pill ok">Sent ${esc(new Date(out.receipt.sentAt).toLocaleString('en-US'))}</p>
+        <p>Your completed, signed forms were emailed to the association (${esc(cfg.recipient)}) with a copy to the owner. You can still download copies for your records.</p>
+        <p><a class="btn ghost" href="/w/${mW[1]}">Review / download your forms</a></p></div>`));
     }
 
     if (mW[2] && request.method === 'GET') {

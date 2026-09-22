@@ -502,3 +502,76 @@ test('canceled cases reject guest wizard views and stay closed', async () => {
   assert.equal(res.status, 410);
   assert.match(await res.text(), /reservation is no longer active/i);
 });
+
+test('guest downloads the filled lease-application PDF containing their own entered data', async () => {
+  const { env, store } = mockEnv();
+  const c = seedCase(store);
+  // Simulate a guest who filled and saved the wizard: savedAt is set, so the
+  // downloads block and the /w/[token]/pdf endpoints are reachable.
+  c.wizard = {
+    savedAt: '2026-09-20T10:00:00Z',
+    adults: [
+      { firstName: 'Ana', middleName: 'Maria', lastName: 'Hypothetica',
+        street: '123 Main St', city: 'St. Petersburg', state: 'FL', zip: '33701',
+        phone: '5551234567', birthDate: '1985-06-15', gender: 'F',
+        idType: 'drivers_license', idNumber: 'H1234567', idState: 'FL',
+        email: 'ana@example.test', employer: 'Spark Co', employerPhone: '5551112222', sigPng: null },
+    ],
+    references: [{ name: 'Ref One', phone: '5550001111', address: '9 Elm St' }],
+    emergency: [{ name: 'Em One', phone: '5552223333' }],
+    auto: { make: 'Honda', year: '2020', plate: 'ABC123' },
+    checkIn: '2026-10-17', checkOut: '2026-12-20',
+    applicationType: 'lease', esignConsent: true,
+  };
+  store.set('cases', JSON.stringify([c]));
+
+  // Real templates from public/forms, served exactly as the production ASSETS binding does.
+  const { readFileSync } = await import('node:fs');
+  const formBytes = (name) => new Uint8Array(readFileSync(new URL(`../public/forms/${name}.pdf`, import.meta.url)));
+  env.ASSETS = { async fetch(u) {
+    const file = new URL(u).pathname.split('/').pop(); // lease-application.pdf (endpoint appends .pdf)
+    const stem = file.replace(/\.pdf$/, '');
+    if (stem === 'lease-application') return new Response(formBytes('lease-application'), { status: 200 });
+    return new Response('not found', { status: 404 });
+  } };
+
+  const res = await onRequest({ request: guestRequest(`/w/${TOKEN}/pdf/lease-application`, { method: 'GET' }), env, waitUntil: () => {} });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('Content-Type') || '', /application\/pdf/);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  assert.equal(new TextDecoder().decode(bytes.subarray(0, 5)), '%PDF-');
+
+  // Decompress every FlateDecode content stream (stream...endstream blocks) and
+  // confirm the guest's entered values are actually drawn into the form.
+  const { inflateSync } = await import('node:zlib');
+  const latin = new TextDecoder('latin1');
+  const rawStr = latin.decode(bytes);
+  let decompressed = '';
+  let from = 0;
+  while (true) {
+    let s = rawStr.indexOf('stream\r\n', from);
+    if (s < 0) s = rawStr.indexOf('stream\n', from);
+    if (s < 0) break;
+    const dataStart = rawStr.indexOf('\n', s) + 1;
+    const e = rawStr.indexOf('endstream', dataStart);
+    if (e < 0) break;
+    let dataEnd = e;
+    if (rawStr[dataEnd - 1] === '\n') dataEnd--;
+    if (rawStr[dataEnd - 1] === '\r') dataEnd--;
+    const payload = bytes.subarray(dataStart, dataEnd);
+    if (payload.length >= 2 && payload[0] === 0x78 && payload[1] === 0x9c) {
+      try { decompressed += latin.decode(inflateSync(payload)); } catch { /* per-stream tolerant */ }
+    }
+    from = e + 9;
+  }
+  // pdf-lib writes text as hex string operands <…> Tj; decode them to prove the
+  // guest's own entered values are actually drawn into the form.
+  const hexOperands = [...decompressed.matchAll(/<([0-9A-Fa-f]+)>/g)];
+  let text = '';
+  for (const m of hexOperands) {
+    const h = m[1]; let s = '';
+    for (let i = 0; i + 1 < h.length; i += 2) s += String.fromCharCode(parseInt(h.substr(i, 2), 16));
+    text += s;
+  }
+  assert.match(text, /Hypothetica/);
+});
