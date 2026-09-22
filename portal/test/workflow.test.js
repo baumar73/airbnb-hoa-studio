@@ -75,8 +75,15 @@ test('rejects invalid dates and missing adult count', () => {
   assert.equal(validateCaseInput({ guestName: 'X', checkIn: '2027-02-31', checkOut: '2027-03-05', adults: 1 }).ok, false);
 });
 
-test('Airbnb rentals must use the full HOA path and meet the 30-night minimum', () => {
-  assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-16', adults: 1 }).ok, true);
+test('Airbnb rentals use the full HOA path: under 30 nights is rejected, exactly 30 requires clarification, 31+ is full', () => {
+  // 30 nights: Inventur R1/R3 defines the boundary as unresolved -> clarification,
+  // never silently classified (fail-closed). 2026-10-17 -> 2026-11-16 = 30 nights.
+  const exactly30 = validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-16', adults: 1 });
+  assert.equal(exactly30.ok, false);
+  assert.match(exactly30.error, /clarif/i);
+  // 31 nights is a clear full-path rental.
+  assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-17', adults: 1 }).ok, true);
+  // under 30 stays invalid for paid rentals.
   assert.equal(validateAirbnbCaseInput({ guestName: 'X', checkIn: '2026-10-17', checkOut: '2026-11-15', adults: 1 }).ok, false);
 });
 

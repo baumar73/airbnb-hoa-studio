@@ -60,6 +60,10 @@ export function validateAirbnbCaseInput(input) {
   const result = validateCaseInput(input);
   if (!result.ok) return result;
   if (result.nights < 30) return { ok: false, error: 'paid Airbnb rentals require at least 30 nights and the full HOA path' };
+  // Inventur R1/R3: exactly 30 actual nights is an unresolved boundary (guest
+  // registration caps at 30, lease text requires 30+). Never classify it
+  // silently; require explicit owner clarification (fail-closed).
+  if (result.nights === 30) return { ok: false, clarification_required: true, error: 'exactly 30 nights needs clarification before classifying this reservation as a lease or a guest stay' };
   if (Number(input && input.adults) > 2) return { ok: false, error: 'rentals with more than two adults require a separate manual HOA application package' };
   return { ...result, pathType: 'full' };
 }

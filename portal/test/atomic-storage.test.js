@@ -319,7 +319,7 @@ async function automaticFixture() {
   legacy.set('compliance-config',JSON.stringify(compliance));legacy.set('submit-live','yes');
   compliance.airbnbExternalFeeAuthorizationReference='synthetic authorization';legacy.set('compliance-config',JSON.stringify(compliance));
   const cases=await loadStoredCases(env);
-  const c={id:'automatic',guestName:'Jane Smith',reservationCode:'SYNTHETIC123',checkIn:'2026-11-01',checkOut:'2026-12-01',nights:30,adults:1,pathType:'full',screeningRoute:'paper',ownerReviewReadyAt:'2026-09-05T00:00:00Z',
+  const c={id:'automatic',guestName:'Jane Smith',reservationCode:'SYNTHETIC123',checkIn:'2026-11-01',checkOut:'2026-12-02',nights:31,adults:1,pathType:'full',screeningRoute:'paper',ownerReviewReadyAt:'2026-09-05T00:00:00Z',
     steps:['ids_provided','fee_sent','screening_complete'].map(id=>({id,done:true})),
     wizard:{adults:[{firstName:'Jane',middleName:'None',lastName:'Smith',birthDate:'1980-01-01',gender:'F',phone:'555-0100',email:'synthetic@example.test',street:'synthetic',city:'synthetic',state:'FL',zip:'00000',idType:'drivers_license',idNumber:'synthetic',idState:'FL',employer:'Retired',employerPhone:'N/A',sigPng:sig,esignConsent:true,signatureAudit:{signedAt:'2026-09-05T00:00:00Z',contentHash:'synthetic'}}],references:[{name:'One',phone:'1',address:'test'},{name:'Two',phone:'2',address:'test'}],emergency:[{name:'One',phone:'1'},{name:'Two',phone:'2'}],esignConsent:true,esignConsentVersion:'fl-2026.09.02',rulesAcknowledged:true}};
   c.reviewHash=await caseReviewDigest(c,c.wizard);cases.push(c);await saveStoredCases(env,cases);
