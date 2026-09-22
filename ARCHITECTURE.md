@@ -59,4 +59,4 @@ a checkout is never invented. -> Telegram alert on `complete:false`.
 ## Verification (per commit)
 
 `npm test` · `npm run check` · `npm run build` · `npm audit --json` — all green
-on `main` (340 tests, audit 0 high/critical).
+on `main` (344 tests, audit 0 high/critical).

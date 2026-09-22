@@ -102,12 +102,20 @@ Mietvorgänge auf einen Blick:
   Check-in), mit Prozent und Gesamt-Farbe: grün (freigegeben) / gelb (in Arbeit
   od. Screening offen) / rot (fällig, Freigabe fehlt, Versand-Störung) / ausgegraut
   (storniert). So erkennt man mit einem Blick, ob ein Vorgang im Zeitplan liegt.
-- **Foto & Reinigung** werden pro Mieter über `/admin/board/setup` gesetzt
-  (Basic-Auth geschützt, Validierung von data-URL und YYYY-MM-DD).
-- Der bestehende Merkzettel-/Hinweis-Board darunter bleibt unverändert.
+- **Foto & Reinigung**: Das Gastfoto wird pro Mieter über `/admin/board/setup`
+  gesetzt (Basic-Auth, data-URL-Validierung). Das **Reinigungsdatum (Turno)**
+  wird **automatisch** aus `operations/data/airbnb-hoa-state.json` abgeleitet:
+  `operations/tools/export_cleaning_projects.py` extrahiert die Turno-Projekte
+  in das `cleaning-projects`-KV (wrangler kv put, reale IDs/Secrets nur ausserhalb
+  Git); die Portal-Logik `functions/lib/cleaning.js` matcht 0–2 Tage nach
+  Check-out (stornierte ausgenommen). Manuelle Einträge überschreiben die
+  Ableitung. Das Gastfoto hat keine verlässliche Automatik-Quelle (Airbnb hat
+  keine öffentliche Gastfoto-API) und bleibt bewusst manuell.
 - **Test:** `test/progress-board.test.js` (+2), `test/board-router.test.js`
-  (+2): Sortierung, Farbe/Label, Photo+Reinigung setzen und anzeigen, invalide
-  Eingaben abgelehnt (keine Mutation). Suite: **340** Tests grün.
+  (+2), `test/cleaning.test.js` (+3): Sortierung, Farbe/Label, Photo+Reinigung
+  setzen/anzeigen, invalide Eingaben abgelehnt, automatische ReinigungsAbleitung
+  aus Turno-Projekten (0–2 Tage, cancelled ausgeschlossen).
+  Suite: **344** Tests grün.
 
 ## Abgedeckte Regeln (Wiederbeleg)
 

@@ -8,6 +8,7 @@ import { submitApprovedPackage, isReadyForOwnerReview, docStates, generatePackag
 import { validateCaseInput, isAllowedMutationOrigin, validateLiveSubmissionPrerequisites, validateSignaturePng, isGuestAccessibleCase, applicationFeeState, isGuestPaperworkComplete } from './lib/workflow.js';
 import { COMPLIANCE_POLICY_VERSION, HOA_SOURCE_PACKET, adverseActionNotice, isAnnualRental, isSameLesseeRenewal, liveComplianceState, externalFeeRequestAuthorized } from './lib/compliance.js';
 import { sendFilledForms, deliveryConfig, deliveryErrors } from './lib/form-delivery.js';
+import { resolveCleaning } from './lib/cleaning.js';
 import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCases, inheritCaseSnapshot, caseSnapshotVersion } from './lib/storage.js';
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
@@ -1268,7 +1269,7 @@ function boardView(notes, msg, topBlock = '', casesForSetup = []) {
     `<h1>Board</h1><p>Merkzettel rund um Wohnung, Konten und Behörden — Dinge, die nicht vergessen werden dürfen.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `${topBlock?`<div class="card"><h2>Fortschritt der Mietvorgänge</h2>${topBlock}</div>`:''}
     <div class="card"><h2>Foto & Reinigung pro Mieter</h2>
-      <p class="muted">Setze optional das Gastfoto (Airbnb) und das Reinigungsdatum (Turno) je Vorgang. Foto als Daten-URL (kleines JPEG/PNG, z. B. per Paste).</p>
+      <p class="muted">Setze optional das Gastfoto (Airbnb) je Vorgang (Foto als data:image/…-URL). Das Reinigungsdatum (Turno) wird automatisch aus den gespeicherten Turno-Projekten abgeleitet; manuelle Einträge überschreiben die Ableitung.</p>
       ${casesForSetup.map(c => `<form method="post" action="/admin/board/setup" class="u0f2f2e2b">
         <input type="hidden" name="id" value="${esc(c.id)}">
         <b>${esc(c.guestName.split(' ')[0])}</b> <span class="muted">${esc(c.checkIn)} – ${esc(c.checkOut)}</span>
@@ -1540,10 +1541,11 @@ export function caseProgress(c, now) {
 
 // One column per tenant, like a slot-machine wheel: the wheel fills as the
 // process moves toward the stay. Sorted chronologically (earliest stays left).
-export function progressBoardView(cases, now = new Date()) {
+export function progressBoardView(cases, now = new Date(), cleaningProjects = []) {
   const sorted = [...(cases || [])].sort((a, b) => (a.checkIn || '').localeCompare(b.checkIn || ''));
   const columns = sorted.map(c => {
     const p = caseProgress(c, now);
+    const cleaning = resolveCleaning(c, cleaningProjects) || null;
     const first = (c.wizard?.adults || [])[0] || {};
     const firstName = (first.firstName || c.guestName.split(' ')[0] || '?');
     const idNumber = first.idNumber || '—';
@@ -1555,12 +1557,12 @@ export function progressBoardView(cases, now = new Date()) {
     const photo = c.photo
       ? `<img class="gbp" src="${esc(c.photo)}" alt="">`
       : `<div class="gbp gplaceholder">👤</div>`;
-    const cleaning = c.cleaning ? esc(c.cleaning) : '<span class="muted">n.n.</span>';
+    const cleaningHtml = cleaning ? esc(cleaning) : '<span class="muted">n.n.</span>';
     return `<div class="gcol ${toneClass}" title="${esc(c.checkIn)} – ${esc(c.checkOut)}">
       <div class="ghead">${photo}<div class="gname">${esc(firstName)}</div><div class="gid">${esc(idNumber)}</div></div>
       <div class="gwheel">${wheels}<div class="gpct">${p.pct}%</div></div>
       <div class="gstatus tint">${esc(p.label)}</div>
-      <div class="gstay"><span>${esc(c.checkIn)}</span><span>→</span><span>${esc(c.checkOut)}</span><span class="gclean">🧹 ${cleaning}</span></div>
+      <div class="gstay"><span>${esc(c.checkIn)}</span><span>→</span><span>${esc(c.checkOut)}</span><span class="gclean">🧹 ${cleaningHtml}</span></div>
     </div>`;
   }).join('');
   return `<div class="gboard">${columns || '<p class="muted">Keine Mietvorgänge.</p>'}</div>`;
@@ -2248,7 +2250,8 @@ async function routeRequest(context) {
     if (p === '/admin/board' && request.method === 'GET') {
       const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
       const allCases = await loadCases(env);
-      const board = progressBoardView(allCases);
+      const cleaningProjects = JSON.parse((await env.CASES.get('cleaning-projects')) || '[]');
+      const board = progressBoardView(allCases, new Date(), cleaningProjects);
       return html(boardView(notes, url.searchParams.get('msg'), board, allCases));
     }
     if (p === '/admin/board/setup' && request.method === 'POST') {

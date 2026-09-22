@@ -58,3 +58,14 @@ test('progressBoardView renders one column per tenant sorted chronologically wit
   assert.match(html, /Reinigung|cleaning|🧹/i);
   assert.match(html, /photo|avatar|\bimg\b|👤/i);
 });
+
+test('progressBoardView derives the cleaning date automatically from Turno projects', () => {
+  const cases = [makeCase('A', 'Ana Alpha', '2026-11-01', '2026-11-30')];
+  const html = progressBoardView(cases, new Date('2026-10-01T00:00:00Z'), [
+    { id: 't', projectId: 'T1', date: '2026-12-01', status: 'completed' }, // 2026-11-30 + 1
+  ]);
+  assert.match(html, /2026-12-01/);
+  // Without projects, the manual-empty state is shown instead.
+  const nothing = progressBoardView(cases, new Date('2026-10-01T00:00:00Z'), []);
+  assert.doesNotMatch(nothing, /2026-12-01/);
+});
