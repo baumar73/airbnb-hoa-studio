@@ -47,6 +47,22 @@ Jeder Push auf `main` und jeder Pull Request laeuft durch GitHub Actions
 (`.github/workflows/ci.yml`): `npm test` · `npm run check` · `npm run build` ·
 `npm audit` (Portal) plus Python-Syntax-Check (Operations).
 
+## Sicherheit & Review
+
+Die Härtung ist in Tests + CI abgesichert (`portal/test/csp.test.js`,
+`portal/test/admin-auth.test.js`, `portal/test/secure-compare.test.js`):
+
+- **Strikte Content-Security-Policy ohne `unsafe-inline`:** pro Antwort wird ein
+  kryptografischer Nonce rotiert und in jeden `<script>`/`<style>`-Tag injiziert
+  (CSP `script-src`/`style-src 'self' 'nonce-…'`). Inline-`style=`-Attribute und
+  `onsubmit`-Handler wurden in Utility-Klassen bzw. zentrale Nonce-Script-Logik
+  (`data-confirm`/`data-pct`) umgebaut.
+- **Constant-time Auth:** Admin-Basic-Auth und Review-Token-Vergleich laufen
+  ueber `tolerantCompare` (SHA-256-Digest + XOR-Akkumulator, kein Kurzschluss),
+  `functions/lib/secure-compare.js`.
+- **Sicherheits-Header:** HSTS, nosniff, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, restriktive Permissions-Policy.
+
 ## Doku
 
 - `STUDIO_BRIEF.md` – Regeln/Tests.
@@ -57,4 +73,4 @@ Jeder Push auf `main` und jeder Pull Request laeuft durch GitHub Actions
 ## Checks (lokal)
 
 `npm test` · `npm run check` · `npm run build` · `npm audit --json`
-(313 tests, audit-sauber).
+(327 tests, audit-sauber).
