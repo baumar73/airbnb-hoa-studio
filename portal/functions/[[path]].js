@@ -11,6 +11,7 @@ import { getEncryptedSecret, loadStoredCases, putEncryptedSecret, saveStoredCase
 import { sendViaGmail, sendTelegram } from './lib/email.js';
 import { confirmHoaOccupancy, parseAdultFormSlots } from './lib/guest-form.js';
 import { bookingLastName } from './lib/parse.js';
+import { tolerantCompare } from './lib/secure-compare.js';
 import { needsReview, reviewContextHash, validateReviewReport, reviewCaseData, caseReviewDigest } from './lib/review.js';
 import { archivePackage, loadArchivedPackage, reviewPackagePayload } from './lib/package-archive.js';
 import {planGuestJourney} from './lib/journey.js';
@@ -177,10 +178,10 @@ async function checkAdmin(request, env) {
     const sep = decoded.indexOf(':');
     const u = sep >= 0 ? decoded.slice(0, sep) : '';
     const p = sep >= 0 ? decoded.slice(sep + 1) : '';
-    if (u === (env.ADMIN_USER || 'markus')) {
+    if (await tolerantCompare(u, env.ADMIN_USER || 'markus')) {
       const kvHash = await env.CASES.get('admin-password-hash');
-      if (kvHash) { if (await sha256hex(p) === kvHash) return null; }
-      else if (env.ADMIN_PASSWORD && p === env.ADMIN_PASSWORD) return null;
+      if (kvHash) { if (await tolerantCompare(await sha256hex(p), kvHash)) return null; }
+      else if (env.ADMIN_PASSWORD && await tolerantCompare(p, env.ADMIN_PASSWORD)) return null;
     }
   }
   return new Response('Authentication required', { status: 401, headers: {
@@ -1812,7 +1813,7 @@ async function routeRequest(context) {
   if (p.startsWith('/admin')) {
     const reviewRoute=['/admin/review/candidates','/admin/review/package','/admin/review/result','/admin/review/claim','/admin/review/failure','/admin/review/heartbeat'].includes(p);
     const reviewToken=String(env.REVIEW_API_TOKEN||'');
-    const reviewer=reviewRoute && reviewToken.length>=32 && await sha256hex(request.headers.get('Authorization')||'')===await sha256hex('Bearer '+reviewToken);
+    const reviewer=reviewRoute && reviewToken.length>=32 && await tolerantCompare(request.headers.get('Authorization')||'', 'Bearer '+reviewToken);
     const denied = reviewer ? null : await checkAdmin(request, env);
     if (denied) return denied;
     if(p==='/admin/package-delivery-reconcile'&&request.method==='POST') {
