@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 import { CaseStore } from '../case-store/src/index.js';
-import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret, caseSnapshotVersion } from '../functions/lib/storage.js';
+import { loadStoredCases, saveStoredCases, inheritCaseSnapshot, putEncryptedSecret, encryptPrivateJson, decryptPrivateJson, caseSnapshotVersion } from '../functions/lib/storage.js';
 import {caseReviewDigest,reviewContextHash} from '../functions/lib/review.js';
 import {reconcileBookingUpdate,acknowledgeBookingChange} from '../functions/lib/booking-reconcile.js';
 import { register } from 'node:module';
@@ -677,3 +677,20 @@ test('executed document download uses archived bytes after owner signature chang
   const result=await onRequest({env,request:new Request('https://example.com/v/synthetic-executed-token/executed-lease.pdf')});
   assert.equal(result.status,200);assert.equal(await result.text(),'synthetic PDF fixture 4');
 });
+test('AES-256-GCM private fields: the wrong decryption key is rejected and reveals no plaintext', async () => {
+    // Correct-key round trip proves the sealing path is usable.
+    const env = { DATA_ENCRYPTION_KEY: Buffer.alloc(32,7).toString('base64') };
+    const envWrong = { DATA_ENCRYPTION_KEY: Buffer.alloc(32,9).toString('base64') };
+    const secret = { idNumber: 'D12345678', sigPng: 'aGVsb2HlM3' };
+    const sealed = await encryptPrivateJson(env, 'test-purpose', secret);
+    assert.deepEqual(await decryptPrivateJson(env, 'test-purpose', sealed), secret);
+    // The ciphertext is 12-byte IV + GCM tag + payload — entirely sealed, never base64 plaintext.
+    assert.ok(!JSON.stringify(sealed).includes('D12345678'));
+    // Decrypting the same ciphertext with a different 32-byte key must fail closed
+    // (AES-GCM tag validation) and never return any part of the plaintext.
+    let threw = null;
+    try { await decryptPrivateJson(envWrong, 'test-purpose', sealed); }
+    catch (e) { threw = e; }
+    assert.ok(threw !== null, 'expected a GCM authentication failure for the wrong key');
+    assert.ok(!String(threw).includes('D12345678'), 'error must not contain plaintext fragments');
+  });

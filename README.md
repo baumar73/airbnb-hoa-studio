@@ -73,4 +73,4 @@ Die Härtung ist in Tests + CI abgesichert (`portal/test/csp.test.js`,
 ## Checks (lokal)
 
 `npm test` · `npm run check` · `npm run build` · `npm audit --json`
-(327 tests, audit-sauber).
+(330 tests, audit-sauber).
