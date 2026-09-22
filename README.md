@@ -1,59 +1,39 @@
 # Airbnb HOA Studio – Isla 405D
 
-Private workshop for the HOA (condominium) guest-registration and lease-approval
-workflow of Unit 405D, Isla del Sol, St. Petersburg, FL (Airbnb monthly rentals).
+Private versionierte Arbeitsumgebung fuer den Airbnb-Vermietungsablauf von Unit 405D, Isla del Sol, St. Petersburg, FL (HOA-Guest-Registration und Lease-Approval).
 
-**Status:** private · owner-operated · not a public product.
-This repo is the single, versioned home for the Isla 405D portal so the owner
-and helpers can keep improving it without re-searching scattered copies.
+**Status:** privat · owner-operated · kein Public-Product.
 
-## Purpose
 
-The association requires every Airbnb guest to register with the condo and get
-lease approval before check-in. This system removes the manual email/paper chase:
 
-- Guests enter only their Airbnb confirmation code + last name.
-- The system resolves the booking, shows exactly what to submit, lets them fill
-  and sign the required association forms online, and tracks status.
-- The owner gets one place to review, approve, and archive submissions.
+## Ziel
 
-## Infrastructure
+Buchungen flüssig ohne Rueckfragen an den Eigentuemer durchfuehren:
 
-- **`portal/`** — Cloudflare Workers app served at `https://isladelsol405d.com/`.
-  - Guest self-service: `/find` (code + last name) → `/v/<token>` personal page.
-  - Owner admin area + read-only API `/api/ro/*` for Hermes/GBrain.
-  - **`cron/`** — `isla-cron` worker: every 30 min AND daily scans a Gmail
-    (IMAP) inbox, parses Airbnb booking confirmations, cancellations, HOA
-    replies, and writes cases / send Telegram alerts. Runs on Cloudflare KV.
-  - Airbnb host-confirmation letters are parsed in their real year-less format
-    (`…ARRIVES OCT 15…` + later date); a checkout is never invented.
-- **`operations/`** — local Node dashboard + tools (daily watch, calendar
-  snapshot, integration status, Gmail/Hermes sync). Runs on the owner's home
-  stack (Mac mini worker).
-- Gmail (IMAP/SMTP) integration for Airbnb booking/express messages and for
-  owner-approved submission emails. Telegram notify.
+- **Automatische Ueberwachung:** Airbnb-Buchungen werden geparstund als Faelle angelegt; Stornierungenund HOA-Anworten erkundet; Unklares alarmiert via Telegram.
 
-## Engineering rules (see `STUDIO_BRIEF.md`)
 
-- Test-driven development; regression tests before behavioral changes.
-- **Never deploy or call production from a workspace run.**
-- **Never send email, submit an HOA package, approve a case, or infer approval
-  from inbound email automatically.**
-- Guest save persists a draft only; it never triggers HOA submission.
-- No SSN / identity-document upload. No fabricated people or identifiers.
-- Live submission stays blocked until secure IDs and fee evidence/waiver exist.
+
+- **Regeln eingehalten:** die relevanten Formulareund Regelwerke sind versioniert Teil dieses Repos; Formulardaten werden per testbelegtem Koordinaten-Overlay exakt eingetragen(nie erraten, nie gegen live unterschriebene Dokumente substituiert).
+
+
+
+## Formulare
+
+- Echte Form-Templates: `portal/public/forms/` –
+  `lease-application.pdf`(SHA-256 `256cb293…`), `guest-registration.pdf`(SHA-256 `d40d0012…`).
+- Der Gast bekommt die vorausgefuellten, korrekten Formulare vorgelegt zum Pruefen, Abzeichnen, Unterschreiben(kundengerecht).
+- Template-Updates laufen ueber TDD und Commits, die die SHA-256 tragen.
+
+
+
+## Doku
+
+- `STUDIO_BRIEF.md` – Regeln/Tests.
+- `ARCHITECTURE.md` – Aufbau, Datenfluss, Deploy, Formular-Pfade(fuer jede KI durchsuchbar.
+
+
 
 ## Checks
 
-```bash
-npm test
-npm run check
-npm run build
-npm audit --json
-```
-
-All 313 tests pass; audit 0 high/critical.
-
----
-
-_Isla del Sol 405D · bay-view one-bedroom · Boca Ciega Bay, St. Petersburg, FL._
+`npm test` · `npm run check` · `npm run build` · `npm audit --json`(313 tests, audit-sauber).
