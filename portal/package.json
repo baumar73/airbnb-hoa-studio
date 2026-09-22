@@ -1,7 +1,7 @@
 {
   "name": "isla-portal",
   "version": "1.1.0",
-  "description": "Private HOA guest-paperwork and owner-review portal for Example Island Unit 405D",
+  "description": "Public repo (anonymized code identity) for the Unit 405D HOA guest-paperwork and owner-review portal; see README for identity and data-minimization policy.",
   "scripts": {
     "verify": "node scripts/verify.mjs",
     "test": "node --test test/*.test.js",
