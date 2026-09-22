@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  portal:
+    name: Portal (JS) — test / check / build / audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: portal
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Build (wrangler pages functions)
+        run: npm run build
+
+      - name: Dependency audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: false
+
+  operations-python:
+    name: Operations (Python) — syntax
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: operations
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python syntax check (tools)
+        run: |
+          set -e
+          for f in tools/*.py; do
+            python3 -m py_compile "$f"
+          done
+
+      - name: Python syntax check (scripts + tests)
+        run: |
+          set -e
+          for f in ../portal/scripts/*.py ../portal/test/*.py; do
+            [ -f "$f" ] && python3 -m py_compile "$f"
+          done
