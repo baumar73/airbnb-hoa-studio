@@ -389,8 +389,8 @@ function page(title, headerHtml, bodyHtml, opts) {
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f4c5c">${o.index ? '' : '<meta name="robots" content="noindex">'}
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest">
 <title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body>
-<header><div class="wrap"><p class="brand">Example Island <b>· Unit 405D</b> — Guest Approval</p>${headerHtml}</div></header><main>${bodyHtml}</main>
-<footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a> · <a href="/fair-housing">Fair housing &amp; accommodations</a></footer>
+<header><div class="wrap"><p class="brand">Isla del Sol <b>· Unit 405D</b> — Guest Approval</p>${headerHtml}</div></header><main>${bodyHtml}</main>
+<footer>Isla del Sol · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a> · <a href="/fair-housing">Fair housing &amp; accommodations</a></footer>
 <script>
 document.querySelectorAll('form[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!window.confirm(f.getAttribute('data-confirm')))e.preventDefault();});});
 document.querySelectorAll('.barfill[data-pct]').forEach(function(b){b.style.width=b.getAttribute('data-pct')+'%';});
@@ -416,14 +416,14 @@ function adminPage(title, active, headerHtml, bodyHtml) {
 }
 
 // ---------- views ----------
-const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Example Island, St. Petersburg, Florida. Fully furnished for monthly stays (30+ nights): in-unit washer & dryer, dishwasher, full kitchen, fast internet up to 700 Mbps, community pool, smart-lock self-check-in. Minutes from St. Pete Beach, Fort De Soto Park and downtown St. Petersburg. Booking exclusively via Airbnb.';
+const HOME_DESC = 'Quiet one-bedroom condo with sweeping water views over Boca Ciega Bay at Isla del Sol, St. Petersburg, Florida. Fully furnished for monthly stays (30+ nights): in-unit washer & dryer, dishwasher, full kitchen, fast internet up to 700 Mbps, community pool, smart-lock self-check-in. Minutes from St. Pete Beach, Fort De Soto Park and downtown St. Petersburg. Booking exclusively via Airbnb.';
 const HOME_FAQ = [
   ['Can I book the condo on this website?',
-   'No — booking runs exclusively through Airbnb (airbnb.com/rooms/DEMOID0002). This site is the official companion portal that handles the condominium association\'s approval paperwork after you book.'],
+   'No — booking runs exclusively through Airbnb (airbnb.com/rooms/1097686557541958107). This site is the official companion portal that handles the condominium association\'s approval paperwork after you book.'],
   ['What is the minimum stay?',
    'The condominium association requires a lease term of at least 30 nights, so bookings are monthly. That makes the home ideal for snowbirds, travel professionals and remote workers.'],
   ['Why does my rental need approval?',
-   'Example Condominium is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. After booking, your private page guides you through either the association’s Tenant Evaluation route or its paper route.'],
+   'Palma Del Mar No. 2 is a condominium association, and its rules require board approval for every rental in the building — it applies to all owners, not just this one. After booking, your private page guides you through either the association’s Tenant Evaluation route or its paper route.'],
   ['How long does the approval take?',
    'The association asks applicants to allow up to 15 days after every required application, screening, document and payment item arrives. Complete your chosen route early; your personal status page shows live progress.'],
   ['What is the $100 fee?',
@@ -448,7 +448,7 @@ const FAQ_JSONLD = JSON.stringify({
 const HOME_JSONLD = JSON.stringify({
   '@context': 'https://schema.org',
   '@type': 'Apartment',
-  name: 'Example Island Bay-View Condo — Unit 405D, Example Condominium',
+  name: 'Boca Ciega Bay-View Condo — Unit 405D, Palma Del Mar No. 2',
   description: HOME_DESC,
   address: { '@type': 'PostalAddress', streetAddress: '6219 Palma Del Mar Blvd S, Unit 405D',
     addressLocality: 'St. Petersburg', addressRegion: 'FL', postalCode: '33715', addressCountry: 'US' },
@@ -458,16 +458,16 @@ const HOME_JSONLD = JSON.stringify({
   amenityFeature: ['Water view (Boca Ciega Bay)', 'In-unit washer & dryer', 'Dishwasher', 'Full kitchen',
     '700 Mbit internet (Spectrum)', 'Community pool', 'Smart-lock self-check-in', 'Air conditioning']
     .map(n => ({ '@type': 'LocationFeatureSpecification', name: n, value: true })),
-  tourBookingPage: 'https://www.airbnb.com/rooms/DEMOID0002',
-  sameAs: ['https://www.airbnb.com/rooms/DEMOID0002'],
-  url: 'https://portal.example.test/',
+  tourBookingPage: 'https://www.airbnb.com/rooms/1097686557541958107',
+  sameAs: ['https://www.airbnb.com/rooms/1097686557541958107'],
+  url: 'https://isladelsol405d.com/',
 });
 
 function landingView() {
-  return page('Example Island Bay-View Condo, St. Petersburg FL — Unit 405D Guest Portal',
-    `<h1>Example Island — your bay-view home at Unit 405D</h1>
+  return page('Boca Ciega Bay-View Condo, St. Petersburg FL — Unit 405D Guest Portal',
+    `<h1>Isla del Sol — your bay-view home at Unit 405D</h1>
      <p>A fully furnished one-bedroom condo above Boca Ciega Bay in St. Petersburg, Florida, for monthly stays. Booked through Airbnb — and this is your private portal for the condominium association's rental approval, step by step.</p>
-     <span class="chip">Example Island · St. Petersburg, Florida</span>`,
+     <span class="chip">Isla del Sol · St. Petersburg, Florida</span>`,
     `<div class="card"><h2>How it works</h2>
       <ol>
         <li><b>Book on Airbnb.</b> After your booking is confirmed, you receive a personal link to this portal via Airbnb chat.</li>
@@ -497,14 +497,14 @@ function landingView() {
        <p class="muted"><b>Already submitted a paper application?</b> Please confirm with Owner or the HOA before starting again. Tenant Evaluation is a complete application process, not a payment-only link for an existing paper application. Do not apply or pay twice.</p>
      </section>
      <div class="card"><h2>The home</h2>
-      <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
+      <p>A quiet one-bedroom condo on the fourth floor of Palma Del Mar No. 2 at <b>Isla del Sol</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Isla del Sol Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
       <ul class="steps ude00808e">
         <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished for genuine stays of at least 30 nights — ideal for snowbirds, travel professionals and remote workers. The condo remains available to the guest for the full reserved term.</span></div></li>
         <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast internet up to 700 Mbps, smart-lock self-check-in, community pool.</span></div></li>
         <li><div><b>The location</b><br><span class="muted">10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals; about 30 minutes to Tampa International Airport.</span></div></li>
         <li><div><b>Good to know</b><br><span class="muted">No pets (association rule) and no smoking. Every rental needs the association's approval — that's exactly what this portal takes care of.</span></div></li>
       </ul>
-      <p><a class="btn" href="https://www.airbnb.com/rooms/DEMOID0002" rel="noopener">Book on Airbnb — Example Island, Unit 405D</a><br>
+      <p><a class="btn" href="https://www.airbnb.com/rooms/1097686557541958107" rel="noopener">Book on Airbnb — Isla del Sol, Unit 405D</a><br>
       <span class="muted ue785b9bd">Booking runs exclusively through Airbnb. This site is the official companion portal for the home's approval paperwork.</span></p>
      </div>
      <div class="card"><h2>Frequently asked questions</h2>
@@ -512,10 +512,10 @@ function landingView() {
         <li><div><b>${esc(q)}</b><br><span class="muted">${esc(a)}</span></div></li>`).join('')}
       </ul>
      </div>`,
-    { index: true, extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://portal.example.test/">
-<meta property="og:type" content="website"><meta property="og:site_name" content="Example Island · Unit 405D">
-<meta property="og:title" content="Example Island Bay-View Condo, St. Petersburg FL — monthly stays">
-<meta property="og:description" content="${esc(HOME_DESC)}"><meta property="og:url" content="https://portal.example.test/">
+    { index: true, extraHead: `<meta name="description" content="${esc(HOME_DESC)}"><link rel="canonical" href="https://isladelsol405d.com/">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Isla del Sol · Unit 405D">
+<meta property="og:title" content="Boca Ciega Bay-View Condo, St. Petersburg FL — monthly stays">
+<meta property="og:description" content="${esc(HOME_DESC)}"><meta property="og:url" content="https://isladelsol405d.com/">
 <meta name="twitter:card" content="summary">
 <script type="application/ld+json">${HOME_JSONLD}</script>
 <script type="application/ld+json">${FAQ_JSONLD}</script>` });
