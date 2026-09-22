@@ -3,6 +3,7 @@
 export const HOA_ITEMS=Object.freeze({
   application_details:'Application details',documents:'Required documents',signatures:'Missing signatures',
   identity_documents:'Secure identity-document handoff',payment:'Payment status clarification',
+  supplementary_form:'Supplementary form requested by the association',
 });
 export const HOA_CONFIRMATIONS=Object.freeze({
   application_received:'Application received (not complete or approved)',
@@ -30,6 +31,7 @@ export function hoaTaskText(c,code) {
     signatures:`Complete the missing signatures requested by the association ${where}.`,
     identity_documents:`Provide the outstanding identity documents ${where}, using its secure identity-document process. Do not email IDs or upload them to this portal.`,
     payment:`Clarify the outstanding fee/payment status ${where}. Check the verified instructions on your paperwork page. If you already paid, ask the application service or association to trace that payment. Do not pay twice.`,
+    supplementary_form:`Complete the supplementary form (for example a Tenant Check / Background Check form) ${where}. Do not email or upload identity documents to this portal; use your page for the form itself.`,
   };
   return Object.hasOwn(text,code)?text[code]:'';
 }

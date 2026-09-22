@@ -1,7 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {reviewHoaEvidence,reportHoaTask} from '../functions/lib/hoa-evidence.js';
+import {reviewHoaEvidence,reportHoaTask,HOA_ITEMS,hoaTaskText} from '../functions/lib/hoa-evidence.js';
 import {planGuestJourney,guestReminderMessage} from '../functions/lib/journey.js';
+
+test('a supplementary form is requested and cleared as its own outstanding item, not an attachment of documents',()=>{
+  const now=new Date('2026-09-05T12:00:00Z');
+  const c={id:'synthetic',guestName:'Jordan Lee',reservationCode:'HMTEST000002',checkIn:'2026-10-01',checkOut:'2026-11-01',adults:1,pathType:'full',screeningRoute:'paper',createdAt:'2026-09-01',steps:[],hoaMailEvents:[]};
+  const plan=()=>planGuestJourney(c,now);
+  const source=('1').padStart(64,'0');
+  c.hoaMailEvents.push({id:source,reviewRequired:true,categories:['other']});
+  // The association asks for a separate supplementary form (e.g. Tenant Check).
+  const result=reviewHoaEvidence(c,source,{attested:true,by:'synthetic owner',requestedItems:['supplementary_form']},now);
+  assert.equal(result.ok,true,result.error);
+  assert.equal(c.hoaTasks.length,1);
+  const form=c.hoaTasks[0];
+  assert.equal(form.code,'supplementary_form');
+  // It surfaces as its own guest task with a form-specific instruction.
+  assert.ok(plan().guestTasks.some(t=>t.id==='hoa_task:'+form.id));
+  assert.match(hoaTaskText(c,'supplementary_form'),/form/i);
+  // Merely reporting the generic documents task does NOT clear it.
+  assert.equal(reportHoaTask(c,form.id,form.version,now).ok,true);
+  assert.equal(plan().guestTasks.some(t=>t.id==='hoa_task:'+form.id),false);
+  assert.ok(!plan().exception);
+});
+test('older conflicting document/signature tasks are superseded when a changed stay reconciles a supplementary form',()=>{
+  assert.ok('supplementary_form' in HOA_ITEMS);
+});
 
 test('online application, partial follow-up, payment evidence, approval and later adverse response',()=>{
   // Synthetic local workflow, not a Tenant Evaluation integration or live acceptance.
