@@ -115,16 +115,31 @@ const SEC_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+    "default-src 'self'; style-src 'self'; " +
     "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; " +
     "form-action 'self'; frame-ancestors 'none'",
 };
 
+// Central HTML responder: rotates a per-response CSP nonce so inline
+// <script>/<style> elements are allowed WITHOUT 'unsafe-inline'. The same
+// nonce is injected into the CSP header and into every script/style tag, so
+// the rewritten body must be returned (not the original).
 function html(body, code, indexable) {
+  const nonce = randNonce();
+  const out = body.replace(/<(script|style)\b/gi, `<$1 nonce="${nonce}"`);
+  const csp = "default-src 'self'; script-src 'self' 'nonce-" + nonce + "'; style-src 'self' 'nonce-" + nonce + "'; " +
+    "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; " +
+    "form-action 'self'; frame-ancestors 'none'";
   const headers = { 'Content-Type': 'text/html; charset=utf-8', ...SEC_HEADERS,
+    'Content-Security-Policy': csp,
     'Cache-Control': indexable ? 'public, max-age=300' : 'private, no-store, max-age=0' };
   if (!indexable) headers['X-Robots-Tag'] = 'noindex';
-  return new Response(body, { status: code || 200, headers });
+  return new Response(out, { status: code || 200, headers });
+}
+function randNonce() {
+  const b = new Uint8Array(18);
+  crypto.getRandomValues(b);
+  return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 function redirect(loc) {
   return new Response(null, { status: 303, headers: { Location: loc, ...SEC_HEADERS, 'Cache-Control': 'private, no-store, max-age=0' } });
@@ -276,6 +291,51 @@ details.sect>*:last-child{margin-bottom:18px}
 .attn.crit{border-left-color:var(--crit);background:var(--crit-wash)}
 .attn.okk{border-left-color:var(--ok);background:var(--ok-wash)}
 footer{text-align:center;color:var(--faint);font-size:13px;padding:26px 22px;border-top:1px solid var(--line);margin-top:20px}
+
+/* --- auto-generated utility classes (CSP: no inline style attributes) --- */
+.ue90617ff{background:var(--crit-wash);color:var(--crit)}
+.u41e4e7c4{border:1.5px dashed var(--line);border-radius:8px;width:100%;max-width:700px;touch-action:none;background:#fff}
+.uca265730{color:var(--sun-deep);font-size:14.5px;font-weight:500}
+.u2a1b75c9{display:block}
+.ua605c51e{display:block;margin-top:10px}
+.u60901360{display:flex;gap:10px;align-items:flex-start;font-weight:400}
+.u6002dd78{display:flex;gap:10px;flex-wrap:wrap}
+.u593718ea{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.uee52adba{display:flex;gap:6px;flex-direction:column}
+.u472ec391{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.u4e330d89{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.u059faac0{display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px}
+.ua8ddc3e4{display:grid;grid-template-columns:1fr 2fr;gap:10px}
+.udcefdb35{display:grid;grid-template-columns:2fr 1.5fr 2fr;gap:10px}
+.u8c47274e{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+.uaadb3cb7{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+.ucccfa456{display:inline}
+.uc3c8d100{display:inline-flex;gap:7px;align-items:center;margin:0 8px}
+.u41e578a4{display:inline-flex;gap:7px;align-items:center;margin:0;font-weight:400}
+.u97445a8d{flex:1}
+.u53f8a2fa{font-family:var(--mono);font-size:11.5px}
+.ue1e124fa{font-family:var(--mono);font-size:12px}
+.ue785b9bd{font-size:13.5px}
+.u5e0faad2{font-size:13px}
+.u433de30b{font-size:14px}
+.ude00808e{font-size:15px}
+.u1444c6ea{font-size:16px}
+.uef0b7a11{margin-bottom:0}
+.u78fa54ea{margin-left:10px}
+.u5dd2a678{margin-left:8px}
+.ud2c171b1{margin-top:10px}
+.u575c0429{margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ud6f2af6e{margin-top:14px}
+.uc42fdd48{margin:0;font-weight:400}
+.u82460327{margin:10px 0 0}
+.u2d724d0f{margin:14px 0 0}
+.ua548ea71{white-space:pre-wrap}
+.u8d2e5f36{white-space:pre-wrap;overflow-wrap:anywhere}
+.u0466783d{width:100%}
+.u581be415{width:90px}
+.u30e741d9{width:auto}
+.u495e8c7d{width:auto;margin-top:4px}
+.barfill{height:100%;border-radius:8px;background:var(--accent)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 @media(max-width:640px){
  header{padding:34px 18px 24px}
@@ -284,7 +344,7 @@ footer{text-align:center;color:var(--faint);font-size:13px;padding:26px 22px;bor
  .review-grid{grid-template-columns:1fr}
  details.sect{padding:2px 18px}
  h1{font-size:clamp(26px,7vw,34px)}
- main [style*="grid-template-columns"]{grid-template-columns:1fr!important;gap:8px!important}
+ main .u472ec391 ,main .u4e330d89 ,main .u059faac0 ,main .ua8ddc3e4 ,main .udcefdb35 ,main .u8c47274e ,main .uaadb3cb7{grid-template-columns:1fr!important;gap:8px!important}
  table,thead,tbody,th,td,tr{display:block}
  thead{position:absolute;left:-9999px}
  td{border-bottom:none;padding:3px 0}
@@ -300,6 +360,10 @@ function page(title, headerHtml, bodyHtml, opts) {
 <title>${esc(title)}</title>${o.extraHead || ''}<style>${CSS}</style></head><body>
 <header><div class="wrap"><p class="brand">Example Island <b>· Unit 405D</b> — Guest Approval</p>${headerHtml}</div></header><main>${bodyHtml}</main>
 <footer>Example Island · Unit 405D · 6219 Palma Del Mar Blvd S, St. Petersburg FL — private guest-approval portal · <a href="/privacy">Privacy</a> · <a href="/fair-housing">Fair housing &amp; accommodations</a></footer>
+<script>
+document.querySelectorAll('form[data-confirm]').forEach(function(f){f.addEventListener('submit',function(e){if(!window.confirm(f.getAttribute('data-confirm')))e.preventDefault();});});
+document.querySelectorAll('.barfill[data-pct]').forEach(function(b){b.style.width=b.getAttribute('data-pct')+'%';});
+</script>
 </body></html>`;
 }
 
@@ -380,7 +444,7 @@ function landingView() {
      <div class="card"><h2>Already booked? Find your page</h2>
       <p>Enter your Airbnb confirmation code (looks like <span class="pill teal">HMDEMO0003</span>, in your booking confirmation) and your last name:</p>
       <form method="post" action="/find" autocomplete="off">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="u4e330d89">
           <div><label>Confirmation code</label><input name="code" placeholder="HM…" required></div>
           <div><label>Last name</label><input name="name" required></div>
         </div>
@@ -397,17 +461,17 @@ function landingView() {
      </section>
      <div class="card"><h2>The home</h2>
       <p>A quiet one-bedroom condo on the fourth floor of Example Condominium at <b>Example Island</b> — a small island neighborhood at the southern tip of St. Petersburg, wrapped in water, palms and the fairways of the Example Island Yacht &amp; Country Club, with sweeping views over Boca Ciega Bay.</p>
-      <ul class="steps" style="font-size:15px">
+      <ul class="steps ude00808e">
         <li><div><b>Made for monthly stays</b><br><span class="muted">Fully furnished for genuine stays of at least 30 nights — ideal for snowbirds, travel professionals and remote workers. The condo remains available to the guest for the full reserved term.</span></div></li>
         <li><div><b>Everything in the unit</b><br><span class="muted">Full kitchen with dishwasher, in-unit washer &amp; dryer, air conditioning, fast internet up to 700 Mbps, smart-lock self-check-in, community pool.</span></div></li>
         <li><div><b>The location</b><br><span class="muted">10–15 minutes to St. Pete Beach, Fort De Soto Park, downtown St. Petersburg and the Bayfront / Johns Hopkins All Children's hospitals; about 30 minutes to Tampa International Airport.</span></div></li>
         <li><div><b>Good to know</b><br><span class="muted">No pets (association rule) and no smoking. Every rental needs the association's approval — that's exactly what this portal takes care of.</span></div></li>
       </ul>
       <p><a class="btn" href="https://www.airbnb.com/rooms/DEMOID0002" rel="noopener">Book on Airbnb — Example Island, Unit 405D</a><br>
-      <span class="muted" style="font-size:13.5px">Booking runs exclusively through Airbnb. This site is the official companion portal for the home's approval paperwork.</span></p>
+      <span class="muted ue785b9bd">Booking runs exclusively through Airbnb. This site is the official companion portal for the home's approval paperwork.</span></p>
      </div>
      <div class="card"><h2>Frequently asked questions</h2>
-      <ul class="steps" style="font-size:15px">${HOME_FAQ.map(([q, a]) => `
+      <ul class="steps ude00808e">${HOME_FAQ.map(([q, a]) => `
         <li><div><b>${esc(q)}</b><br><span class="muted">${esc(a)}</span></div></li>`).join('')}
       </ul>
      </div>`,
@@ -446,7 +510,7 @@ function hoaSourceReviewForm(c,cases,id,env) {
   if(!c) return `<div class="card"><h2>Quelle einem Vorgang zuordnen</h2><p>Nur nach Prüfung des Originals zuordnen. Name und Mietzeitraum müssen eindeutig passen.</p><ul>${cases.filter(c=>c.status!=='canceled').map(c=>`<li><a href="/admin/hoa-mail/${id}?case=${encodeURIComponent(c.id)}">${esc(c.guestName)} · ${esc(c.checkIn)} – ${esc(c.checkOut)}</a></li>`).join('')}</ul></div>`;
   const event=(c.hoaMailEvents||[]).find(e=>e.id===id);
   if(event?.review) return `<div class="card"><h2>Quelle bereits bearbeitet</h2><p>${esc(event.review.kind)} · ${esc(event.review.at)} · ${esc(event.review.by)}</p><p>Bestätigt: ${esc(event.review.confirmations.join(', ')||'keine Fakten bestätigt')}<br>Nachgefordert: ${esc(event.review.requestedItems.join(', ')||'keine')}<br>Erledigte Aufgaben: ${event.review.resolvedItems.length}</p><p>Ein neuer Beleg ist für eine weitere Entscheidung erforderlich.</p></div>`;
-  const checks=(name,options)=>Object.entries(options).map(([value,label])=>`<label style="display:block"><input type="checkbox" name="${name}" value="${esc(value)}"> ${esc(label)}</label>`).join('');
+  const checks=(name,options)=>Object.entries(options).map(([value,label])=>`<label class="u2a1b75c9"><input type="checkbox" name="${name}" value="${esc(value)}"> ${esc(label)}</label>`).join('');
   return `<div class="card"><h2>Geprüften Beleg bearbeiten</h2><p>${esc(c.guestName)} · ${esc(c.checkIn)} – ${esc(c.checkOut)}</p><p>Keine automatische Bestätigung: Originalnachricht und gegebenenfalls Anhänge im Postfach prüfen. Tenant Evaluation darf nicht mit einer Board-Genehmigung verwechselt werden. Keine zusätzlichen Gebühren erfinden.</p><form method="post" action="/admin/hoa-mail/${id}/review"><input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="caseVersion" value="${caseSnapshotVersion(cases,c.id)}"><label>Buchungscode (bei Gastregistrierung vollständigen Gastnamen) zur Bestätigung eingeben<input name="reservation" required autocomplete="off"></label><label>Ergebnis<select name="kind"><option value="confirmed">Einzelne Fakten / Aufgaben anhand des Originals geprüft</option><option value="needs_review">Unklar oder widersprüchlich — Prüfung offenhalten</option><option value="adverse_response">Negative Rückmeldung — gesonderte Prüfung, keine Stornierung</option><option value="no_action">Keine fallbezogene Aktion erforderlich</option></select></label><h3>Nur ausdrücklich belegte Fakten</h3>${checks('confirmations',HOA_CONFIRMATIONS)}<h3>Konkrete Nachforderungen an den Gast</h3>${checks('requestedItems',HOA_ITEMS)}<h3>Nachweislich erledigte Nachforderungen</h3>${checks('resolvedItems',Object.fromEntries(hoaEvidenceState(c).tasks.map(t=>[t.id,(HOA_ITEMS[t.code]||t.code)+' — '+t.status+' — '+t.openedAt])))}${hoaEvidenceState(c).exception==='hoa_evidence_stale'?'<label><input type="checkbox" name="reconcileContext" value="yes"> Ich habe den neuen Mietzeitraum und die Belegzuordnung geprüft. Frühere Fakten und Aufgaben gelten nicht automatisch für den geänderten Aufenthalt. Nur ausdrücklich bestätigte Fakten und neu ausgewählte Aufgaben werden übernommen.</label>':''}${c.hoaReviewHold?'<label><input type="checkbox" name="clearHold" value="yes"> Der aktuelle Beleg klärt die bisherige Prüfsperre ausdrücklich.</label>':''}<label><input type="checkbox" name="attested" value="yes" required> Ich habe Original, Absenderberechtigung, Buchung und Mietzeitraum geprüft. Jede Auswahl wird ausdrücklich durch diesen Beleg gestützt; der Textauszug oder die automatische Kategorie allein genügt nicht.</label><p><button>Beleggebunden speichern</button></p><p class="muted">Kein Versand durch diesen Klick. Gast-Erinnerungen bleiben separat freizuschalten.</p></form></div>`;
 }
 
@@ -485,11 +549,11 @@ c/o Example Property Management, Inc.
 570 Carillon Parkway, Suite 210
 St. Petersburg, FL 33716</div>
       ${c.feeMailed
-        ? `<p style="margin-top:14px"><span class="pill ok">check mailed ${esc(c.feeMailed.slice(0, 10))}</span> <span class="muted">Thank you — we are tracking receipt with the association.</span></p>
-           <form method="post" action="/v/${c.token}/fee-unmailed" onsubmit="return confirm('Remove the mailed status because the envelope was not actually sent?')"><button class="small ghost">I have not mailed it</button></form>`
-        : `<form method="post" action="/v/${c.token}/fee-mailed" style="margin-top:14px" onsubmit="return confirm('Confirm that the envelope with the $100 check or money order is actually in the mail?')">
+        ? `<p class="ud6f2af6e"><span class="pill ok">check mailed ${esc(c.feeMailed.slice(0, 10))}</span> <span class="muted">Thank you — we are tracking receipt with the association.</span></p>
+           <form method="post" action="/v/${c.token}/fee-unmailed" data-confirm="Remove the mailed status because the envelope was not actually sent?"><button class="small ghost">I have not mailed it</button></form>`
+        : `<form class="ud6f2af6e" method="post" action="/v/${c.token}/fee-mailed" data-confirm="Confirm that the envelope with the $100 check or money order is actually in the mail?">
              <button>I've mailed the check ✓</button>
-             <span class="muted" style="margin-left:10px">Tap this once your envelope is in the mail — it helps us confirm receipt.</span>
+             <span class="muted u78fa54ea">Tap this once your envelope is in the mail — it helps us confirm receipt.</span>
            </form>`}
     </div>` : '';
   const route = c.pathType === 'full' ? (c.screeningRoute || 'undecided') : 'paper';
@@ -510,7 +574,7 @@ St. Petersburg, FL 33716</div>
         ? '<p><span class="pill ok">Official application confirmed complete</span></p>'
         : c.screeningReportedAt
           ? `<p><span class="pill warn">Completion reported ${esc(c.screeningReportedAt.slice(0, 10))}</span> <span class="muted">Owner is confirming it with the association.</span></p>`
-          : `<form method="post" action="/v/${c.token}/screening-reported" onsubmit="return confirm('Confirm that you completed and submitted the official Tenant Evaluation application?')">
+          : `<form method="post" action="/v/${c.token}/screening-reported" data-confirm="Confirm that you completed and submitted the official Tenant Evaluation application?">
                <input type="hidden" name="confirmed" value="yes"><button>I've completed Tenant Evaluation ✓</button>
                <p class="muted">This reports completion to Owner; it does not copy screening data into this portal.</p>
              </form>`}
@@ -520,13 +584,13 @@ St. Petersburg, FL 33716</div>
       <p><span class="pill ok">Ready for Owner review</span></p>
       <p>Your local paper documents and signatures are saved. The association's separate screening, secure photo-ID handoff and fee are tracked separately. You do not need to fill out these forms again.</p>
       <p><a class="btn ghost" href="/w/${c.token}">Review / edit your details</a>
-      <span class="pill ok" style="margin-left:10px">completed ${esc((c.ownerReviewReadyAt || '').slice(0, 10))}</span></p>
+      <span class="pill ok u78fa54ea">completed ${esc((c.ownerReviewReadyAt || '').slice(0, 10))}</span></p>
       <p class="muted">If you change personal details, the affected signatures must be provided again before the forms return to Owner review.</p>
     </div>` : `
     <div class="card"><h2>Complete the local paper-route forms online</h2>
       <p>Enter your details once and sign online. You can save an unfinished draft and return later. We prepare four local PDFs for Owner to review. The association's separate official screening is not performed on this site.</p>
       <p><a class="btn" href="/w/${c.token}">${c.wizard ? 'Review / edit your details' : 'Start the paperwork'}</a>
-      ${c.wizard ? `<span class="pill ok" style="margin-left:10px">details saved ${esc((c.wizard.savedAt || '').slice(0, 10))}</span>` : ''}</p>
+      ${c.wizard ? `<span class="pill ok u78fa54ea">details saved ${esc((c.wizard.savedAt || '').slice(0, 10))}</span>` : ''}</p>
     </div>`;
   return page(`Your stay ${esc(c.checkIn)} — approval status`,
     `<h1>Hi ${esc(c.guestName.split(' ')[0])}, here's where your approval stands</h1>
@@ -534,14 +598,14 @@ St. Petersburg, FL 33716</div>
      ${banner}`,
     bookingApprovalNotice(c, compliance) + followUpCard + (followUp.exception||followUp.tasks.length?'':wizardCard) + reminderContactForm(c,contactVersion,remindersEnabled) + `<div class="card">
        <h2>Progress</h2>
-       <div class="bar"><div style="width:${pct}%"></div></div>
+       <div class="bar"><div data-pct="${pct}" class="barfill"></div></div>
        <p class="muted">${done} of ${total} steps complete</p>
        <ul class="steps">${progressSteps.map((s, i) => `
          <li class="${s.done ? 'done' : ''} ${i === nextIdx ? 'next' : ''}">
            <div class="dot">${s.done ? '✓' : ''}</div>
            <div><span class="lbl">${esc(s.label)}</span>
            ${s.done && s.date ? `<div class="muted">done ${esc(s.date.slice(0,10))}</div>` : ''}
-           ${i === nextIdx ? `<div style="color:var(--sun-deep);font-size:14.5px;font-weight:500">← next step</div>` : ''}</div>
+           ${i === nextIdx ? `<div class="uca265730">← next step</div>` : ''}</div>
          </li>`).join('')}
        </ul>
      </div>
@@ -556,7 +620,7 @@ St. Petersburg, FL 33716</div>
      </div>` : ''}
      ${c.submission ? `<div class="card"><h2>Your executed documents</h2><p><a class="btn ghost" href="/v/${c.token}/executed-lease.pdf">Download the final signed lease</a>${isAnnualRental(c) ? ` <a class="btn ghost" href="/v/${c.token}/executed-flood-disclosure.pdf">Download the flood disclosure</a>` : ''}</p><p class="muted">Keep copies for your records. The lease includes the required radon notice and the electronic-signature audit reference.</p></div>` : ''}
      <div class="card"><h2>Good to know</h2>
-       <ul class="steps" style="font-size:15px">
+       <ul class="steps ude00808e">
          <li><div><b>Why all this paperwork?</b><br><span class="muted">The condominium association (HOA) requires board approval for every rental — it applies to all owners in the building, not just this one. We've made it as painless as we can.</span></div></li>
          <li><div><b>Is my data safe?</b><br><span class="muted">Your details are used solely for the association's approval file and its automated quality check, transmitted encrypted, and never sold. Processing is limited to the association and the service providers identified in the privacy notice. We never ask for your Social Security number or ID uploads on this site.</span></div></li>
          <li><div><b>How long does approval take?</b><br><span class="muted">Allow up to 15 days after the association has every required application, screening, document and payment item. Please complete everything early. This page and our emails keep you posted.</span></div></li>
@@ -639,7 +703,7 @@ function aiHelperCard(token) {
     <p class="muted">If ChatGPT, Claude or another assistant helps you with paperwork, hand it everything in one go — your live status, the exact fields to prepare and the fee instructions. Only the signature must remain yours.</p>
     <p class="sigrow">
       <button type="button" class="small ghost" id="aibrief">Copy briefing for your AI assistant</button>
-      <a class="muted" style="font-size:13.5px" href="/v/${token}/brief.txt" target="_blank">open as plain text →</a>
+      <a class="muted ue785b9bd" href="/v/${token}/brief.txt" target="_blank">open as plain text →</a>
       <span id="aimsg" class="muted"></span>
     </p>
    </div>
@@ -716,43 +780,43 @@ function wizardView(c, saved, draftVersion = null) {
   const isFull = c.pathType === 'full';
   const adultBlock = (i) => `
     <div class="card"><h2>Adult ${i + 1}${i === 0 ? ' (main guest)' : ''}</h2>
-      <div style="display:grid;grid-template-columns:2fr 1.5fr 2fr;gap:10px">
+      <div class="udcefdb35">
         <div><label>First name *</label><input name="a${i}_firstName" value="${A(i,'firstName')}" autocomplete="section-adult${i} given-name" maxlength="60" required></div>
         <div><label>Full middle name(s), or “None” *</label><input name="a${i}_middleName" value="${A(i,'middleName')}" maxlength="80" required></div>
         <div><label>Last name *</label><input name="a${i}_lastName" value="${A(i,'lastName')}" autocomplete="section-adult${i} family-name" maxlength="60" required></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="u4e330d89">
         <div><label>Birth date${isFull ? ' *' : ''}</label><input name="a${i}_birthDate" type="date" value="${A(i,'birthDate')}" autocomplete="bday" ${isFull ? 'required' : ''}></div>
         <div><label>Gender${isFull ? ' (as requested by the HOA) *' : ''}</label><input name="a${i}_gender" value="${A(i,'gender')}" placeholder="As shown on ID" ${isFull ? 'required' : ''}></div>
       </div>
       ${isFull ? `
       <label>Current street address *</label><input name="a${i}_street" value="${A(i,'street')}" autocomplete="section-adult${i} street-address" maxlength="120" required>
-      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+      <div class="u8c47274e">
         <div><label>City *</label><input name="a${i}_city" value="${A(i,'city')}" autocomplete="section-adult${i} address-level2" maxlength="60" required></div>
         <div><label>State *</label><input name="a${i}_state" value="${A(i,'state')}" autocomplete="section-adult${i} address-level1" maxlength="30" required></div>
         <div><label>ZIP *</label><input name="a${i}_zip" value="${A(i,'zip')}" autocomplete="section-adult${i} postal-code" maxlength="16" required></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="u472ec391">
         <div><label>Phone *</label><input name="a${i}_phone" type="tel" inputmode="tel" value="${A(i,'phone')}" autocomplete="section-adult${i} tel" maxlength="32" required></div>
         <div><label>Alternate phone</label><input name="a${i}_altPhone" type="tel" inputmode="tel" value="${A(i,'altPhone')}" maxlength="32"></div>
         <div><label>Email *</label><input name="a${i}_email" type="email" value="${A(i,'email')}" autocomplete="section-adult${i} email" maxlength="254" required></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px">
+      <div class="u059faac0">
         <div><label>ID type *</label><select name="a${i}_idType" required><option value="">Choose…</option><option value="drivers_license" ${A(i,'idType') === 'drivers_license' ? 'selected' : ''}>Driver's license</option><option value="us_photo_id" ${A(i,'idType') === 'us_photo_id' ? 'selected' : ''}>US photo ID</option></select></div>
         <div><label>ID number *</label><input name="a${i}_idNumber" value="${A(i,'idNumber')}" maxlength="40" required></div>
         <div><label>Issuing state *</label><input name="a${i}_idState" value="${A(i,'idState')}" maxlength="30" required></div>
       </div>
       <p class="muted">If you do not have a US driver's license or US photo ID, save a draft and message Owner through Airbnb before continuing.</p>
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      <div class="uaadb3cb7">
         <div><label>Employer / occupation status *</label><input name="a${i}_employer" value="${A(i,'employer')}" placeholder="Employer, self-employed, or retired" maxlength="80" required></div>
         <div><label>Employer phone *</label><input name="a${i}_employerPhone" type="tel" value="${A(i,'employerPhone')}" placeholder="N/A if retired" maxlength="32" required></div>
       </div>` : (i === 0 ? `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="u4e330d89">
         <div><label>Phone *</label><input name="a${i}_phone" type="tel" inputmode="tel" value="${A(i,'phone')}" autocomplete="tel" required></div>
         <div><label>Email *</label><input name="a${i}_email" type="email" value="${A(i,'email')}" autocomplete="email" required></div>
       </div>
       <label>Home street address *</label><input name="a${i}_street" value="${A(i,'street')}" autocomplete="street-address" required>
-      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+      <div class="u8c47274e">
         <div><label>City *</label><input name="a${i}_city" value="${A(i,'city')}" autocomplete="address-level2" required></div>
         <div><label>State *</label><input name="a${i}_state" value="${A(i,'state')}" autocomplete="address-level1" required></div>
         <div><label>ZIP *</label><input name="a${i}_zip" value="${A(i,'zip')}" autocomplete="postal-code" required></div>
@@ -762,13 +826,13 @@ function wizardView(c, saved, draftVersion = null) {
     ${Number(c.expectedMinors || 0) > 0 ? `<div class="card"><h2>Minor occupants (under 18)</h2>
       <p class="muted">Minors are listed as occupants on the lease application. They do not complete a background authorization, provide photo ID here or sign the adult forms.</p>
       ${Array.from({ length: Number(c.expectedMinors || 0) }, (_, i) => `
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      <div class="uaadb3cb7">
         <div><label>Minor ${i + 1} name *</label><input name="ch${i}_name" value="${esc(((w.children||[])[i]||{}).name||'')}" maxlength="120" required></div>
         <div><label>Minor ${i + 1} birth date *</label><input name="ch${i}_birthDate" type="date" value="${esc(((w.children||[])[i]||{}).birthDate||'')}" required></div>
       </div>`).join('')}
     </div>` : ''}
     <div class="card"><h2>Vehicle (optional)</h2>
-      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+      <div class="u8c47274e">
         <div><label>Make / model</label><input name="auto_make" value="${esc((w.auto||{}).make||'')}"></div>
         <div><label>Year</label><input name="auto_year" value="${esc((w.auto||{}).year||'')}"></div>
         <div><label>License plate</label><input name="auto_plate" value="${esc((w.auto||{}).plate||'')}"></div>
@@ -776,7 +840,7 @@ function wizardView(c, saved, draftVersion = null) {
     </div>
     <div class="card"><h2>References (non-relatives)</h2>
       ${[0,1].map(i => `
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      <div class="uaadb3cb7">
         <div><label>Name ${i+1} *</label><input name="ref${i}_name" value="${esc(((w.references||[])[i]||{}).name||'')}" required></div>
         <div><label>Phone *</label><input name="ref${i}_phone" type="tel" value="${esc(((w.references||[])[i]||{}).phone||'')}" required></div>
       </div>
@@ -784,14 +848,14 @@ function wizardView(c, saved, draftVersion = null) {
     </div>
     <div class="card"><h2>Emergency contacts</h2>
       ${[0,1].map(i => `
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      <div class="uaadb3cb7">
         <div><label>Name ${i+1} *</label><input name="em${i}_name" value="${esc(((w.emergency||[])[i]||{}).name||'')}" required></div>
         <div><label>Phone *</label><input name="em${i}_phone" type="tel" value="${esc(((w.emergency||[])[i]||{}).phone||'')}" required></div>
       </div>`).join('')}
     </div>` : `
     <div class="card"><h2>Children staying (if any)</h2>
       ${[0,1,2].map(i => `
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      <div class="uaadb3cb7">
         <div><label>Child ${i+1} name</label><input name="ch${i}_name" value="${esc(((w.children||[])[i]||{}).name||'')}"></div>
         <div><label>Birth date</label><input name="ch${i}_birthDate" type="date" value="${esc(((w.children||[])[i]||{}).birthDate||'')}"></div>
       </div>`).join('')}
@@ -799,15 +863,15 @@ function wizardView(c, saved, draftVersion = null) {
   const rulesSection = isFull ? `
     <div class="card"><h2>Rules &amp; Regulations</h2>
       <p>Please open and review the association's <a href="/forms/rules-and-regulations.pdf" target="_blank" rel="noopener">current Rules &amp; Regulations (PDF)</a> before signing. The owner workflow records the exact rules version used for this application.</p>
-      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
-        <input type="checkbox" name="rules_acknowledged" value="yes" style="width:auto;margin-top:4px" ${w.rulesAcknowledged ? 'checked' : ''} required>
+      <label class="u60901360">
+        <input class="u495e8c7d" type="checkbox" name="rules_acknowledged" value="yes" ${w.rulesAcknowledged ? 'checked' : ''} required>
         <span>I have reviewed the Rules &amp; Regulations and agree to comply with them during the stay.</span>
       </label>
     </div>
     ${isAnnualRental(c) ? `<div class="card"><h2>Florida flood disclosure</h2>
       <p>This stay is at least one year, so Florida law requires a separate flood disclosure. Open the read-only preview after saving and keep the executed copy provided after Owner release.</p>
-      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
-        <input type="checkbox" name="flood_disclosure_acknowledged" value="yes" style="width:auto;margin-top:4px" ${w.floodDisclosureAcknowledged ? 'checked' : ''} required>
+      <label class="u60901360">
+        <input class="u495e8c7d" type="checkbox" name="flood_disclosure_acknowledged" value="yes" ${w.floodDisclosureAcknowledged ? 'checked' : ''} required>
         <span>I understand that a separate Florida flood disclosure will be part of the agreement package.</span>
       </label>
     </div>` : ''}` : '';
@@ -832,10 +896,10 @@ function wizardView(c, saved, draftVersion = null) {
       <label>Signature — Adult ${i + 1}${adults[i] && adults[i].sigPng ? ' <span class="pill ok">stored</span>' : ''}</label>
       <canvas class="sigpad" data-i="${i}" width="640" height="170" role="img" aria-label="Signature pad for adult ${i + 1}" tabindex="0"></canvas>
       <div class="sigrow"><button type="button" class="small ghost" data-clear="${i}">Clear new drawing</button>
-        ${adults[i] && adults[i].sigPng ? `<label style="display:inline-flex;gap:7px;align-items:center;margin:0;font-weight:400"><input type="checkbox" name="a${i}_remove_sig" value="yes"> Remove stored signature</label>` : ''}
+        ${adults[i] && adults[i].sigPng ? `<label class="u41e578a4"><input type="checkbox" name="a${i}_remove_sig" value="yes"> Remove stored signature</label>` : ''}
       </div>
       <input type="hidden" name="a${i}_sig" value="">
-      <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400">
+      <label class="u60901360">
         <input type="checkbox" name="a${i}_esign_consent" value="yes" ${adults[i] && adults[i].esignConsent ? 'checked' : ''} required>
         <span>Adult ${i + 1} confirms this is their own signature, consents to transact electronically, intends the signature to have the same legal effect as a handwritten signature, and authorizes it for the listed HOA and lease documents. Copies can be downloaded and printed. A paper alternative may be requested through Airbnb before signing.</span>
       </label>`).join('')}
@@ -890,7 +954,7 @@ function wizardView(c, saved, draftVersion = null) {
        ${sigSection}
        <div class="card">
          <p class="muted">We never ask for your Social Security number online. Where the association's form requires it, the field stays blank. Photo IDs are not uploaded here either. After your forms are complete, Owner will confirm the secure handoff through your existing Airbnb chat. The HOA package cannot be sent until the required ID copies have been received securely.</p>
-         <p style="display:flex;gap:10px;flex-wrap:wrap">
+         <p class="u6002dd78">
            <button type="submit" name="saveMode" value="draft" formnovalidate class="ghost">Save draft and continue later</button>
            <button type="submit" name="saveMode" value="complete">Check completeness &amp; prepare quality review</button>
          </p>
@@ -905,13 +969,13 @@ function settingsView(hasSig, liveMode, msg, compliance, complianceState) {
   return adminPage('Einstellungen — Demo Unit Admin', '/admin/settings',
     `<h1>Einstellungen</h1><p>Automatik, Unterschrift und Zugänge — alles, was das System am Laufen hält.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card"><h2>Versandmodus nach deiner Freigabe</h2>
-      <p style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <p class="u593718ea">
         ${liveMode
           ? '<span class="pill ok">LIVE — nach deiner Prüfung gehen Pakete an die Verwaltung</span>'
           : '<span class="pill warn">TESTMODUS — nach deiner Prüfung gehen Pakete nur an dich (contact008@example.test)</span>'}
-        <form method="post" action="/admin/submit-live" style="display:inline" onsubmit="return confirm('${liveMode ? 'Wirklich auf TESTMODUS zurückschalten?' : 'LIVE-Versand wirklich aktivieren? Empfänger: Example Property Management und Keila; CC Owner.'}')">
+        <form class="ucccfa456" method="post" action="/admin/submit-live" data-confirm="${liveMode ? 'Wirklich auf TESTMODUS zurückschalten?' : 'LIVE-Versand wirklich aktivieren? Empfänger: Example Property Management und Keila; CC Owner.'}">
           <input type="hidden" name="mode" value="${liveMode ? 'off' : 'yes'}">
-          ${liveMode ? '' : '<label style="display:inline-flex;gap:7px;align-items:center;margin:0 8px"><span>Zum Aktivieren LIVE eingeben:</span><input name="confirm" pattern="LIVE" required style="width:90px"></label>'}
+          ${liveMode ? '' : '<label class="uc3c8d100"><span>Zum Aktivieren LIVE eingeben:</span><input class="u581be415" name="confirm" pattern="LIVE" required></label>'}
           <button class="small ${liveMode ? 'ghost' : ''}">${liveMode ? 'Auf Testmodus zurückschalten' : 'LIVE-Versand aktivieren'}</button>
         </form>
       </p>
@@ -933,14 +997,14 @@ function settingsView(hasSig, liveMode, msg, compliance, complianceState) {
         <label>Name der Consumer Reporting Agency</label><input name="craName" value="${esc(cfg.craName || '')}" placeholder="z. B. Tenant Evaluation / ausführende CRA">
         <label>Anschrift der Consumer Reporting Agency</label><textarea name="craAddress" rows="2">${esc(cfg.craAddress || '')}</textarea>
         <label>Telefon der Consumer Reporting Agency</label><input name="craPhone" value="${esc(cfg.craPhone || '')}">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="u472ec391">
           <div><label>HOA bestätigt Portal-E-Signaturen am *</label><input type="date" name="hoaESignAcceptedAt" value="${esc(cfg.hoaESignAcceptedAt || '')}" required></div>
           <div><label>Datenschutz-/Breach-Plan geprüft am *</label><input type="date" name="privacySecurityReviewedAt" value="${esc(cfg.privacySecurityReviewedAt || '')}" required></div>
           <div><label>Fair-Housing-Prozess geprüft am *</label><input type="date" name="fairHousingReviewedAt" value="${esc(cfg.fairHousingReviewedAt || '')}" required></div>
         </div>
         <h3>Nur für Mietverträge ab einem Jahr: Angaben für Fla. Stat. §83.512</h3>
         ${[['floodDamageKnown','Kenntnis von schädigendem Hochwasser während Eigentumszeit'],['floodClaimFiled','Versicherungsclaim wegen Hochwasserschaden gestellt'],['floodAssistanceReceived','Hochwasserhilfe einschließlich FEMA erhalten']].map(([name,label]) => `<label>${label}</label><select name="${name}"><option value="">Nicht festgelegt</option><option value="yes" ${cfg[name] === 'yes' ? 'selected' : ''}>Ja</option><option value="no" ${cfg[name] === 'no' ? 'selected' : ''}>Nein</option></select>`).join('')}
-        <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400"><input type="checkbox" name="attest" value="yes" required><span>Ich bestätige, dass die Fundstellen anhand der aktuellen Originalunterlagen geprüft wurden. Das $100-Antragsformular allein ist kein Nachweis der satzungsmäßigen Gebührenbefugnis.</span></label>
+        <label class="u60901360"><input type="checkbox" name="attest" value="yes" required><span>Ich bestätige, dass die Fundstellen anhand der aktuellen Originalunterlagen geprüft wurden. Das $100-Antragsformular allein ist kein Nachweis der satzungsmäßigen Gebührenbefugnis.</span></label>
         <p><button>Compliance-Angaben speichern</button></p>
       </form>
     </div>
@@ -958,11 +1022,11 @@ function settingsView(hasSig, liveMode, msg, compliance, complianceState) {
         ? '<p><span class="pill ok">Unterschrift hinterlegt</span> <span class="muted">— wird ausschließlich beim von dir geprüften und ausdrücklich freigegebenen finalen Paket eingesetzt. Neu zeichnen und speichern überschreibt sie.</span></p>'
         : '<p><span class="pill warn">noch keine Unterschrift hinterlegt</span> <span class="muted">— ohne sie kann kein finales Paket freigegeben werden.</span></p>'}
       <p class="muted">Mit Finger (Handy) oder Trackpad/Maus im Feld unterschreiben. Groß und mittig — sie wird automatisch passend skaliert.</p>
-      <canvas id="pad" width="700" height="220" style="border:1.5px dashed var(--line);border-radius:8px;width:100%;max-width:700px;touch-action:none;background:#fff"></canvas>
+      <canvas class="u41e4e7c4" id="pad" width="700" height="220"></canvas>
       <p>
         <button id="save">Unterschrift speichern</button>
-        <button id="clear" class="ghost" type="button" style="margin-left:8px">Neu zeichnen</button>
-        <span id="msg" class="muted" style="margin-left:10px"></span>
+        <button id="clear" class="ghost u5dd2a678" type="button">Neu zeichnen</button>
+        <span id="msg" class="muted u78fa54ea"></span>
       </p>
     </div>
     <div class="card"><h2>Zugänge & Anbindung</h2>
@@ -1006,12 +1070,12 @@ function adverseActionView(c, compliance, msg) {
          <label>CRA-Name</label><input name="craName" value="${esc(compliance.craName || '')}" required>
          <label>CRA-Anschrift</label><textarea name="craAddress" rows="2" required>${esc(compliance.craAddress || '')}</textarea>
          <label>CRA-Telefon</label><input name="craPhone" value="${esc(compliance.craPhone || '')}" required>
-         <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400"><input type="checkbox" name="reportBased" value="yes" required><span>Die Maßnahme beruht ganz oder teilweise auf diesem Consumer Report.</span></label>
-         <label style="display:flex;gap:10px;align-items:flex-start;font-weight:400"><input type="checkbox" name="fairHousingReviewed" value="yes" required><span>Ich habe die Entscheidung auf konsistente Kriterien, Fair Housing und mögliche Reasonable Accommodations geprüft.</span></label>
+         <label class="u60901360"><input type="checkbox" name="reportBased" value="yes" required><span>Die Maßnahme beruht ganz oder teilweise auf diesem Consumer Report.</span></label>
+         <label class="u60901360"><input type="checkbox" name="fairHousingReviewed" value="yes" required><span>Ich habe die Entscheidung auf konsistente Kriterien, Fair Housing und mögliche Reasonable Accommodations geprüft.</span></label>
          <p><button>Entwurf erstellen</button></p>
        </form>
      </div>
-     ${prepared ? `<div class="card"><h2>Vorbereiteter Hinweis</h2><p class="muted">Erstellt ${esc(prepared.preparedAt)} von ${esc(prepared.preparedBy)}. Manuelle rechtliche/inhaltliche Prüfung und Zustellung erforderlich.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(prepared.notice)}</pre></div>` : ''}`);
+     ${prepared ? `<div class="card"><h2>Vorbereiteter Hinweis</h2><p class="muted">Erstellt ${esc(prepared.preparedAt)} von ${esc(prepared.preparedBy)}. Manuelle rechtliche/inhaltliche Prüfung und Zustellung erforderlich.</p><pre class="u8d2e5f36">${esc(prepared.notice)}</pre></div>` : ''}`);
 }
 
 // ---------- library ----------
@@ -1048,11 +1112,11 @@ function libraryView(keys, msg) {
   const groups = LIB_CATS.map(([cat, label]) => {
     const files = keys.filter(k => k.startsWith(`lib:${cat}/`)).sort((a, b) => libDisplayName(a).localeCompare(libDisplayName(b)));
     if (!files.length) return '';
-    return `<details class="sect libcat" data-cat="${cat}"><summary>${esc(label)} <span class="muted" style="font-size:14px">(${files.length})</span></summary>
+    return `<details class="sect libcat" data-cat="${cat}"><summary>${esc(label)} <span class="muted u433de30b">(${files.length})</span></summary>
       <ul class="steps">${files.map(k => `
         <li class="libfile" data-name="${esc(libDisplayName(k).toLowerCase())}">
-          <div style="flex:1"><a href="/admin/library/f/${encodeURIComponent(k.slice(4))}" target="_blank">${esc(libDisplayName(k))}</a></div>
-          <form method="post" action="/admin/library/delete" onsubmit="return confirm('Datei löschen?')">
+          <div class="u97445a8d"><a href="/admin/library/f/${encodeURIComponent(k.slice(4))}" target="_blank">${esc(libDisplayName(k))}</a></div>
+          <form method="post" action="/admin/library/delete" data-confirm="Datei löschen?">
             <input type="hidden" name="key" value="${esc(k)}"><button class="small ghost">×</button>
           </form>
         </li>`).join('')}
@@ -1061,7 +1125,7 @@ function libraryView(keys, msg) {
   return adminPage('Bibliothek — Demo Unit Admin', '/admin/library',
     `<h1>Bibliothek</h1><p>Alle Unterlagen zur Wohnung — HOA, vergangene Fälle, Versicherung, Grundbuch, Steuer. Kategorien aufklappen oder einfach suchen.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card">
-      <input id="libsearch" placeholder="Suchen … (z. B. rules, minutes, approval, quote)" style="font-size:16px">
+      <input class="u1444c6ea" id="libsearch" placeholder="Suchen … (z. B. rules, minutes, approval, quote)">
      </div>
      ${groups}
      <div class="card"><h2>Datei hochladen</h2>
@@ -1144,26 +1208,26 @@ async function exportReceipts(env, year, who) {
 function boardView(notes, msg) {
   const open = notes.filter(n => !n.done), done = notes.filter(n => n.done);
   const note = (n) => `
-    <li><div style="flex:1">
-      <b>${esc(n.title)}</b> <span class="muted" style="font-family:var(--mono);font-size:11.5px">${esc((n.createdAt || '').slice(0, 10))}</span>
+    <li><div class="u97445a8d">
+      <b>${esc(n.title)}</b> <span class="muted u53f8a2fa">${esc((n.createdAt || '').slice(0, 10))}</span>
       ${n.done ? '<span class="pill ok">erledigt</span>' : ''}
-      ${n.text ? `<br><span class="${n.done ? 'muted' : ''}" style="white-space:pre-wrap">${esc(n.text)}</span>` : ''}
+      ${n.text ? `<br><span class="${n.done ? 'muted' : ''} ua548ea71">${esc(n.text)}</span>` : ''}
     </div>
-    <div style="display:flex;gap:6px;flex-direction:column">
+    <div class="uee52adba">
       <form method="post" action="/admin/board/toggle"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ${n.done ? 'ghost' : ''}">${n.done ? 'reaktivieren' : 'erledigt ✓'}</button></form>
-      <form method="post" action="/admin/board/del" onsubmit="return confirm('Hinweis löschen?')"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ghost">×</button></form>
+      <form method="post" action="/admin/board/del" data-confirm="Hinweis löschen?"><input type="hidden" name="id" value="${esc(n.id)}"><button class="small ghost">×</button></form>
     </div></li>`;
   return adminPage('Board — Demo Unit Admin', '/admin/board',
     `<h1>Board</h1><p>Merkzettel rund um Wohnung, Konten und Behörden — Dinge, die nicht vergessen werden dürfen.${msg ? ' — ' + esc(msg) : ''}</p>`,
-    `<div class="card"><h2>Offen ${open.length ? `<span class="muted" style="font-size:14px">(${open.length})</span>` : ''}</h2>
+    `<div class="card"><h2>Offen ${open.length ? `<span class="muted u433de30b">(${open.length})</span>` : ''}</h2>
       ${open.length ? `<ul class="steps">${open.map(note).join('')}</ul>` : '<p class="muted">Nichts offen. 🌴</p>'}</div>
      <div class="card"><h2>Neuer Hinweis</h2>
       <form method="post" action="/admin/board/add">
         <label>Titel</label><input name="title" required>
-        <label>Text</label><textarea name="text" rows="4" style="width:100%"></textarea>
+        <label>Text</label><textarea class="u0466783d" name="text" rows="4"></textarea>
         <p><button class="small">Auf das Board</button></p>
       </form></div>
-     ${done.length ? `<details class="sect"><summary>Erledigt <span class="muted" style="font-size:14px">(${done.length})</span></summary><ul class="steps">${done.map(note).join('')}</ul></details>` : ''}`);
+     ${done.length ? `<details class="sect"><summary>Erledigt <span class="muted u433de30b">(${done.length})</span></summary><ul class="steps">${done.map(note).join('')}</ul></details>` : ''}`);
 }
 async function rcptList(env) {
   const out = [];
@@ -1178,11 +1242,11 @@ async function rcptList(env) {
 function receiptsView(keys, msg) {
   const groups = RCPT_CATS.map(([cat, label]) => {
     const files = keys.filter(k => k.startsWith(`rcpt:${cat}/`)).sort((a, b) => libDisplayName(a).localeCompare(libDisplayName(b)));
-    return `<div class="card libcat" data-cat="${cat}"><h2>${esc(label)} <span class="muted" style="font-size:14px">(${files.length})</span></h2>
+    return `<div class="card libcat" data-cat="${cat}"><h2>${esc(label)} <span class="muted u433de30b">(${files.length})</span></h2>
       ${files.length ? `<ul class="steps">${files.map(k => `
         <li class="libfile" data-name="${esc(libDisplayName(k).toLowerCase())}">
-          <div style="flex:1"><a href="/admin/receipts/f/${encodeURIComponent(k.slice(5))}" target="_blank">${esc(libDisplayName(k))}</a></div>
-          <form method="post" action="/admin/receipts/delete" onsubmit="return confirm('Beleg löschen?')">
+          <div class="u97445a8d"><a href="/admin/receipts/f/${encodeURIComponent(k.slice(5))}" target="_blank">${esc(libDisplayName(k))}</a></div>
+          <form method="post" action="/admin/receipts/delete" data-confirm="Beleg löschen?">
             <input type="hidden" name="key" value="${esc(k)}"><button class="small ghost">×</button>
           </form>
         </li>`).join('')}
@@ -1193,13 +1257,13 @@ function receiptsView(keys, msg) {
   return adminPage('Quittungen — Demo Unit Admin', '/admin/receipts',
     `<h1>Quittungsordner</h1><p>Alle Belege zur Wohnung an einem Ort — für Steuer, Nebenkostenabrechnung und den Überblick.${msg ? ' — ' + esc(msg) : ''}</p>`,
     `<div class="card">
-      <input id="libsearch" placeholder="Beleg suchen …" style="font-size:16px">
-      <p class="muted" style="margin-bottom:0">Laufende Quellen: Turno-Belege in der Turno-App unter „Receipts" · Duke-Energy-Rechnungen im Duke-Konto · Airbnb-Auszahlungen unter Verlauf → Auszahlungen (CSV). Einfach als PDF sichern und hier hochladen.</p>
+      <input class="u1444c6ea" id="libsearch" placeholder="Beleg suchen …">
+      <p class="muted uef0b7a11">Laufende Quellen: Turno-Belege in der Turno-App unter „Receipts" · Duke-Energy-Rechnungen im Duke-Konto · Airbnb-Auszahlungen unter Verlauf → Auszahlungen (CSV). Einfach als PDF sichern und hier hochladen.</p>
      </div>
      <div class="card"><h2>Jahres-Export per E-Mail</h2>
       <p class="muted">Verschickt alle Belege eines Jahres als PDF-Anhänge (bei großen Mengen automatisch aufgeteilt). Du bekommst jede Mail als CC und eine Telegram-Bestätigung.</p>
       <form method="post" action="/admin/receipts/export">
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
+        <div class="ua8ddc3e4">
           <div><label>Jahr</label>
             <select name="year">${years.map(y => `<option value="${esc(y)}">${esc(y)} (${yearCount(y)} Belege)</option>`).join('')}</select></div>
           <div><label>Empfänger</label>
@@ -1257,8 +1321,8 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
     : '<div class="attn okk">Alles ruhig — keine offenen Punkte. 🌴</div>';
   const caseRows = active.map(c => {
     const done = c.steps.filter(s => s.done).length, pct = Math.round(done / c.steps.length * 100);
-    return `<li><div style="flex:1"><b>${esc(c.guestName)}</b> <span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights} Nächte</span>
-      <div class="bar"><div style="width:${pct}%"></div></div>
+    return `<li><div class="u97445a8d"><b>${esc(c.guestName)}</b> <span class="muted">${esc(c.checkIn)} → ${esc(c.checkOut)} · ${c.nights} Nächte</span>
+      <div class="bar"><div data-pct="${pct}" class="barfill"></div></div>
       <span class="muted">${done}/${c.steps.length} Schritte</span>
       ${c.submission ? '<span class="pill ok">eingereicht</span>' : c.wizard ? '<span class="pill teal">Daten da</span>' : '<span class="pill warn">wartet auf Gast</span>'}
       ${isDone(c, 'board_approved') ? '<span class="pill ok">approved</span>' : ''}</div>
@@ -1266,14 +1330,14 @@ function dashboardView(cases, counts, ownerSigOnFile, liveMode, msg, news) {
   }).join('');
   return adminPage('Übersicht — Demo Unit Admin', '/admin',
     `<h1>Übersicht</h1><p>Dein Vermietungs-Cockpit für Unit 405D — was läuft und was Aufmerksamkeit braucht.${msg ? ' — ' + esc(msg) : ''}</p>
-     <p style="margin:14px 0 0">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
-     ${ownerSigOnFile ? '<span class="pill ok">Unterschrift ✓</span>' : '<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Unterschrift fehlt</span>'}</p>`,
+     <p class="u2d724d0f">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
+     ${ownerSigOnFile ? '<span class="pill ok">Unterschrift ✓</span>' : '<span class="pill ue90617ff">Unterschrift fehlt</span>'}</p>`,
     `<div class="card"><h2>Braucht Aufmerksamkeit</h2>${attnHtml}</div>
      <div class="card"><h2>Offene Vorgänge</h2>${active.length
        ? `<ul class="steps">${caseRows}</ul>`
        : '<p class="muted">Keine offenen Vorgänge. Neue Buchungen werden automatisch aus Gmail angelegt — du bekommst dann eine Telegram-Nachricht mit dem Magic-Link.</p>'}</div>
      <div class="card"><h2>Neues von der Verwaltung</h2>${(news && news.length)
-       ? `<ul class="steps">${news.slice(0, 5).map(n => newsItemHtml(n, Date.now())).join('')}</ul><p style="margin:10px 0 0"><a href="/admin/news">Alle Neuigkeiten →</a></p>`
+       ? `<ul class="steps">${news.slice(0, 5).map(n => newsItemHtml(n, Date.now())).join('')}</ul><p class="u82460327"><a href="/admin/news">Alle Neuigkeiten →</a></p>`
        : '<p class="muted">Noch keine Verwaltungs-Mails erfasst — neue E-Mails von Example Property Management erscheinen hier automatisch.</p>'}</div>
      <div class="kpis">
       <a class="kpi" href="/admin/cases"><b>${cases.length}</b><span>Vorgänge gesamt</span></a>
@@ -1289,11 +1353,11 @@ function fmtNewsDate(iso) {
 }
 function newsItemHtml(n, now) {
   const fresh = n.at && (now - new Date(n.at)) < 7 * 86400000;
-  return `<li><div style="flex:1">
-    <span class="muted" style="font-family:var(--mono);font-size:12px">${esc(fmtNewsDate(n.at))}</span>
+  return `<li><div class="u97445a8d">
+    <span class="muted ue1e124fa">${esc(fmtNewsDate(n.at))}</span>
     ${fresh ? '<span class="pill teal">neu</span>' : ''}<br>
     <b>${esc(n.subject || '(ohne Betreff)')}</b><br>
-    <span class="muted" style="font-size:13px">${esc(n.from)}</span>
+    <span class="muted u5e0faad2">${esc(n.from)}</span>
     ${n.excerpt ? `<br><span class="muted">${esc(n.excerpt.slice(0, 220))}${n.excerpt.length > 220 ? '…' : ''}</span>` : ''}
     ${/^[a-f0-9]{64}$/.test(n.id||'') ? `<p><a href="/admin/hoa-mail/${n.id}">E-Mail-Beleg öffnen</a> · Zuordnung: ${esc(n.matchReason||'unbekannt')}</p>` : ''}
   </div></li>`;
@@ -1323,26 +1387,26 @@ function contactsView(contacts, msg) {
   });
   groups.push(rest);
   const cards = groups.filter(g => g.items.length).map(g =>
-    `<div class="card cgroup"><h2>${esc(g.label)} <span class="muted" style="font-size:14px">(${g.items.length})</span></h2>
+    `<div class="card cgroup"><h2>${esc(g.label)} <span class="muted u433de30b">(${g.items.length})</span></h2>
      <ul class="steps">${g.items.map(([ct, i]) => `
       <li class="cfile" data-name="${esc(`${ct.name} ${ct.role} ${ct.notes || ''}`.toLowerCase())}">
-        <div style="flex:1"><b>${esc(ct.name)}</b> <span class="pill teal">${esc(ct.role)}</span>
+        <div class="u97445a8d"><b>${esc(ct.name)}</b> <span class="pill teal">${esc(ct.role)}</span>
           ${ct.email || ct.phone ? `<br>${[
             ct.email ? `<a href="mailto:${esc(ct.email)}">${esc(ct.email)}</a>` : '',
             ct.phone ? `<a href="tel:${esc(ct.phone.replace(/[^+\d]/g, ''))}">${esc(ct.phone)}</a>` : '',
           ].filter(Boolean).join(' · ')}` : ''}
           ${ct.notes ? `<br><span class="muted">${esc(ct.notes)}</span>` : ''}</div>
-        <form method="post" action="/admin/library/contact-del" onsubmit="return confirm('Kontakt löschen?')">
+        <form method="post" action="/admin/library/contact-del" data-confirm="Kontakt löschen?">
           <input type="hidden" name="i" value="${i}"><button class="small ghost">×</button></form>
       </li>`).join('')}
      </ul></div>`).join('');
   return adminPage('Kontakte — Demo Unit Admin', '/admin/contacts',
     `<h1>Kontakte</h1><p>Alle Ansprechpartner und Accounts rund um Unit 405D — Verwaltung, Versicherung, Dienstleister, Infrastruktur.${msg ? ' — ' + esc(msg) : ''}</p>`,
-    `<div class="card"><input id="csearch" placeholder="Kontakt suchen … (z. B. Versicherung, Duke, Jeanine)" style="font-size:16px"></div>
+    `<div class="card"><input class="u1444c6ea" id="csearch" placeholder="Kontakt suchen … (z. B. Versicherung, Duke, Jeanine)"></div>
      ${cards || '<div class="card"><p class="muted">noch keine Kontakte</p></div>'}
      <div class="card"><h2>Kontakt hinzufügen</h2>
       <form method="post" action="/admin/library/contact-add">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="u4e330d89">
           <div><label>Name</label><input name="name" required></div>
           <div><label>Rolle</label><input name="role" placeholder="z. B. Verwaltung, Versicherung, Handwerker" required></div>
           <div><label>E-Mail</label><input name="email"></div>
@@ -1385,7 +1449,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     const done = visibleSteps.filter(s => s.done).length;
     const stepBtns = visibleSteps.map(s => ['fee_sent','screening_complete','board_approved'].includes(s.id)
       ? `<a class="btn small ghost" href="${hoaEvents.length?'/admin/hoa-mail/'+hoaEvents[0].id:'/admin/news'}" title="${esc(s.label)} — verify source">${s.done?'✓':'·'} source</a>` :
-      `<form method="post" action="/admin/toggle" style="display:inline">
+      `<form class="ucccfa456" method="post" action="/admin/toggle">
          <input type="hidden" name="id" value="${c.id}"><input type="hidden" name="step" value="${s.id}">
          <button class="small ${s.done ? '' : 'ghost'}" title="${esc(s.label)}">${s.done ? '✓' : '·'}</button>
        </form>`).join(' ');
@@ -1421,7 +1485,7 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
     const subLine = c.submission
       ? `<span class="pill ok">📬 gesendet ${esc(c.submission.sentAt.slice(0,10))}${c.submission.live ? '' : ' (TEST)'}</span>`
       : c.submissionError
-        ? `<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Versand-Störung: ${esc(c.submissionError.message.slice(0,60))}</span>`
+        ? `<span class="pill ue90617ff">Versand-Störung: ${esc(c.submissionError.message.slice(0,60))}</span>`
         : c.screeningRoute === 'online'
           ? `<span class="pill ${c.screeningReportedAt ? 'warn' : 'teal'}">Tenant Evaluation ${c.screeningReportedAt ? 'vom Gast als erledigt gemeldet — Bestätigung ausstehend' : 'ausstehend'}</span>`
           : (c.wizard ? '<span class="pill warn">wartet auf Owner-Prüfung / vollständige Signaturen</span>' : '');
@@ -1431,20 +1495,20 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
       ? '<span class="pill warn">Lokale KI-Prüfung ausstehend</span>'
       : ai.status === 'green'
         ? `<span class="pill ok">Lokale KI-Prüfung grün · ${esc(ai.model || 'local')}</span><p class="muted">${esc(ai.summary || 'Keine Abweichungen gefunden.')}</p>`
-        : `<span class="pill" style="background:var(--crit-wash);color:var(--crit)">KI-Prüfung ${esc(ai.status || 'red')}</span><p class="muted">${esc((ai.findings || []).join(' · ') || ai.summary || 'Prüfung wiederholen.')}</p>`;
+        : `<span class="pill ue90617ff">KI-Prüfung ${esc(ai.status || 'red')}</span><p class="muted">${esc((ai.findings || []).join(' · ') || ai.summary || 'Prüfung wiederholen.')}</p>`;
     const reviewButton = ready && !c.submission ? `
-      <div style="margin-top:10px">
+      <div class="ud2c171b1">
         ${aiLine}
-        ${ai && ai.status === 'green' ? `<form method="post" action="/admin/submit" style="display:block;margin-top:10px" onsubmit="return confirm('Die OpenAI-KI-Prüfung ist grün. Jetzt ${liveMode ? 'den externen Versand an die Verwaltung freigeben' : 'ein Testpaket nur an Owner senden'}?')">
+        ${ai && ai.status === 'green' ? `<form class="ua605c51e" method="post" action="/admin/submit" data-confirm="Die OpenAI-KI-Prüfung ist grün. Jetzt ${liveMode ? 'den externen Versand an die Verwaltung freigeben' : 'ein Testpaket nur an Owner senden'}?">
           <input type="hidden" name="id" value="${esc(c.id)}"><input type="hidden" name="reviewHash" value="${esc(c.reviewHash || '')}">
           <button class="small">${liveMode ? 'Grünen KI-Bericht bestätigen und versenden' : 'Grünen KI-Bericht bestätigen und Testpaket erzeugen'}</button>
         </form>` : '<p class="muted">Kein manueller PDF-Abgleich nötig. Der Versand wird erst nach einem grünen OpenAI-KI-Bericht freigeschaltet.</p>'}
       </div>` : '';
     const classification = c.pathType === 'full' ? `
-      <form method="post" action="/admin/case-classification" style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <form class="u575c0429" method="post" action="/admin/case-classification">
         <input type="hidden" name="id" value="${esc(c.id)}">
-        <select name="applicationType" style="width:auto"><option value="lease" ${(c.applicationType || 'lease') === 'lease' ? 'selected' : ''}>Neuer/anderer Mieter</option><option value="renewal" ${c.applicationType === 'renewal' ? 'selected' : ''}>Verlängerung</option></select>
-        <label style="margin:0;font-weight:400"><input type="checkbox" name="sameLesseesConfirmed" value="yes" ${c.sameLesseesConfirmed ? 'checked' : ''}> exakt dieselben Mieter</label>
+        <select class="u30e741d9" name="applicationType"><option value="lease" ${(c.applicationType || 'lease') === 'lease' ? 'selected' : ''}>Neuer/anderer Mieter</option><option value="renewal" ${c.applicationType === 'renewal' ? 'selected' : ''}>Verlängerung</option></select>
+        <label class="uc42fdd48"><input type="checkbox" name="sameLesseesConfirmed" value="yes" ${c.sameLesseesConfirmed ? 'checked' : ''}> exakt dieselben Mieter</label>
         <button class="small ghost">Einordnen</button>
       </form>` : '';
     return `<tr>
@@ -1455,17 +1519,17 @@ function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
       <td>${done}/${visibleSteps.length}<br>${stepBtns}<br>${mailBtns}</td>
       <td><a href="/v/${c.token}" target="_blank">/v/${c.token}</a><br>
           ${c.pathType === 'full' ? `<a href="/admin/adverse-action?id=${encodeURIComponent(c.id)}">Adverse-Action-Hinweis</a><br>` : ''}
-          <form method="post" action="/admin/delete" onsubmit="return confirm('Delete case?')" style="display:inline">
+          <form class="ucccfa456" method="post" action="/admin/delete" data-confirm="Delete case?">
             <input type="hidden" name="id" value="${c.id}"><button class="small ghost">delete</button>
           </form></td></tr>`;
   }).join('');
   return adminPage('Vorgänge — Demo Unit Admin', '/admin/cases',
     `<h1>Vorgänge</h1><p>${cases.length} Vorgang/Vorgänge${msg ? ' — ' + esc(msg) : ''}</p>
-     <p style="margin:14px 0 0">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
-     ${ownerSigOnFile ? '' : '<span class="pill" style="background:var(--crit-wash);color:var(--crit)">Owner-Signatur fehlt — finaler Versand gesperrt</span>'}
-     <a href="/admin/settings" style="font-size:13.5px">Einstellungen →</a></p>`,
+     <p class="u2d724d0f">${liveMode ? '<span class="pill ok">Freigegebener Versand an Verwaltung</span>' : '<span class="pill warn">TESTMODUS — Versand nur an Owner</span>'}
+     ${ownerSigOnFile ? '' : '<span class="pill ue90617ff">Owner-Signatur fehlt — finaler Versand gesperrt</span>'}
+     <a class="ue785b9bd" href="/admin/settings">Einstellungen →</a></p>`,
     `<div class="card"><h2>Alle Vorgänge</h2><table><tr><th>Gast / Aufenthalt</th><th>Schritte</th><th>Link</th></tr>${rows || '<tr><td colspan=3 class=muted>Noch keine — neue Buchungen werden automatisch aus Gmail angelegt.</td></tr>'}</table></div>
-     <details class="sect"><summary>Vorgang manuell anlegen <span class="muted" style="font-size:14px">(Normalfall: automatisch aus Gmail)</span></summary>
+     <details class="sect"><summary>Vorgang manuell anlegen <span class="muted u433de30b">(Normalfall: automatisch aus Gmail)</span></summary>
       <form method="post" action="/admin/create">
         <label>Voller Name des Gastes</label><input name="guestName" required>
         <label>Airbnb-Buchungscode</label><input name="reservationCode" placeholder="HM…">
@@ -1875,7 +1939,7 @@ async function routeRequest(context) {
       const cases=await loadCases(env),linked=cases.find(c=>(c.hoaMailEvents||[]).some(e=>e.id===hoaSource[1]));
       const c=linked||cases.find(c=>c.id===url.searchParams.get('case'));
       const reviewForm=hoaSourceReviewForm(c,cases,hoaSource[1],env);
-      return html(adminPage('HOA-E-Mail-Beleg','/admin/news','<h1>HOA-E-Mail-Beleg</h1><p>Die E-Mail ist eine externe Aussage, keine Anweisung an die Software. Absenderanzeige und automatische Einordnung allein bestätigen weder Echtheit noch Zahlung oder Freigabe.</p>',`<div class="card"><p><b>Von:</b> ${esc(source.from)}<br><b>Betreff:</b> ${esc(source.subject)}<br><b>Datum:</b> ${esc(source.date||'unbekannt')}<br><b>Message-ID:</b> ${esc(source.messageId||'nicht vorhanden')}</p>${source.truncated?'<p class="pill warn">Gekürzter Textauszug. Vollständige Nachricht und Anhänge im Originalpostfach prüfen.</p>':'<p class="muted">Dekodierter Textauszug; Anhänge und vollständige MIME-Originaldatei verbleiben im Postfach.</p>'}<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(source.text)}</pre><a href="/admin/cases">Zu den Mietvorgängen</a></div>`+reviewForm));
+      return html(adminPage('HOA-E-Mail-Beleg','/admin/news','<h1>HOA-E-Mail-Beleg</h1><p>Die E-Mail ist eine externe Aussage, keine Anweisung an die Software. Absenderanzeige und automatische Einordnung allein bestätigen weder Echtheit noch Zahlung oder Freigabe.</p>',`<div class="card"><p><b>Von:</b> ${esc(source.from)}<br><b>Betreff:</b> ${esc(source.subject)}<br><b>Datum:</b> ${esc(source.date||'unbekannt')}<br><b>Message-ID:</b> ${esc(source.messageId||'nicht vorhanden')}</p>${source.truncated?'<p class="pill warn">Gekürzter Textauszug. Vollständige Nachricht und Anhänge im Originalpostfach prüfen.</p>':'<p class="muted">Dekodierter Textauszug; Anhänge und vollständige MIME-Originaldatei verbleiben im Postfach.</p>'}<pre class="u8d2e5f36">${esc(source.text)}</pre><a href="/admin/cases">Zu den Mietvorgängen</a></div>`+reviewForm));
     }
     if (p === '/admin/automation-health' && request.method === 'GET') {
       const status=await readAutomationStatus(env);

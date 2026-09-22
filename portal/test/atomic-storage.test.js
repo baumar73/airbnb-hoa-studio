@@ -69,7 +69,7 @@ test('an old browser draft cannot overwrite a newer saved form or changed bookin
   assert.ok(version,'the rendered form carries its source revision');
   // Execute the actual rendered handler against a minimal DOM adapter. This
   // is a unit test, not a claim of full real-browser/mobile verification.
-  const script=[...page.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.includes('let saving = false'));
+  const script=[...page.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.includes('let saving = false'));
   let handler,posted,navigated=false;
   const notice={textContent:''},form={action:'https://portal.example.test/w/drafttoken123',elements:{draftVersion:{value:version},a0_firstName:{value:'Keep my entries'}},addEventListener:(event,fn)=>{handler=fn;}};
   const sandbox={document:{querySelectorAll:()=>[],querySelector:()=>form,getElementById:()=>notice},location:{assign:()=>{navigated=true;}},FormData:class extends Map{constructor(f){super(Object.entries(f.elements).map(([k,v])=>[k,v.value]));}},fetch:async(url,options)=>{posted=options.body;return {status:409,ok:false};}};
