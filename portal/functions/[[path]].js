@@ -247,6 +247,35 @@ li.next .dot{border-color:var(--sun)}
 .bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:14px 0 6px}
 .bar>div{height:100%;background:linear-gradient(90deg,var(--accent),var(--sun));border-radius:99px;
  transition:width .6s ease}
+/* ---- tenant progress board (one column per stay, slot-machine wheel) ---- */
+.gboard{display:flex;gap:14px;align-items:stretch;overflow-x:auto;padding-bottom:6px}
+.gcol{flex:0 0 148px;display:flex;flex-direction:column;border:1px solid var(--line-strong);
+ border-radius:14px;padding:10px 12px;background:var(--card);gap:8px}
+.gcol.uok{border-color:var(--ok);box-shadow:0 0 0 2px var(--ok-wash)}
+.gcol.uwarn{border-color:var(--warn)}
+.gcol.ucrit{border-color:var(--crit);box-shadow:0 0 0 2px var(--crit-wash)}
+.gcol.uempty{opacity:.55}
+.ghead{display:flex;flex-direction:column;align-items:center;gap:2px}
+.gbp{width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid var(--line)}
+.gplaceholder{width:56px;height:56px;border-radius:50%;border:2px dashed var(--line-strong);
+ background:var(--soft);color:var(--faint);display:flex;align-items:center;justify-content:center;font-size:22px}
+.gname{font-weight:700;font-size:14px;color:var(--ink)}
+.gid{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.gwheel{display:flex;flex-direction:column;gap:3px;padding:4px 0}
+.wslot{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--faint);
+ border:1px solid var(--line);border-radius:99px;padding:2px 8px}
+.wslot.on{background:var(--ok-wash);color:var(--ok);border-color:var(--ok)}
+.wslot.on>span{text-decoration:line-through}
+.gpct{font-family:var(--mono);font-size:11px;color:var(--faint);text-align:center}
+.gstatus{font-size:12px;font-weight:700}
+.gstatus.tint.ok{color:var(--ok)}.gstatus.tint.warn{color:var(--warn)}
+.gstatus.tint.crit{color:var(--crit)}.gstatus.tint.empty{color:var(--faint)}
+.gstay{display:flex;flex-wrap:wrap;gap:2px 4px;font-family:var(--mono);font-size:10px;
+ color:var(--faint);border-top:1px solid var(--line);padding-top:4px}
+.gstay span{white-space:nowrap}
+.gclean{white-space:nowrap;display:inline-block;padding:1px 6px;border-radius:99px;
+ background:var(--sun-wash);color:var(--sun-deep)}
+@media (max-width:760px){.gboard{flex-direction:column}}
 .muted{color:var(--faint);font-size:14.5px}
 table{width:100%;border-collapse:collapse;font-size:14.5px}
 th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -1223,7 +1252,7 @@ async function exportReceipts(env, year, who) {
 }
 
 // ---------- board (Hinweise & Merkzettel) ----------
-function boardView(notes, msg) {
+function boardView(notes, msg, topBlock = '', casesForSetup = []) {
   const open = notes.filter(n => !n.done), done = notes.filter(n => n.done);
   const note = (n) => `
     <li><div class="u97445a8d">
@@ -1237,7 +1266,18 @@ function boardView(notes, msg) {
     </div></li>`;
   return adminPage('Board — Demo Unit Admin', '/admin/board',
     `<h1>Board</h1><p>Merkzettel rund um Wohnung, Konten und Behörden — Dinge, die nicht vergessen werden dürfen.${msg ? ' — ' + esc(msg) : ''}</p>`,
-    `<div class="card"><h2>Offen ${open.length ? `<span class="muted u433de30b">(${open.length})</span>` : ''}</h2>
+    `${topBlock?`<div class="card"><h2>Fortschritt der Mietvorgänge</h2>${topBlock}</div>`:''}
+    <div class="card"><h2>Foto & Reinigung pro Mieter</h2>
+      <p class="muted">Setze optional das Gastfoto (Airbnb) und das Reinigungsdatum (Turno) je Vorgang. Foto als Daten-URL (kleines JPEG/PNG, z. B. per Paste).</p>
+      ${casesForSetup.map(c => `<form method="post" action="/admin/board/setup" class="u0f2f2e2b">
+        <input type="hidden" name="id" value="${esc(c.id)}">
+        <b>${esc(c.guestName.split(' ')[0])}</b> <span class="muted">${esc(c.checkIn)} – ${esc(c.checkOut)}</span>
+        <label>Foto (data:image/...)<input name="photo" value="${esc(c.photo || '')}" placeholder="data:image/png;base64,…"></label>
+        <label>Reinigung (Turno, YYYY-MM-DD)<input name="cleaning" value="${esc(c.cleaning || '')}" placeholder="YYYY-MM-DD"></label>
+        <button class="small">Speichern</button>
+      </form>`).join('')}
+    </div>
+    <div class="card"><h2>Offen ${open.length ? `<span class="muted u433de30b">(${open.length})</span>` : ''}</h2>
       ${open.length ? `<ul class="steps">${open.map(note).join('')}</ul>` : '<p class="muted">Nichts offen. 🌴</p>'}</div>
      <div class="card"><h2>Neuer Hinweis</h2>
       <form method="post" action="/admin/board/add">
@@ -1444,6 +1484,86 @@ function contactsView(contacts, msg) {
        });
      });
      </script>`);
+}
+
+function isDoneNative(c, id) { return !!(c.steps || []).find(s => s.id === id && s.done); }
+
+// Slots for the progress wheel, shared by the board column for this case type.
+function progressSlots(c) {
+  if (c.pathType !== 'full') {
+    return [
+      ['forms_sent', 'Gast-Formular'],
+      ['screening_complete', 'Screening'],
+      ['board_approved', 'Board-Freigabe'],
+      ['checkin_released', 'Check-in'],
+    ];
+  }
+  if (c.screeningRoute === 'online') {
+    return [
+      ['route_selected', 'Route gewählt'],
+      ['screening_complete', 'Tenant Eval.'],
+      ['board_approved', 'Board-Freigabe'],
+      ['checkin_released', 'Check-in'],
+    ];
+  }
+  return [
+    ['forms_sent', 'Formulare'],
+    ['ids_provided', 'IDs gesichert'],
+    ['screening_complete', 'Screening'],
+    ['board_approved', 'Board-Freigabe'],
+    ['checkin_released', 'Check-in'],
+  ];
+}
+
+// Compact per-case status for the board's at-a-glance color + label.
+export function caseProgress(c, now) {
+  if (c.status === 'canceled') return { tone: 'empty', label: 'Storniert', pct: 0, slots: [] };
+  const slots = progressSlots(c).map(([id, label]) => ({ id, label, done: isDoneNative(c, id) }));
+  const done = slots.filter(s => s.done).length;
+  const pct = Math.round(done / slots.length * 100);
+  const approved = isDoneNative(c, 'board_approved');
+  const released = isDoneNative(c, 'checkin_released');
+  const screening = isDoneNative(c, 'screening_complete');
+  const start = new Date(c.checkIn + 'T12:00:00Z');
+  const days = Math.ceil((start - now) / 86400000);
+  let tone, label;
+  if (!c.wizard || !c.wizard.savedAt) { tone = 'warn'; label = 'Keine Formulare'; }
+  else if (released) { tone = 'ok'; label = 'Check-in freigegeben'; }
+  else if (approved) { tone = 'ok'; label = 'Board freigegeben'; }
+  else if (days < 0) { tone = 'crit'; label = 'Fällig — Freigabe fehlt'; }
+  else if (days <= 10 && !screening) { tone = 'crit'; label = 'Screening ausstehend'; }
+  else if (c.submissionError) { tone = 'crit'; label = 'Versand-Störung'; }
+  else if (!screening) { tone = 'warn'; label = 'Screening ausstehend'; }
+  else { tone = 'warn'; label = 'In Arbeit'; }
+  return { tone, label, pct, slots };
+}
+
+// One column per tenant, like a slot-machine wheel: the wheel fills as the
+// process moves toward the stay. Sorted chronologically (earliest stays left).
+export function progressBoardView(cases, now = new Date()) {
+  const sorted = [...(cases || [])].sort((a, b) => (a.checkIn || '').localeCompare(b.checkIn || ''));
+  const columns = sorted.map(c => {
+    const p = caseProgress(c, now);
+    const first = (c.wizard?.adults || [])[0] || {};
+    const firstName = (first.firstName || c.guestName.split(' ')[0] || '?');
+    const idNumber = first.idNumber || '—';
+    const toneClass = p.tone === 'ok' ? 'uok' : p.tone === 'crit' ? 'ucrit' : p.tone === 'empty' ? 'uempty' : 'uwarn';
+    const wheels = p.slots.map(s => {
+      const on = s.done;
+      return `<div class="wslot ${on ? 'on' : ''}" title="${esc(s.label)}">${on ? '●' : '○'} <span>${esc(s.label)}</span></div>`;
+    }).join('');
+    const photo = c.photo
+      ? `<img class="gbp" src="${esc(c.photo)}" alt="">`
+      : `<div class="gbp gplaceholder">👤</div>`;
+    const cleaning = c.cleaning ? esc(c.cleaning) : '<span class="muted">n.n.</span>';
+    return `<div class="gcol ${toneClass}" title="${esc(c.checkIn)} – ${esc(c.checkOut)}">
+      <div class="ghead">${photo}<div class="gname">${esc(firstName)}</div><div class="gid">${esc(idNumber)}</div></div>
+      <div class="gwheel">${wheels}<div class="gpct">${p.pct}%</div></div>
+      <div class="gstatus tint">${esc(p.label)}</div>
+      <div class="gstay"><span>${esc(c.checkIn)}</span><span>→</span><span>${esc(c.checkOut)}</span><span class="gclean">🧹 ${cleaning}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="gboard">${columns || '<p class="muted">Keine Mietvorgänge.</p>'}</div>`;
 }
 
 function casesView(cases, msg, ownerSigOnFile, liveMode, compliance = {}) {
@@ -2127,7 +2247,28 @@ async function routeRequest(context) {
     }
     if (p === '/admin/board' && request.method === 'GET') {
       const notes = JSON.parse((await env.CASES.get('admin-board')) || '[]');
-      return html(boardView(notes, url.searchParams.get('msg')));
+      const allCases = await loadCases(env);
+      const board = progressBoardView(allCases);
+      return html(boardView(notes, url.searchParams.get('msg'), board, allCases));
+    }
+    if (p === '/admin/board/setup' && request.method === 'POST') {
+      const form = await request.formData();
+      const cases = await loadCases(env);
+      const c = cases.find(x => x.id === form.get('id'));
+      if (c) {
+        const photo = String(form.get('photo') || '').trim();
+        const cleaning = String(form.get('cleaning') || '').trim();
+        if (photo && !/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(photo)) {
+          return html(page('Board', '<h1>Ungültiges Foto</h1>', '<p>Foto muss eine data:image-Base64-URL sein.</p>'), 400);
+        }
+        if (cleaning && !/^\d{4}-\d{2}-\d{2}$/.test(cleaning)) {
+          return html(page('Board', '<h1>Ungültiges Reinigungsdatum</h1>', '<p>Format YYYY-MM-DD.</p>'), 400);
+        }
+        c.photo = photo || null;
+        c.cleaning = cleaning || null;
+        await saveCases(env, cases);
+      }
+      return redirect('/admin/board');
     }
     if (p === '/admin/board/add' && request.method === 'POST') {
       const form = await request.formData();

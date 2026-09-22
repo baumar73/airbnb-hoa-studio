@@ -85,7 +85,29 @@ um den Fluss zu überwachen. Er erhält danach eine Bestätigung.
   Wizard-View bei aktivem Flag (`[[path]].js`).
 - **Test:** `test/form-delivery.test.js` (+5): Empfänger=Keila + CC=Owner, Gast
   nie Empfänger, flag-off blockiert, canceled blockiert, savedAt fehlt
-  blockiert, Empfänger nicht konfiguriert blockiert. Suite: **336** Tests grün.
+  blockiert, Empfänger nicht konfiguriert blockiert. Suite: **340** Tests grün.
+
+## Admin-Fortschritts-Board (ein „Slot-Machine-Rad" je Mieter)
+
+Auf `/admin/board` zeigt eine neue spaltenbasierte Wand den Fortschritt **aller**
+Mietvorgänge auf einen Blick:
+
+- **Eine Spalte je Mieter**, chronologisch sortiert (älteste Mietzeit links,
+  neueste rechts) — die Spalten wandern mit den Vermietungsdaten.
+- **Oben** optional das Airbnb-Gastfoto (als `data:image/...`-URL) mit Vorname
+  und ID-Nummer; **unten** die Vermietungsdaten Check-in → Check-out →
+  Reinigung (Turno, optionales Datum).
+- **Das „Rad"** (`caseProgress`/`progressBoardView` in `functions/[[path]].js`)
+  füllt sich als Folge von Schritten (Formulare, IDs, Screening, Board-Freigabe,
+  Check-in), mit Prozent und Gesamt-Farbe: grün (freigegeben) / gelb (in Arbeit
+  od. Screening offen) / rot (fällig, Freigabe fehlt, Versand-Störung) / ausgegraut
+  (storniert). So erkennt man mit einem Blick, ob ein Vorgang im Zeitplan liegt.
+- **Foto & Reinigung** werden pro Mieter über `/admin/board/setup` gesetzt
+  (Basic-Auth geschützt, Validierung von data-URL und YYYY-MM-DD).
+- Der bestehende Merkzettel-/Hinweis-Board darunter bleibt unverändert.
+- **Test:** `test/progress-board.test.js` (+2), `test/board-router.test.js`
+  (+2): Sortierung, Farbe/Label, Photo+Reinigung setzen und anzeigen, invalide
+  Eingaben abgelehnt (keine Mutation). Suite: **340** Tests grün.
 
 ## Abgedeckte Regeln (Wiederbeleg)
 
