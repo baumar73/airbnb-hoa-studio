@@ -119,3 +119,35 @@ test('supports plural adult counts and a year-crossing stay', () => {
   assert.equal(parsed.adults, 2);
   assert.equal(parsed.complete, true);
 });
+
+// Real Airbnb host-confirmation letter (no labelled Check-in/Checkout block, no
+// weekday prefix, no explicit year): "…ARRIVES Oct 15…" + later bare "Nov 14".
+test('parses the real Airbnb host-confirmation letter for Richard Acosta', () => {
+  const mail = {
+    subject: 'Reservation confirmed - Richard Acosta arrives Oct 15',
+    text: `NEW BOOKING CONFIRMED! RICHARD ARRIVES OCT 15. Send a message to confirm
+check-in details or welcome Richard.
+https://www.airbnb.com/hosting/reservations/details/HMDRJJPKBY
+Richard Acosta
+Oct 15 - Nov 14
+2 adults`,
+  };
+  const parsed = parseBooking(mail, '2026-09-22');
+  assert.equal(parsed.code, 'HMDRJJPKBY');
+  assert.equal(parsed.guestName, 'Richard Acosta');
+  assert.equal(parsed.checkIn, '2026-10-15');
+  assert.equal(parsed.checkOut, '2026-11-14');
+  assert.equal(parsed.complete, true);
+});
+
+// The year-less arrival shorthand must NOT fire on same-day tokens or when only
+// an arrival date exists (no checkout to derive -> never invent one).
+test('year-less shorthand never invents a checkout from an arrival-only letter', () => {
+  const onlyArrival = parseBooking({
+    subject: 'Reservation confirmed - Emma Lane arrives Jun 2',
+    text: 'NEW BOOKING CONFIRMED! EMMA ARRIVES JUN 2. See you soon. HMDRJJPKBX',
+  }, '2026-04-01');
+  assert.equal(onlyArrival.code, 'HMDRJJPKBX');
+  assert.equal(onlyArrival.complete, false);
+  assert.equal(onlyArrival.checkOut, '');
+});

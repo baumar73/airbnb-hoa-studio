@@ -89,6 +89,39 @@ export function bookingLastName(value) {
   return name.split(/\s+/).at(-1) || '';
 }
 
+// Year-less Airbnb arrival form: "…ARRIVES OCT 15…" plus a later bare "Mon Day"
+// checkout token, with no labelled Check-in/Checkout block, no weekday prefix and
+// no explicit year. Accepted only when ALL hold: an arrival word marker, a distinct
+// check-in month-day, and a strictly-later distinct month-day. Never invents a
+// checkout; returns [] unless safely derivable from explicit tokens.
+export function parseYearlessArrival(text, today) {
+  const mk = (y, x) => `${y}-${String(x.mo).padStart(2, '0')}-${String(x.d).padStart(2, '0')}`;
+  const now = today ? new Date(today) : new Date();
+  const thisYear = now.getUTCFullYear();
+  const todayIso = now.toISOString().slice(0, 10);
+  const arr = text.match(/\b(?:arrives|kommt am|checks in)\b[^\n]{0,22}\b([A-Za-zÀ-ÖØ-öø-ÿ]{3,9})\.?\s+(\d{1,2})\b/i);
+  if (!arr) return [];
+  const arrMon = MONTHS[arr[1].slice(0, 3).toLowerCase()];
+  if (!arrMon) return [];
+  const d1 = parseInt(arr[2], 10);
+  let checkIn = mk(thisYear, { mo: arrMon, d: d1 });
+  if (checkIn < todayIso) checkIn = mk(thisYear + 1, { mo: arrMon, d: d1 });
+  if (!validISO(checkIn)) return [];
+  const tail = text.slice((arr.index || 0) + arr[0].length);
+  const tokRe = /\b([A-Za-zÀ-ÖØ-öø-ÿ]{3,9})\.?\s+(\d{1,2})\b/g;
+  let found = null;
+  for (let m = tokRe.exec(tail); m; m = tokRe.exec(tail)) {
+    const mon2 = MONTHS[m[1].slice(0, 3).toLowerCase()];
+    if (!mon2) continue;
+    let cand = mk(thisYear, { mo: mon2, d: parseInt(m[2], 10) });
+    if (cand < todayIso) cand = mk(thisYear + 1, { mo: mon2, d: parseInt(m[2], 10) });
+    if (validISO(cand) && new Date(`${cand}T00:00:00Z`) > new Date(`${checkIn}T00:00:00Z`)) { found = cand; break; }
+  }
+  if (!found) return [];
+  if ((new Date(`${found}T00:00:00Z`) - new Date(`${checkIn}T00:00:00Z`)) / 86400000 > 120) return [];
+  return [checkIn, found];
+}
+
 export function parseBooking({ subject, text }, today) {
   const all = subject + '\n' + text;
   const code = (all.match(/\b(HM[A-Z0-9]{8,12})\b/) || [])[1] || '';
@@ -103,6 +136,11 @@ export function parseBooking({ subject, text }, today) {
     if (yearless.length===2) dates=yearless;
   }
   if (dates.length < 2 && stayWindow !== all) dates = parseDates(all);
+  // Year-less arrival shorthand (real Airbnb host-confirmation letters). Used only
+  // when nothing authoritative was derived — otherwise it could shift or blend
+  // explicit years. Derives a range only when an arrival marker plus a
+  // strictly-later explicit date exist (never invents a checkout).
+  if (dates.length === 0) dates = parseYearlessArrival(all, today);
   // Capture the whole name up to a known boundary, never just two words.
   // A labelled body value is stronger evidence than a shortened subject.
   const labelled = text.match(/^(?:Guest|Gast):[ \t]*([^\n\r]+)$/mi);

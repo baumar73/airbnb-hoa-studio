@@ -3,16 +3,33 @@
 Private workshop for the HOA (condominium) guest-registration and lease-approval
 workflow of Unit 405D, Isla del Sol, St. Petersburg, FL (Airbnb monthly rentals).
 
-**Status:** private · owner-operated · not a public product
+**Status:** private · owner-operated · not a public product.
+This repo is the single, versioned home for the Isla 405D portal so the owner
+and helpers can keep improving it without re-searching scattered copies.
 
-## What this is
+## Purpose
+
+The association requires every Airbnb guest to register with the condo and get
+lease approval before check-in. This system removes the manual email/paper chase:
+
+- Guests enter only their Airbnb confirmation code + last name.
+- The system resolves the booking, shows exactly what to submit, lets them fill
+  and sign the required association forms online, and tracks status.
+- The owner gets one place to review, approve, and archive submissions.
+
+## Infrastructure
 
 - **`portal/`** — Cloudflare Workers app served at `https://isladelsol405d.com/`.
-  Guests find their personal paperwork page with their Airbnb confirmation code +
-  last name (`/find`), complete the association forms online, sign, and track status.
-  Includes a read-only API (`/api/ro/*`) for Hermes/GBrain and an owner admin area.
-- **`operations/`** — local Node dashboard + tools (daily watch, calendar snapshot,
-  integration status, Gmail/Hermes sync). Runs on the owner's home-server stack.
+  - Guest self-service: `/find` (code + last name) → `/v/<token>` personal page.
+  - Owner admin area + read-only API `/api/ro/*` for Hermes/GBrain.
+  - **`cron/`** — `isla-cron` worker: every 30 min AND daily scans a Gmail
+    (IMAP) inbox, parses Airbnb booking confirmations, cancellations, HOA
+    replies, and writes cases / send Telegram alerts. Runs on Cloudflare KV.
+  - Airbnb host-confirmation letters are parsed in their real year-less format
+    (`…ARRIVES OCT 15…` + later date); a checkout is never invented.
+- **`operations/`** — local Node dashboard + tools (daily watch, calendar
+  snapshot, integration status, Gmail/Hermes sync). Runs on the owner's home
+  stack (Mac mini worker).
 - Gmail (IMAP/SMTP) integration for Airbnb booking/express messages and for
   owner-approved submission emails. Telegram notify.
 
@@ -35,11 +52,7 @@ npm run build
 npm audit --json
 ```
 
-## Workflow status
-
-Current branch: `ox-alpha/operations-hardening-20260821`.
-Active integration (in progress): Hermes access to live portal API + Airbnb
-messaging. See the integration plan in the workspace.
+All 313 tests pass; audit 0 high/critical.
 
 ---
 
